@@ -2,7 +2,7 @@
 
 Kraken Media Server es un servidor multimedia y reproductor web autohospedado, construido con **Flask (Python)** en el backend y una SPA en **Vanilla JavaScript + Tailwind CSS** en el frontend. Diseñado para funcionar como un Spotify/Plex privado para tu familia a través de **Cloudflare Tunnels**.
 
-> **V4.76** — Crossfade continuo con Web Audio API, Multi-usuario, Playlists compartidas, Avatares personalizados, Smart Mixes, Letras Sincronizadas, Visualizer, Modo Offline PWA.
+> **V4.84** — Auto-Update via GitHub, Auto-Tag Video (TMDB), Video Search Fix, Netflix-style UI, Crossfade continuo con Web Audio API, Multi-usuario, Playlists compartidas, Avatares personalizados, Smart Mixes, Letras Sincronizadas, Visualizer, Modo Offline PWA.
 
 ---
 
@@ -50,6 +50,32 @@ Kraken Media Server es un servidor multimedia y reproductor web autohospedado, c
 - **PIN de administrador** — Protege acciones destructivas: mover archivos, editar tags, sincronizar
 - **Cloudflare Access** — Autenticación de doble factor vía email
 - **Protección de rutas** — Validación de traversal en todas las rutas de archivos
+
+---
+
+## 🔄 Auto-Update (GitHub Releases)
+
+Kraken verifica automáticamente si hay una nueva versión disponible al iniciar:
+
+1. Al abrir la app, consulta la API de GitHub Releases
+2. Si hay una versión nueva, muestra un banner morado en la parte superior
+3. Click en "Descargar" → abre la página de GitHub Releases
+4. Descarga el installer y reinala
+
+### Configuración
+
+En `config.py`:
+```python
+GITHUB_REPO = "tuusuario/kraken-media-server"
+```
+
+### Cómo crear un Release
+
+1. Haz build del proyecto (`pyinstaller KrakenOffline.spec`)
+2. Genera el installer con Inno Setup
+3. Ve a GitHub → Releases → **Draft a new release**
+4. Sube los archivos: `.exe`, `.zip` (Windows), `.zip` (Mac)
+5. Publica el release
 
 ---
 
@@ -311,9 +337,11 @@ Kraken incluye handlers para Amazon Alexa (`alexa_handlers.py`). Comandos soport
 
 ## 🔮 Roadmap
 
-- [ ] **Ejecutable (.exe)** — Empaquetar con PyInstaller para distribuir sin Python
+- [x] **Ejecutable (.exe)** — Empaquetar con PyInstaller para distribuir sin Python (v4.80+)
+- [x] **Auto-Update via GitHub** — Notificaciones de nuevas versiones (v4.84)
 - [ ] **APK (Android)** — Wrap de la PWA en TWA para Google Play
 - [x] **Crossfade** — Transiciones de audio fluidas con Web Audio API
+- [ ] **Auto-Tag Video** — Integración TMDB para metadata de videos (v4.84)
 - [ ] **Refactorización Frontend** — Dividir `index.html` en módulos JS separados
 - [ ] **Análisis de Audio (BPM/Energía)** — Mixes inteligentes por "vibe" con Librosa
 - [ ] **WebSockets** — Sincronización en tiempo real entre dispositivos
