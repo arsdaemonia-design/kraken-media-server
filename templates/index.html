@@ -6952,7 +6952,8 @@
                                 showKey = f._normalizedPath;
                                 let safeTitle = f.tmdb_title || f.title || parts[parts.length - 1];
                                 if (f.folder_type === 'movie' && parts.length > 3) {
-                                    safeTitle = f.tmdb_title || parts[2].replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim() || f.title;
+                                    const folderIndex = Math.max(0, parts.length - 2);
+                                    safeTitle = f.tmdb_title || parts[folderIndex].replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim() || f.title;
                                 }
                                 showTitle = safeTitle;
                                 f.clean_title = showTitle; // Prevent overwriting original title object natively
