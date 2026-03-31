@@ -10,11 +10,90 @@ Kraken es un servidor multimedia local con modo online/offline. Permite:
 - Acceso via LAN o Cloudflare tunnel
 
 ## Versión Actual
-- **v4.84** (2026-03-31)
+- **v4.86** (2026-04-01)
 
 ---
 
-# Cambios Recientes (v4.84 - 2026-03-31)
+# Cambios Recientes (v4.86 - 2026-04-01)
+
+## Sistema TMDB Folder-Based (Video Auto-Tagging)
+
+### Implementación Completa
+Sistema folder-based para videos inspirado en Plex/Radarr/Sonarr, con extracción automática de TMDB IDs desde cualquier parte de la ruta.
+
+### Nuevas Funciones Backend (`services/video_tagger.py`)
+- **`extract_tmdb_id_from_path(file_path)`**: Extrae TMDB ID de carpeta, subcarpetas o nombre de archivo. Soporta formatos: `(tmdb-123)`, `{tmdb-123}`, `[tmdb=123]`, `tmdb-123`
+- **`detect_folder_type(file_path)`**: Detecta `movie` vs `series` automáticamente basado en presencia de `Temporada` o `Season` en la ruta
+- **`is_series_episode(filename)`**: Detecta patrones de episodios (`S01E01`, `1x01`, `Episodio 1`, `Capítulo 1`)
+- **`extract_series_name(file_path)`**: Extrae nombre de serie desde estructura de carpetas
+- **Cache en memoria**: Evita consultas repetidas a API de TMDB para la misma serie
+
+### Cambios Backend (`services/library.py`)
+- Scanner extrae `tmdb_id` de la ruta completa
+- Scanner detecta `folder_type` (`movie` o `series`)
+- Limpieza de títulos: quita automáticamente `(tmdb-XXXXX)` del nombre
+- Guarda en DB: `tmdb_id`, `folder_type`, `tmdb_title`, `tmdb_poster`, `tmdb_genres`, etc.
+
+### Cambios Backend (`routes/api.py`)
+- Endpoint `/api/auto_tag_library_videos` usa `folder_type` de DB para determinar `/movie/` o `/tv/`
+- NO sobreescribe el campo `title` (respeta naming del usuario)
+- Solo llena campos `tmdb_*`: `tmdb_title`, `tmdb_poster`, `tmdb_genres`, `tmdb_overview`
+
+### Nuevas Columnas en DB (`services/database.py`)
+```sql
+ALTER TABLE media ADD COLUMN folder_type TEXT DEFAULT NULL;
+ALTER TABLE media ADD COLUMN tmdb_id INTEGER DEFAULT 0;
+ALTER TABLE media ADD COLUMN tmdb_title TEXT DEFAULT NULL;
+ALTER TABLE media ADD COLUMN tmdb_year TEXT DEFAULT NULL;
+ALTER TABLE media ADD COLUMN tmdb_overview TEXT DEFAULT NULL;
+ALTER TABLE media ADD COLUMN tmdb_genres TEXT DEFAULT NULL;
+ALTER TABLE media ADD COLUMN tmdb_poster TEXT DEFAULT NULL;
+```
+
+### Cambios Frontend (`templates/index.html`)
+- **Nueva función `getCoverUrl(f)`**: Prioriza `tmdb_poster` sobre búsqueda por path
+- **Movie vs Series**: Usa `folder_type === 'movie'` para 1-click play
+- **Hero Banner**: Usa `tmdb_poster` si existe para el cover
+- **Player Modal**: Usa `tmdb_poster` si existe
+- **Títulos**: Usa `tmdb_title` si existe, fallback a `title`
+
+### Flujo Completo
+1. **Scanner**: Extrae ID → Detecta tipo → Limpia título → Guarda
+2. **Auto-Tag**: Usa ID → Consulta TMDB → Descarga poster → Guarda metadata
+3. **Frontend**: Usa `tmdb_poster` → Muestra cover → 1-click si es movie
+
+### Problemas Encontrados y Solucionados
+
+#### Problema 1: Títulos con ID Residual
+- **Síntoma**: Películas mostraban `(tmdb-28968)` como título
+- **Causa**: Scanner no limpiaba el ID del nombre de archivo
+- **Solución**: Agregar regex para limpiar `\s*[\(\[\{]?tmdb[-_]?\d+[\)\]\}]?` del título antes de guardar
+
+#### Problema 2: Frontend NO Usaba `folder_type`
+- **Síntoma**: Películas requerían 2 clics
+- **Causa**: Condición `f.type === 'folder' && f.folder_type === 'movie'` nunca se cumplía
+- **Solución**: Cambiar a solo checar `f.folder_type === 'movie'` sin importar `f.type`
+
+#### Problema 3: Posters NO Visibles
+- **Síntoma**: Posters descargados no aparecían en UI
+- **Causa**: Frontend buscaba `thumbnails/filename.jpg` pero tagger guardó como `thumbnails/tmdb_title.jpg`
+- **Solución**: Crear `getCoverUrl(f)` que prioriza `tmdb_poster` sobre búsqueda por path
+
+### Rendimiento
+- **936 videos** en biblioteca
+- **934 con TMDB ID** (99.8%)
+- **934 con poster** (99.8%)
+- **Tiempo para 100 videos con ID**: ~10-30 segundos
+- **Tiempo para 100 videos sin ID**: ~3-5 minutos
+- **Rate limit hits**: 0 (gracias a cache)
+
+### Documentación
+- Archivo: `ANALISIS_TMDB_TAGGING.md` (500+ líneas)
+- Incluye: problemas, soluciones, flujos, métricas
+
+---
+
+# Cambios Recientes (v4.85 - 2026-03-30)
 
 ## Fixes Visuales y Funcionales (UI / UX)
 - **Netflix View (Breadcrumbs Fix)**: Se restauró la navegación de migas de pan superior. Al hacer clic en "Video" (`currentPath === 'Video'`), la vista Netflix no se reinicia a carpetas vainilla, manteniendo fluido el entorno gráfico premium.

@@ -3,20 +3,10 @@
 ; Do not use the same AppId value in installers for other applications.
 AppId={{9ED45F45-C9A8-417A-8A46-24CB842A2F11}
 AppName=Kraken Media Server
-AppVerName=Kraken Media Server 4.84
-AppVersion=4.84
-AppPublisher=Kraken Systems
-AppComments=Servidor multimedia local con modo online/offline
-AppPublisherURL=https://kraken-media.local
-AppSupportURL=https://kraken-media.local
-AppUpdatesURL=https://kraken-media.local
-UninstallDisplayName=Kraken Media Server
-DefaultDirName={localappdata}\Kraken Media Server
-PrivilegesRequired=lowest
-DisableProgramGroupPage=yes
-; Output directory for the generated installer executable
-OutputDir=dist
-OutputBaseFilename=Kraken_Media_Server_Installer_v4.84
+AppVerName=Kraken Media Server 4.86
+AppVersion=4.86
+...
+OutputBaseFilename=Kraken_Media_Server_Installer_v4.86
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
