@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "skills": {
+    "devops-cicd": {
+      "source": "miles990/claude-software-skills",
+      "sourceType": "github",
+      "computedHash": "0177e710cea7accdca0dcc932ef2d185f6a2a926e4ebb60b4e8cb8c09cdf9750"
+    },
+    "flask-api-development": {
+      "source": "aj-geddes/useful-ai-prompts",
+      "sourceType": "github",
+      "computedHash": "9e5213f9fa4bde4175b717ab679d5a46497bd9edfff6673724a05320c741c6a9"
+    },
+    "flask-python": {
+      "source": "mindrally/skills",
+      "sourceType": "github",
+      "computedHash": "35f4d421129a992a70eeceb570fb4eca7ea1a84b2fcd5706e9df09ecb8c24194"
+    },
+    "javascript-mastery": {
+      "source": "sickn33/antigravity-awesome-skills",
+      "sourceType": "github",
+      "computedHash": "53163dfd0b76feaadc1c276f74fae57b68466a19e06309745a327d1136f5c526"
+    },
+    "pwa-development": {
+      "source": "alinaqi/claude-bootstrap",
+      "sourceType": "github",
+      "computedHash": "45a3bae4955e3399fd4680c44d2bf1adb8e88a4c595c0d2284de5785497a621f"
+    },
+    "python-testing": {
+      "source": "laurigates/claude-plugins",
+      "sourceType": "github",
+      "computedHash": "0d62cb41e3857409ec3f2f75e601c9b7955fb0e9ee0d31476d0908695e447c59"
+    },
+    "video-engineer": {
+      "source": "404kidwiz/claude-supercode-skills",
+      "sourceType": "github",
+      "computedHash": "4c185d18fb49fe83e813b189dd54af234831920b56aa7157f7ccacfcee77e3ae"
+    },
+    "vite": {
+      "source": "antfu/skills",
+      "sourceType": "github",
+      "computedHash": "1cdc4bbecaa89544e6ef92566b015db989994bf90c4472683ac64f7a114dc3af"
+    }
+  }
+}
