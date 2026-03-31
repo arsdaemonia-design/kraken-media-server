@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 
 <head>
@@ -6885,7 +6885,7 @@
                     const desktopInput = document.getElementById('lib-search-desktop');
                     const searchValue = (mobileInput && mobileInput.value) || (desktopInput && desktopInput.value) || '';
 
-                    const isRoot = (currentPath === "");
+                    const isRoot = (currentPath === "" || currentPath === "Video");
                     const isSearching = (searchValue.trim().length > 0) || (filters.sort !== 'default' && filters.sort != undefined);
                     const videoPathDepth = currentPath.split('/').filter(Boolean).length;
                     const shouldForceVideoList = videoPathDepth >= 3;
@@ -6940,17 +6940,22 @@
                             let showKey, showTitle, showPathToOpen;
                             let isSeries = false;
 
-                            if (parts.length > 3) {
+                            if (parts.length > 3 && f.folder_type !== 'movie') {
                                 // Es un episodio dentro de un show (Video/Series/Breaking Bad/S01/ep1.mp4)
-                                // agrupamos por el nombre del Show que es parts[2]
-                                showKey = parts.slice(0, 3).join('/'); // "Video/Series/Breaking Bad"
+                                showKey = parts.slice(0, 3).join('/'); 
                                 showTitle = parts[2];
                                 showPathToOpen = showKey + '/';
                                 isSeries = true;
                             } else {
-                                // Es un archivo suelto (Video/Peliculas/Batman.mp4)
+                                // Es un archivo suelto o una Pelicula
                                 showKey = f._normalizedPath;
-                                showTitle = f.title || parts[parts.length - 1];
+                                let safeTitle = f.tmdb_title || f.title || parts[parts.length - 1];
+                                if (f.folder_type === 'movie' && parts.length > 3) {
+                                    safeTitle = f.tmdb_title || parts[2].replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim() || f.title;
+                                }
+                                showTitle = safeTitle;
+                                f.clean_title = showTitle; // Prevent overwriting original title object natively
+                                f.name = showTitle;
                                 showPathToOpen = f._normalizedPath;
                             }
 
@@ -6958,12 +6963,15 @@
                                 if (isSeries) {
                                     uniqueShowsMap.set(showKey, {
                                         type: 'folder',
-                                        name: showTitle,
-                                        title: showTitle, // Por si acaso algún template usa title
+                                        name: f.tmdb_title || showTitle.replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim(),
+                                        title: f.tmdb_title || showTitle.replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim(),
                                         path: showPathToOpen,
                                         sample: f, // Para extraer carátula, género y metadata original
                                         date: f.date,
-                                        rating: f.rating
+                                        rating: f.rating,
+                                        folder_type: f.folder_type,
+                                        tmdb_id: f.tmdb_id,
+                                        tmdb_poster: f.tmdb_poster
                                     });
                                 } else {
                                     uniqueShowsMap.set(showKey, f);
@@ -7024,11 +7032,13 @@
                         const heroItem = recentShows[Math.floor(Math.random() * recentShows.length)];
 
                         const heroSource = heroItem.sample ? heroItem.sample : heroItem;
-                        const heroCover = `/caratula/${heroSource._normalizedPath.split('/').map(p => encodeURIComponent(p)).join('/')}`;
+                        const heroCover = (heroSource.tmdb_poster 
+                            ? `/caratula/${encodeURIComponent(heroSource.tmdb_poster)}` 
+                            : `/caratula/${heroSource._normalizedPath.split('/').map(p => encodeURIComponent(p)).join('/')}`);
                         const heroDate = heroSource.date ? new Date(heroSource.date * 1000).getFullYear() : '';
 
                         let heroActionHtml = '';
-                        const isHeroMovieFolder = heroItem.type === 'folder' && heroItem.folder_type === 'movie';
+                        const isHeroMovieFolder = heroItem.folder_type === 'movie';
                         if (heroItem.type === 'folder' && !isHeroMovieFolder) {
                             heroActionHtml = `<button onclick="event.stopPropagation(); currentPath='${escapeStr(heroItem.path)}'; renderLib();" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-sm md:text-base py-3 md:py-4 px-8 md:px-10 rounded-full shadow-xl hover:scale-105 transition flex items-center justify-center gap-3"><i class="fa-solid fa-folder-open text-lg"></i> Explorar Temporadas</button>`;
                         } else {
@@ -7184,8 +7194,8 @@
                                     if (!existing) {
                                         map.set(showKey, {
                                             type: 'folder',
-                                            name: showTitle,
-                                            title: showTitle,
+                                        name: f.tmdb_title || showTitle.replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim(),
+                                        title: f.tmdb_title || showTitle.replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim(),
                                             path: showKey + '/',
                                             sample: f,
                                             date: f.date,
@@ -7322,11 +7332,13 @@
                         const baseShowPath = navParts.slice(0, 3).join('/') + '/';
                         const showFiles = filtered.filter(f => f.path.startsWith(baseShowPath));
 
-                        if (showFiles.length > 0) {
-                            const showTitle = navParts[2];
-                            const categoryName = navParts[1] || window.netflixActiveCategory || 'Video';
-                            const heroSource = showFiles.find(f => f.rating === 1) || showFiles[0];
-                            const heroCover = `/caratula/${heroSource.path.split('/').map(p => encodeURIComponent(p)).join('/')}`;
+                    if (showFiles.length > 0) {
+                      const showTitle = navParts[2];
+                      const categoryName = navParts[1] || window.netflixActiveCategory || 'Video';
+                      const heroSource = showFiles.find(f => f.rating === 1) || showFiles[0];
+                      const heroCover = heroSource.tmdb_poster 
+                        ? `/caratula/${encodeURIComponent(heroSource.tmdb_poster)}`
+                        : `/caratula/${heroSource.path.split('/').map(p => encodeURIComponent(p)).join('/')}`;
 
                             const seasonSet = new Set();
                             showFiles.forEach(f => {
@@ -7552,10 +7564,20 @@
                 window.showAllFiles = true;
                 renderLib();
             }
-            function createCard(f) {
-                const safePath = escapeStr(f.path);
-                const sourcePathToUse = f.sample ? f.sample.path : f.path;
-                const coverUrl = `/caratula/${sourcePathToUse.split('/').map(p => encodeURIComponent(p)).join('/')}`;
+function getCoverUrl(f) {
+  // Para videos: priorizar tmdb_poster si existe
+  const source = f.sample ? f.sample : f;
+  if (source.tmdb_poster) {
+    return `/caratula/${encodeURIComponent(source.tmdb_poster)}`;
+  }
+  // Fallback: usar path del archivo
+  const sourcePath = source ? source.path : f.path;
+  return `/caratula/${sourcePath.split('/').map(p => encodeURIComponent(p)).join('/')}`;
+}
+
+function createCard(f) {
+  const safePath = escapeStr(f.path);
+  const coverUrl = getCoverUrl(f);
                 const isSel = selectedFiles.has(f.path) ? 'ring-2 ring-emerald-500 bg-emerald-900/20' : 'bg-[#121212]';
 
                 // ⭐ INDICADOR DE FAVORITO (Corazón en la esquina)
@@ -7647,7 +7669,7 @@
     </div>`;
 
                 // Lógica para movie vs series: movie_folder = 1 click, series_folder = navegar
-                const isMovieFolder = f.type === 'folder' && f.folder_type === 'movie';
+                const isMovieFolder = f.folder_type === 'movie';
                 const clickAction = isMovieFolder 
                     ? `playNow('${escapeStr(f.path)}')` 
                     : (f.type === 'folder' ? `currentPath='${escapeStr(f.path)}'; renderLib();` : `playNow(this.dataset.path)`);
@@ -7671,14 +7693,14 @@
         </div>
         
         <h3 class="font-bold text-white truncate text-xs mb-0.5 leading-tight flex items-center gap-1">
-            ${f.title} ${inPlaylistIcon}
+            ${escapeHtml(f.clean_title || f.tmdb_title || (f.title || '').replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim())} ${inPlaylistIcon}
         </h3>
         
         <div class="flex justify-between items-center">
     <button onclick="event.stopPropagation(); verArtista(this.dataset.artist)" 
             data-artist="${escapeHtml(f.artist)}"
             class="text-[10px] text-emerald-400 truncate flex-1 text-left hover:text-white hover:underline transition z-20 relative">
-        ${f.artist}
+        ${f.type === 'video' ? escapeHtml((f.artist || '').replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim() || 'Video') : escapeHtml(f.artist)}
     </button>
     ${genreTag}
 </div>
@@ -7687,9 +7709,9 @@
     </div>`;
             }
 
-            /* --- EPISODE ROW (Netflix-style para capítulos de series) --- */
-            function createEpisodeRow(f, index) {
-                const coverUrl = `/caratula/${f.path.split('/').map(p => encodeURIComponent(p)).join('/')}`;
+/* --- EPISODE ROW (Netflix-style para capítulos de series) --- */
+function createEpisodeRow(f, index) {
+  const coverUrl = getCoverUrl(f);
                 const duration = f.duration || '';
                 const isFavorite = f.rating === 1;
                 const favHeart = isFavorite ? `<i class="fa-solid fa-heart text-emerald-400 text-xs ml-2"></i>` : '';
@@ -7747,8 +7769,8 @@
                 // Esto convierte "Guns N' Roses" en "Guns%20N'%20Roses" para que no rompa el HTML.
                 const pathEncoded = encodeURIComponent(f.path);
 
-                // Para la imagen, también codificamos cada parte de la ruta
-                const coverUrl = `/caratula/${f.path.split('/').map(p => encodeURIComponent(p)).join('/')}`;
+  // Para la imagen, también codificamos cada parte de la ruta
+  const coverUrl = getCoverUrl(f);
 
                 const isSel = selectedFiles.has(f.path) ? 'selected border-l-4 border-emerald-500 bg-emerald-900/20' : 'border-l-4 border-transparent';
                 const isFavorite = f.rating === 1;
@@ -8129,9 +8151,14 @@
                 // Mostrar modal
                 modal.classList.remove('hidden');
 
-                // 🔥 Codificar la ruta correctamente (ESTO ERA LO QUE FALTABA)
-                const safePath = track.path.split('/').map(p => encodeURIComponent(p)).join('/');
-                const coverUrl = `/caratula/${safePath}`;
+  // 🔥 Codificar la ruta correctamente (ESTO ERA LO QUE FALTABA)
+  let coverUrl;
+  if (track.type === 'video' && track.tmdb_poster) {
+    coverUrl = `/caratula/${encodeURIComponent(track.tmdb_poster)}`;
+  } else {
+    const safePath = track.path.split('/').map(p => encodeURIComponent(p)).join('/');
+    coverUrl = `/caratula/${safePath}`;
+  }
 
                 console.log("🖼️ Cargando carátula:", coverUrl);
 

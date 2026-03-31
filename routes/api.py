@@ -823,6 +823,21 @@ def delete_playlist():
 @api_bp.route('/caratula/<path:filename>')
 def caratula(filename):
     decoded = unquote(filename).lstrip('/\\')
+
+    # [FIX TMDB] Servir poster descargado de TMDB u otra metadata
+    import os
+    from flask import send_file
+    direct_thumb_path = os.path.join(THUMBNAILS_FOLDER, os.path.basename(decoded))
+    if os.path.exists(direct_thumb_path) and os.path.isfile(direct_thumb_path):
+        resp = send_file(
+            direct_thumb_path,
+            mimetype='image/jpeg',
+            max_age=31536000,
+            conditional=True
+        )
+        resp.headers['Cache-Control'] = 'public, max-age=31536000'
+        return resp
+
     try:
         path = validar_path(decoded)
     except ValueError:

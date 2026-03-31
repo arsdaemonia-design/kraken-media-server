@@ -1,4 +1,4 @@
-﻿# Kraken Media Server - Documentación
+# Kraken Media Server - Documentación
 
 ## ¿Qué es Kraken?
 
@@ -10,7 +10,20 @@ Kraken es un servidor multimedia local con modo online/offline. Permite:
 - Acceso via LAN o Cloudflare tunnel
 
 ## Versión Actual
-- **v4.83** (2026-03-29)
+- **v4.84** (2026-03-31)
+
+---
+
+# Cambios Recientes (v4.84 - 2026-03-31)
+
+## Fixes Visuales y Funcionales (UI / UX)
+- **Netflix View (Breadcrumbs Fix)**: Se restauró la navegación de migas de pan superior. Al hacer clic en "Video" (`currentPath === 'Video'`), la vista Netflix no se reinicia a carpetas vainilla, manteniendo fluido el entorno gráfico premium.
+- **Barra de Búsqueda Netflix**: Se eliminó el `input` inline de la cabecera Netflix en favor del buscador global, resolviendo definitivamente el problema de pérdida de foco al re-renderizar la UI (Analizado en `ANALISIS_VIDEO_SEARCH.md`).
+- **Títulos Limpios (Regex)**: Se añadió un mecanismo dinámico en el renderizado de `createCard()` para purgar automáticamente cualquier residuo de etiquetas `(tmdb-xxxxx)` extraídas de los filenames o id3 tags (Afecta tanto a Títulos principales como a subtítulos de Artista).
+- **Integración de TMDB Géneros**: Los géneros inyectados por la API externa (`tmdb_genres`) ahora son asimilados nativamente durante el armado de `media_type === 'video'`, sincronizando automáticamente las etiquetas de la tarjeta y el filtro principal de pills.
+
+## Core Lógica de Agrupamiento
+- **Independencia de Películas**: Las películas ya no son falsamente envueltas en estructuras virtuales `type: 'folder'` cuando residen en carpetas profundas, permitiendo que todas sus acciones nativas (Play instantáneo, Favoritos, Listas) apunten físicamente a sus `.mp4` correspondientes sin que el API colapse.
 
 ---
 

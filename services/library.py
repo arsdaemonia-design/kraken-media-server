@@ -395,7 +395,7 @@ def generar_biblioteca_viva(owner_email='public'):
             'title': row['title'],
             'artist': row['artist'],
             'album': row['album'],
-            'genre': row['genre'],
+            'genre': row['tmdb_genres'] if row['media_type'] == 'video' and row['tmdb_genres'] else row['genre'],
             'duration_sec': row['duration_sec'],
             'size_bytes': row['size_bytes'],
             'date': row['date_added'],
