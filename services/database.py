@@ -133,7 +133,39 @@ def init_db():
         c.execute("ALTER TABLE media ADD COLUMN energy REAL DEFAULT 0.0")
     except sqlite3.OperationalError:
         pass
-
+    
+    # Add 'folder_type' column for video classification (movie vs series)
+    try:
+        c.execute("ALTER TABLE media ADD COLUMN folder_type TEXT DEFAULT NULL")
+    except sqlite3.OperationalError:
+        pass
+    
+    # Add TMDB columns to media table (for videos)
+    try:
+        c.execute("ALTER TABLE media ADD COLUMN tmdb_id INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("ALTER TABLE media ADD COLUMN tmdb_title TEXT DEFAULT NULL")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("ALTER TABLE media ADD COLUMN tmdb_year TEXT DEFAULT NULL")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("ALTER TABLE media ADD COLUMN tmdb_overview TEXT DEFAULT NULL")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("ALTER TABLE media ADD COLUMN tmdb_genres TEXT DEFAULT NULL")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("ALTER TABLE media ADD COLUMN tmdb_poster TEXT DEFAULT NULL")
+    except sqlite3.OperationalError:
+        pass
+    
     try:
         c.execute("ALTER TABLE playlists ADD COLUMN owner_email TEXT")
         c.execute("DROP INDEX IF EXISTS sqlite_autoindex_playlists_1") # Remove old unique constraint on name

@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import time
 import random
@@ -8,7 +9,7 @@ import state
 import utils
 from services.metadata import obtener_metadata_completa
 
-from services.database import get_db, init_db as db_init_db
+from services.database import get_db, init_db as init_db
 
 # Mapeo de carpetas a idiomas (basado en la estructura real del usuario)
 LANG_FOLDER_MAP = {
@@ -73,6 +74,45 @@ def get_smart_folder_name(root_path):
             return parent_name
     return folder_name
 
+
+def extract_tmdb_id_from_path(file_path):
+    """
+    Extrae TMDB ID de cualquier parte de la ruta
+    Soporta: (tmdb-123), {tmdb-123}, [tmdb=123]
+    """
+    path_str = str(file_path).replace('\\', '/')
+    
+    patterns = [
+        r'\(tmdb[-=_]?(\d+)\)',      # (tmdb-12345)
+        r'\{tmdb[-=_]?(\d+)\}',      # {tmdb-12345}
+        r'\[tmdb[-=_]?(\d+)\]',      # [tmdb=12345]
+        r'(?i)tmdb[-=_](\d+)',       # tmdb-12345
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, path_str)
+        if match:
+            return int(match.group(1))
+    
+    return None
+
+
+def detect_folder_type(file_path):
+    """
+    Detecta si es movie o series basado en la estructura de carpetas
+    Series: Si la ruta contiene Temporada o Season
+    Movies: Todo lo demás
+    """
+    path_lower = str(file_path).lower()
+    
+    series_keywords = ['temporada', 'season', 'temp']
+    for keyword in series_keywords:
+        if keyword in path_lower:
+            return 'series'
+    
+    return 'movie'
+
+
 def escanear_archivos_fisicos():
     """PASO 1 (DELTA): Lee disco y solo reprocesa archivos nuevos/modificados."""
     print("📀 Iniciando escaneo físico de disco...")
@@ -128,25 +168,32 @@ def escanear_archivos_fisicos():
                         
                 tipo_archivo = 'video' if ext in ['mp4', 'webm', 'mkv'] else 'audio'
                 
+                # Extraer TMDB ID de la ruta y detectar tipo
+                tmdb_id = extract_tmdb_id_from_path(rel_path)
+                folder_type = detect_folder_type(rel_path) if tipo_archivo == 'video' else None
+                
                 # Detect language from folder name
                 lang = detect_language_from_folder(folder_name)
                 
                 c.execute('''
                     INSERT INTO media (
                         rel_path, filename, folder, full_folder, media_type,
-                        title, artist, album, genre, duration_sec, size_bytes, date_added, language
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        title, artist, album, genre, duration_sec, size_bytes, date_added, language,
+                        tmdb_id, folder_type
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(rel_path) DO UPDATE SET
                         filename=excluded.filename, folder=excluded.folder, 
                         full_folder=excluded.full_folder, media_type=excluded.media_type,
                         title=excluded.title, artist=excluded.artist, 
                         album=excluded.album, genre=excluded.genre, 
                         duration_sec=excluded.duration_sec, size_bytes=excluded.size_bytes,
-                        language=excluded.language
+                        language=excluded.language,
+                        tmdb_id=excluded.tmdb_id, folder_type=excluded.folder_type
                 ''', (
                     rel_path, f, serie_name, folder_name, tipo_archivo,
                     meta['title'], meta['artist'], meta['album'], meta['genre'],
-                    meta['duration'], stat.st_size, stat.st_mtime, lang
+                    meta['duration'], stat.st_size, stat.st_mtime, lang,
+                    tmdb_id, folder_type
                 ))
                 upserted_count += 1
             except Exception as e:
@@ -282,7 +329,8 @@ def generar_biblioteca_viva(owner_email='public'):
     c.execute('''
         SELECT id, rel_path, filename, folder, full_folder, media_type,
                title, artist, album, genre, duration_sec, size_bytes, date_added,
-               rating, play_count, last_played, language
+               rating, play_count, last_played, language, folder_type, tmdb_id,
+               tmdb_title, tmdb_year, tmdb_genres, tmdb_poster
         FROM media
         ORDER BY folder, title
     ''')
@@ -343,7 +391,13 @@ def generar_biblioteca_viva(owner_email='public'):
             'rating': row['rating'],
             'play_count': row['play_count'],
             'last_played': row['last_played'],
-            'language': row['language']
+            'language': row['language'],
+            'folder_type': row['folder_type'],
+            'tmdb_id': row['tmdb_id'],
+            'tmdb_title': row['tmdb_title'],
+            'tmdb_year': row['tmdb_year'],
+            'tmdb_genres': row['tmdb_genres'],
+            'tmdb_poster': row['tmdb_poster']
         }
         
         rel_path = f['path']

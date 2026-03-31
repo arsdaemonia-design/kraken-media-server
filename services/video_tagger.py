@@ -1,6 +1,7 @@
 """
 Auto-tagger para videos usando TMDB API
 Busca metadata de películas, series y anime automáticamente
+Inspirado en Plex/Radarr/Sonarr
 """
 
 import requests
@@ -11,6 +12,9 @@ from pathlib import Path
 TMDB_API_KEY = "e0e4b911fdae8ee5cd6b64446f416da4"
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
+
+# Cache simple para evitar consultas repetidas
+_TMDB_CACHE = {}
 
 
 def search_movie(title, year=None):
@@ -33,13 +37,15 @@ def search_movie(title, year=None):
     return None
 
 
-def search_tv_show(title):
+def search_tv_show(title, year=None):
     """Busca una serie de TV en TMDB"""
     params = {
         'api_key': TMDB_API_KEY,
         'query': title,
         'language': 'es-MX'
     }
+    if year:
+        params['first_air_date_year'] = year
     
     try:
         response = requests.get(f"{TMDB_BASE_URL}/search/tv", params=params, timeout=10)
@@ -53,6 +59,11 @@ def search_tv_show(title):
 
 def get_movie_details(movie_id):
     """Obtiene detalles completos de una película"""
+    # Usar cache si ya tenemos el resultado
+    cache_key = f"movie_{movie_id}"
+    if cache_key in _TMDB_CACHE:
+        return _TMDB_CACHE[cache_key]
+    
     params = {
         'api_key': TMDB_API_KEY,
         'language': 'es-MX',
@@ -61,7 +72,9 @@ def get_movie_details(movie_id):
     
     try:
         response = requests.get(f"{TMDB_BASE_URL}/movie/{movie_id}", params=params, timeout=10)
-        return response.json()
+        result = response.json()
+        _TMDB_CACHE[cache_key] = result
+        return result
     except Exception as e:
         print(f"Error obteniendo detalles: {e}")
     return None
@@ -69,6 +82,11 @@ def get_movie_details(movie_id):
 
 def get_tv_details(tv_id):
     """Obtiene detalles completos de una serie"""
+    # Usar cache si ya tenemos el resultado
+    cache_key = f"tv_{tv_id}"
+    if cache_key in _TMDB_CACHE:
+        return _TMDB_CACHE[cache_key]
+    
     params = {
         'api_key': TMDB_API_KEY,
         'language': 'es-MX'
@@ -76,7 +94,9 @@ def get_tv_details(tv_id):
     
     try:
         response = requests.get(f"{TMDB_BASE_URL}/tv/{tv_id}", params=params, timeout=10)
-        return response.json()
+        result = response.json()
+        _TMDB_CACHE[cache_key] = result
+        return result
     except Exception as e:
         print(f"Error obteniendo detalles: {e}")
     return None
@@ -105,36 +125,144 @@ def download_poster(poster_path, thumbnails_folder, filename_base):
     return None
 
 
-def extract_year_from_filename(filename):
-    """Extrae el año del nombre del archivo (ej: Inception (2010).mkv)"""
-    match = re.search(r'\b(19\d{2}|20\d{2})\b', filename)
+# ============================================================
+# FUNCIONES DE EXTRACCIÓN (NUEVAS)
+# ============================================================
+
+def extract_tmdb_id_from_path(file_path):
+    """
+    Busca TMDB ID en CUALQUIER parte de la ruta
+    Soporta: (tmdb-123), {tmdb-123}, [tmdb=123], tmdb-123
+    """
+    path_str = str(file_path).replace('\\', '/')
+    
+    # Patrones a buscar en orden de prioridad
+    patterns = [
+        r'\(tmdb[-=_]?(\d+)\)',      # (tmdb-12345) o (tmdb=12345)
+        r'\{tmdb[-=_]?(\d+)\}',      # {tmdb-12345}
+        r'\[tmdb[-=_]?(\d+)\]',      # [tmdb=12345]
+        r'(?i)tmdb[-=_](\d+)',       # tmdb-12345
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, path_str)
+        if match:
+            return match.group(1)
+    
+    return None
+
+
+def extract_year_from_path(file_path):
+    """
+    Extrae el año de la ruta (carpeta o nombre de archivo)
+    Busca: (2010) o simplemente 2010
+    """
+    path_str = str(file_path)
+    
+    # Buscar año en paréntesis: (2010)
+    match = re.search(r'\((\d{4})\)', path_str)
     if match:
         return int(match.group(1))
-    return None
-
-
-def extract_tmdb_id_from_filename(filename):
-    """Busca un ID de TMDB en el nombre (ej. {tmdb-12345} o [tmdb=12345])"""
-    match = re.search(r'(?i)tmdb[-=\s]*(\d+)', filename)
+    
+    # Buscar año libre: 2010
+    match = re.search(r'\b(19\d{2}|20\d{2})\b', path_str)
     if match:
-        return match.group(1)
+        return int(match.group(1))
+    
     return None
 
 
-def clean_title_for_search(filename):
-    """El Filtro Kraken: Limpia el título a la perfección para TMDB"""
-    title = os.path.splitext(filename)[0]
+def is_series_pattern(file_path):
+    """
+    Detecta si la ruta corresponde a una serie
+    Busca: Temporada, Season en la ruta
+    """
+    path_lower = str(file_path).lower()
+    
+    series_keywords = ['temporada', 'season', 'temp']
+    
+    for keyword in series_keywords:
+        if keyword in path_lower:
+            return True
+    
+    return False
+
+
+def is_series_episode(filename):
+    """
+    Detecta si el nombre del archivo es un episodio
+    Patrones: S01E01, 1x01, Episodio 1, Capítulo 1
+    """
+    filename_only = os.path.splitext(filename)[0]
+    
+    episode_patterns = [
+        r'S\d{1,2}E\d{1,2}',        # S01E01, S1E1
+        r'\d{1,2}x\d{1,2}',         # 1x01, 02x03
+        r'episodio\s*\d+',           # Episodio 1
+        r'cap[ií]tulo\s*\d+',       # Capítulo 1
+        r'episode\s*\d+',            # Episode 1
+    ]
+    
+    for pattern in episode_patterns:
+        if re.search(pattern, filename_only, re.IGNORECASE):
+            return True
+    
+    return False
+
+
+def extract_series_name_from_path(file_path):
+    """
+    Extrae el nombre de la serie desde la estructura de carpetas
+    Ignora: Video, Series, Anime, Peliculas, Season, Temporada
+    """
+    parts = Path(file_path).parts
+    
+    # Palabras a ignorar (categorías base)
+    skip_words = {'video', 'series', 'anime', 'peliculas', 'movies', 'tv', 'documentales'}
+    
+    # Palabras que indican temporada (para ignorar)
+    season_words = {'temporada', 'season', 'temp', 's0', 't0'}
+    
+    for part in parts:
+        part_lower = part.lower()
+        
+        # Ignorar categorías base
+        if part_lower in skip_words:
+            continue
+        
+        # Ignorar carpetas de temporada
+        if any(k in part_lower for k in season_words):
+            continue
+        
+        # Ignorar si es solo un número de carpeta (1, 2, 3...)
+        if re.match(r'^\d+$', part):
+            continue
+            
+        # Limpiar TMDB ID del nombre
+        clean_name = re.sub(r'\{[^}]*\}', '', part)
+        clean_name = re.sub(r'\[[^\]]*\]', '', clean_name)
+        clean_name = re.sub(r'\([^)]*\)', '', clean_name)  # También quitar paréntesis con año
+        clean_name = clean_name.strip()
+        
+        if clean_name and len(clean_name) > 1:
+            return clean_name
+    
+    return None
+
+
+def clean_title_for_search(title):
+    """
+    Limpia el título para búsqueda en TMDB
+    Conserve el nombre limpio sin tags de calidad
+    """
+    # Obtener solo el nombre sin extensión
+    title = os.path.splitext(title)[0]
     
     # Reemplazar puntos y guiones bajos por espacios
     title = title.replace('.', ' ').replace('_', ' ')
     
-    # Quitar llaves {} que usan Sonarr/Radarr
-    title = re.sub(r'\{.*?\}', '', title)
-    title = re.sub(r'\[.*?\]', '', title)
-    title = re.sub(r'\(.*?\)', '', title)
-    
-    # Destruir palabras basura
-    basura = [
+    # Quitar tags de calidad y otros unwanted
+    trash = [
         '1080p', '720p', '480p', '4k', '2160p',
         'h264', 'h265', 'x264', 'x265', 'hevc',
         'bluray', 'webdl', 'web-dl', 'brrip', 'bdrip',
@@ -142,95 +270,142 @@ def clean_title_for_search(filename):
         'remastered', 'dvdrip', 'hdrip', 'dvd', 'tv'
     ]
     
-    for b in basura:
-        title = re.sub(rf'(?i)\b{b}\b', '', title)
+    for t in trash:
+        title = re.sub(rf'(?i)\b{t}\b', '', title)
     
-    # Detectar y limpiar episodios
-    title = re.sub(r'(?i)(s\d{1,2}e\d{1,2}|temporada\s*\d+|episode\s*\d+|ep\.?\s*\d+).*', '', title)
+    # Quitar patrones de episodio del final
+    title = re.sub(r'(?i)(s\d{1,2}e\d{1,2}|temporada\s*\d+|episode\s*\d+|ep\.?\s*\d+).*$', '', title)
     
-    # Quitar años
-    title = re.sub(r'\b(19\d{2}|20\d{2})\b', '', title)
-    
-    # Limpiar espacios
+    # Limpiar espacios múltiples
     title = re.sub(r'[\-\s]+', ' ', title).strip()
     
     return title
 
 
-def auto_tag_video(file_path, video_type='movie'):
+def detect_video_type(file_path):
     """
-    Auto-taguea un video usando el ID si existe, o buscando por nombre
+    Detecta si es película o serie basado en la estructura de carpetas
+   Serie: Si la ruta contiene "Temporada" o "Season"
+    Movie: Todo lo demás
+    """
+    if is_series_pattern(file_path):
+        return 'series'
+    
+    return 'movie'
+
+
+# ============================================================
+# FUNCIÓN PRINCIPAL (REESCRITA)
+# ============================================================
+
+def auto_tag_video(file_path, video_type=None):
+    """
+    Auto-tagging folder-based (como Plex/Radarr)
+    
+    Flujo:
+    1. Extraer TMDB ID de la ruta completa
+    2. Detectar tipo (movie vs series) por estructura
+    3. Si hay ID → consulta directa
+    4. Si no hay ID → buscar por nombre
     
     Args:
-        file_path: Ruta del archivo
-        video_type: 'movie', 'tv', o 'anime'
+        file_path: Ruta completa del archivo
+        video_type: Forzar tipo ('movie', 'series', 'anime')
     
     Returns:
         dict con metadata o None
     """
     filename = os.path.basename(file_path)
     
-    # Plan A: Intentar sacar el ID de TMDB
-    tmdb_id = extract_tmdb_id_from_filename(filename)
+    # 1. Extraer TMDB ID de la RUTA COMPLETA
+    tmdb_id = extract_tmdb_id_from_path(file_path)
     
-    # Plan B: Sacar año y título
-    year = extract_year_from_filename(filename)
-    title = clean_title_for_search(filename)
+    # 2. Detectar tipo por estructura de carpetas
+    if video_type is None:
+        video_type = detect_video_type(file_path)
+    
+    is_series = (video_type in ['series', 'anime'])
+    
+    # 3. Extraer año de la ruta (para películas)
+    year = extract_year_from_path(file_path)
+    
+    # 4. Extraer nombre de serie (si es serie)
+    series_name = extract_series_name_from_path(file_path) if is_series else None
     
     result = None
     
-    # Plan A: Usar ID exacto
+    # === PLAN A: ID Directo (precisión 100%) ===
     if tmdb_id:
-        print(f"🎯 ¡ID detectado! Buscando directamente TMDB ID: {tmdb_id}...")
-        if video_type == 'movie':
-            result = get_movie_details(tmdb_id)
-            if result:
-                result['media_type'] = 'movie'
-        else:
+        print(f"🎯 ID encontrado en ruta: {tmdb_id} (tipo: {video_type})")
+        
+        if is_series:
             result = get_tv_details(tmdb_id)
             if result:
                 result['media_type'] = 'tv'
-    
-    # Plan B: Búsqueda por texto
-    if not result:
-        print(f"🔍 Buscando por texto: '{title}' (Año: {year or 'No detectado'}) - Tipo: {video_type}")
-        
-        if video_type == 'movie':
-            movie = search_movie(title, year)
-            if movie:
-                result = get_movie_details(movie['id'])
-                if result:
-                    result['media_type'] = 'movie'
         else:
-            tv_show = search_tv_show(title)
-            if tv_show:
-                result = get_tv_details(tv_show['id'])
+            result = get_movie_details(tmdb_id)
+            if result:
+                result['media_type'] = 'movie'
+    
+    # === PLAN B: Buscar por nombre ===
+    if not result:
+        if is_series and series_name:
+            # Serie sin ID → buscar por nombre de serie
+            print(f"🔍 Buscando serie: '{series_name}' (año: {year or 'N/A'})")
+            search_result = search_tv_show(series_name, year)
+            if search_result:
+                result = get_tv_details(search_result['id'])
                 if result:
                     result['media_type'] = 'tv'
+        else:
+            # Película sin ID → buscar por nombre de archivo
+            title = clean_title_for_search(filename)
+            print(f"🔍 Buscando película: '{title}' (año: {year or 'N/A'})")
+            search_result = search_movie(title, year)
+            if search_result:
+                result = get_movie_details(search_result['id'])
+                if result:
+                    result['media_type'] = 'movie'
     
+    # === PLAN C: Fallback - episode sin ID ===
+    if not result and is_series_episode(filename):
+        title = clean_title_for_search(filename)
+        print(f"🔍 Fallback episodio: '{title}'")
+        search_result = search_tv_show(title) or search_movie(title)
+        if search_result:
+            if 'first_air_date' in search_result:
+                result = get_tv_details(search_result['id'])
+                if result:
+                    result['media_type'] = 'tv'
+            else:
+                result = get_movie_details(search_result['id'])
+                if result:
+                    result['media_type'] = 'movie'
+    
+    # Resultado
     if result:
         print(f"✅ Éxito: {result.get('title') or result.get('name')}")
     else:
-        print(f"❌ No encontrado en TMDB: {filename}")
+        print(f"❌ No encontrado en TMDB: {file_path}")
     
     return result
 
 
-def detect_video_type(file_path):
-    """Detecta si es película, serie o anime basado en la ruta"""
-    path_lower = file_path.lower()
-    
-    if 'anime' in path_lower:
-        return 'anime'
-    elif 'pelicula' in path_lower or 'movie' in path_lower:
-        return 'movie'
-    elif 'serie' in path_lower or 'tv' in path_lower:
-        return 'tv'
-    
-    parts = Path(file_path).parts
-    if len(parts) >= 3:
-        parent_folder = parts[-2].lower()
-        if 'temporada' in parent_folder or 'season' in parent_folder:
-            return 'tv'
-    
-    return 'movie'
+# ============================================================
+# FUNCIÓN LEGACY (para compatibilidad)
+# ============================================================
+
+def extract_year_from_filename(filename):
+    """Legacy: Extrae año del nombre del archivo"""
+    match = re.search(r'\b(19\d{2}|20\d{2})\b', filename)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def extract_tmdb_id_from_filename(filename):
+    """Legacy: Busca ID solo en el nombre del archivo"""
+    match = re.search(r'(?i)tmdb[-=\s]*(\d+)', filename)
+    if match:
+        return match.group(1)
+    return None
