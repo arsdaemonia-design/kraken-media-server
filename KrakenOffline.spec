@@ -32,7 +32,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name='KrakenOffline',
-    icon='assets\\kraken.ico',
+    icon=r'assets\kraken-512.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

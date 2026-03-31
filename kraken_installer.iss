@@ -19,7 +19,7 @@ OutputBaseFilename=Kraken_Media_Server_Installer_v4.86
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
-SetupIconFile=assets\kraken_setup.ico
+SetupIconFile=assets\kraken-512-setup.ico
 WizardImageFile=assets\wizard_large.bmp
 WizardSmallImageFile=assets\wizard_small.bmp
 
