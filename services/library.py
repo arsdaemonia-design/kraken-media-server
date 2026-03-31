@@ -172,6 +172,17 @@ def escanear_archivos_fisicos():
                 tmdb_id = extract_tmdb_id_from_path(rel_path)
                 folder_type = detect_folder_type(rel_path) if tipo_archivo == 'video' else None
                 
+                # Limpiar título - quitar TMDB ID, deixar solo o nome limpo
+                raw_title = meta['title'] or f
+                # Primero quitar (tmdb-123) ou [tmdb-123] ou {tmdb-123}
+                clean_title = re.sub(r'\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?', '', raw_title, flags=re.IGNORECASE).strip()
+                # Quitar guiones extra al final
+                clean_title = re.sub(r'[\s\-_]+$', '', clean_title).strip()
+                # Si quedó vacío, usar el nombre del archivo
+                if not clean_title:
+                    clean_title = f
+                final_title = clean_title
+                
                 # Detect language from folder name
                 lang = detect_language_from_folder(folder_name)
                 
@@ -191,7 +202,7 @@ def escanear_archivos_fisicos():
                         tmdb_id=excluded.tmdb_id, folder_type=excluded.folder_type
                 ''', (
                     rel_path, f, serie_name, folder_name, tipo_archivo,
-                    meta['title'], meta['artist'], meta['album'], meta['genre'],
+                    final_title, meta['artist'], meta['album'], meta['genre'],
                     meta['duration'], stat.st_size, stat.st_mtime, lang,
                     tmdb_id, folder_type
                 ))

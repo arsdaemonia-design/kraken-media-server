@@ -2245,9 +2245,9 @@ def auto_tag_library_videos():
             pass
         
         c.execute('''
-            SELECT rel_path, title FROM media 
+            SELECT rel_path, title, folder_type FROM media 
             WHERE media_type = 'video' 
-            AND (tmdb_id IS NULL OR tmdb_id = 0 OR tmdb_id = '')
+            AND (tmdb_title IS NULL OR tmdb_title = '')
         ''')
         
         videos = c.fetchall()
@@ -2261,8 +2261,8 @@ def auto_tag_library_videos():
         for video in videos:
             video_path = video[0]  # rel_path
             video_title = video[1] if len(video) > 1 else ''
+            video_type = video[2] if len(video) > 2 else 'movie'  # folder_type de la DB
             try:
-                video_type = detect_video_type(video_path)
                 result = auto_tag_video(video_path, video_type)
                 
                 if result:
