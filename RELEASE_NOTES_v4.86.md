@@ -128,6 +128,24 @@ Video/Series/
 
 ---
 
+## 🐛 Bug Fixes (Post-Release)
+
+### Fix: Version Comparison Normalization
+**Problema:** El banner de actualización aparecía incluso cuando la versión instalada era la misma que la última release.
+
+**Causa:** GitHub API devuelve versiones como `"v4.86"` (con prefijo "v") pero la app usa `"4.86"` (sin prefijo), causando que `"v4.86" !== "4.86"`.
+
+**Solución:** Agregada función `normalizeVersion()` que:
+- Convierte a minúsculas
+- Elimina prefijo "v" o "V"
+- Quita espacios en blanco
+- Luego compara versiones normalizadas
+
+**Archivo:** `templates/index.html`  
+**Commit:** Post-release patch
+
+---
+
 ## 📦 Descargas
 
 - `Kraken_Media_Server_Installer_v4.86.exe` (Windows Installer)

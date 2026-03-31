@@ -9,7 +9,8 @@
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#10b981">
-<script>const APP_VERSION="4.86"; const OFFLINE_VERSION="4.86"; const OFFLINE_LIMIT=500; const GITHUB_REPO="arsdaemonia-design/kraken-media-server";</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>window.APP_VERSION="4.86"; window.OFFLINE_VERSION="4.86"; window.OFFLINE_LIMIT=500; window.GITHUB_REPO="arsdaemonia-design/kraken-media-server";</script>
 <script src="/assets/tailwind.min.js"></script>
 <script src="/assets/html2canvas.min.js"></script>
     <!-- Chromecast SDK & Plugin -->
@@ -11292,14 +11293,37 @@ async function autoCompletarVideos() {
 // ========================================
 async function checkForUpdates() {
   try {
+    // Verificar si el usuario cerró el banner recientemente
+    const dismissedData = localStorage.getItem('update_banner_dismissed');
+    if (dismissedData) {
+      const { version, date } = JSON.parse(dismissedData);
+      const daysSinceDismissed = (Date.now() - date) / (1000 * 60 * 60 * 24);
+      // Si cerró hace menos de 7 días y es la misma versión, no mostrar
+      if (daysSinceDismissed < 7) {
+        console.log(`Update banner dismissed for ${version}, ${daysSinceDismissed.toFixed(1)} days ago`);
+        return;
+      }
+    }
+    
     const res = await fetch('/api/check_update');
     const data = await res.json();
     
     if (data.has_update) {
-      const currentVersion = typeof APP_VERSION !== 'undefined' ? APP_VERSION : '0.0';
-      const newVersion = data.version;
+      const currentVersionRaw = typeof APP_VERSION !== 'undefined' ? APP_VERSION : '0.0';
+      const newVersionRaw = data.version;
       
-      // Solo mostrar si es versión mayor o diferente
+      // Normalizar versiones: quitar 'v' o 'V' inicial, espacios, y comparar
+      const normalizeVersion = (v) => {
+        if (!v) return '0.0';
+        return v.toString().toLowerCase().replace(/^v\s*/, '').trim();
+      };
+      
+      const currentVersion = normalizeVersion(currentVersionRaw);
+      const newVersion = normalizeVersion(newVersionRaw);
+      
+      console.log(`Version check: local=${currentVersionRaw}→${currentVersion}, remote=${newVersionRaw}→${newVersion}`);
+      
+      // Solo mostrar si es versión diferente
       if (newVersion !== currentVersion) {
         // Crear banner de actualización
         const banner = document.createElement('div');
@@ -11313,7 +11337,7 @@ async function checkForUpdates() {
             class="bg-white text-purple-700 px-4 py-1 rounded-full text-xs font-bold hover:bg-purple-100 transition">
             Descargar
           </button>
-          <button onclick="this.parentElement.remove()" class="text-white/70 hover:text-white">
+          <button onclick="dismissUpdateBanner('${newVersion}')" class="text-white/70 hover:text-white">
             <i class="fa-solid fa-xmark"></i>
           </button>
         `;
@@ -11323,6 +11347,19 @@ async function checkForUpdates() {
   } catch (e) {
     console.log('Check update failed:', e);
   }
+}
+
+// Función para cerrar el banner y recordar por 7 días
+function dismissUpdateBanner(version) {
+  const banner = document.getElementById('update-banner');
+  if (banner) banner.remove();
+  
+  // Guardar en localStorage: versión y fecha de cierre
+  localStorage.setItem('update_banner_dismissed', JSON.stringify({
+    version: version,
+    date: Date.now()
+  }));
+  console.log(`Update banner dismissed for version ${version}`);
 }
 
 // Check if setup is needed (first run)
