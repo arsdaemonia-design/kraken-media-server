@@ -204,7 +204,8 @@ def init_db():
         ("avatar_url", "TEXT"),
         ("theme_color", "TEXT"),
         ("is_superadmin", "BOOLEAN DEFAULT 0"),
-        ("created_at", "REAL")
+        ("created_at", "REAL"),
+        ("pin_hash", "TEXT DEFAULT NULL"),
     ]
     for col_name, col_type in user_columns:
         try:

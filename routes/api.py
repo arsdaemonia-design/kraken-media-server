@@ -18,6 +18,7 @@ from state import *
 import utils
 from utils import *
 from services.lastfm import *
+from services.auth import get_user_from_request, create_token, hash_pin, verify_pin, generate_invite_code, verify_token
 from services.metadata import *
 from services.library import *
 from services.media_analyzer import *
@@ -1444,7 +1445,8 @@ def status():
     is_speaker = (is_speaker_param == 'true')
     
     # --- INTERCEPCIÃ“N CLOUDFLARE ---
-    cf_email = request.headers.get('Cf-Access-Authenticated-User-Email', '')
+    # --- AUTENTICACIÓN: JWT local → Cloudflare fallback ---
+    auth_email = get_user_from_request(request)
     
     # Valores por defecto para el Radar
     final_username = user_name_fallback
@@ -1453,7 +1455,7 @@ def status():
     needs_registration = False
     
     import config
-    db_email = cf_email if cf_email else config.SUPERADMIN_EMAIL
+    db_email = auth_email if auth_email else config.SUPERADMIN_EMAIL
 
     # 2. CONSULTAR/CREAR USUARIO EN BD
     if session_id:
@@ -2384,6 +2386,193 @@ def check_update():
     except Exception as e:
         print(f"Error check_update: {e}")
         return jsonify({'has_update': False, 'error': str(e)})
+
+
+# ═══════════════════════════════════════════════════
+# SISTEMA DE AUTENTICACIÓN LOCAL (Plex-Style)
+# ═══════════════════════════════════════════════════
+
+@api_bp.route('/api/auth/users', methods=['GET'])
+def auth_list_users():
+    """Lista usuarios para la pantalla '¿Quién está viendo?'"""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT email, username, avatar_url, is_superadmin, pin_hash FROM users ORDER BY created_at")
+    users = []
+    for row in c.fetchall():
+        users.append({
+            'email': row['email'],
+            'username': row['username'] or 'Usuario',
+            'avatar_url': row['avatar_url'],
+            'is_superadmin': bool(row['is_superadmin']),
+            'has_pin': bool(row['pin_hash'])
+        })
+    conn.close()
+    return jsonify({'users': users, 'has_admin': any(u['is_superadmin'] for u in users)})
+
+@api_bp.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    """Login por email + PIN opcional."""
+    data = request.get_json() or {}
+    email = data.get('email', '').strip()
+    pin = data.get('pin', '')
+    
+    if not email:
+        return jsonify({"error": "Email requerido"}), 400
+    
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT email, username, avatar_url, is_superadmin, pin_hash FROM users WHERE email = ?", (email,))
+    user = c.fetchone()
+    conn.close()
+    
+    if not user:
+        return jsonify({"error": "Usuario no encontrado"}), 404
+    
+    # Verificar PIN si el usuario tiene uno
+    if user['pin_hash']:
+        if not pin:
+            return jsonify({"error": "PIN requerido", "needs_pin": True}), 401
+        if not verify_pin(pin, user['pin_hash']):
+            return jsonify({"error": "PIN incorrecto"}), 401
+    
+    token = create_token(user['email'], user['username'] or '', bool(user['is_superadmin']))
+    return jsonify({
+        'token': token,
+        'email': user['email'],
+        'username': user['username'],
+        'avatar_url': user['avatar_url'],
+        'is_superadmin': bool(user['is_superadmin'])
+    })
+
+@api_bp.route('/api/auth/register', methods=['POST'])
+def auth_register():
+    """Registro de Admin (primer uso) o con código de invitación."""
+    data = request.get_json() or {}
+    username = data.get('username', '').strip()
+    pin = data.get('pin', '')
+    invite_code = data.get('invite_code', '').strip().upper()
+    
+    if not username:
+        return jsonify({"error": "Nombre requerido"}), 400
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    # Verificar si ya hay admin
+    c.execute("SELECT COUNT(*) FROM users WHERE is_superadmin = 1")
+    has_admin = c.fetchone()[0] > 0
+    
+    if has_admin and not invite_code:
+        # Ya hay admin, necesita código de invitación
+        return jsonify({"error": "Se requiere código de invitación"}), 403
+    
+    if invite_code:
+        # Validar código de invitación
+        if invite_code not in state.STREAM_TOKENS.get('_invite_codes', {}):
+            conn.close()
+            return jsonify({"error": "Código de invitación inválido"}), 403
+        # Consumir el código (un solo uso)
+        del state.STREAM_TOKENS['_invite_codes'][invite_code]
+    
+    # Crear email local
+    safe_name = username.lower().replace(' ', '_')
+    email = f"{safe_name}@kraken.local"
+    
+    # Verificar que no exista
+    c.execute("SELECT email FROM users WHERE email = ?", (email,))
+    if c.fetchone():
+        conn.close()
+        return jsonify({"error": "Este nombre de usuario ya está registrado"}), 409
+    
+    pin_hash = hash_pin(pin) if pin else None
+    is_admin = 1 if not has_admin else 0
+    
+    c.execute("""
+        INSERT INTO users (email, username, avatar_url, is_superadmin, pin_hash, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (email, username, None, is_admin, pin_hash, time.time()))
+    conn.commit()
+    conn.close()
+    
+    token = create_token(email, username, bool(is_admin))
+    return jsonify({
+        'token': token,
+        'email': email,
+        'username': username,
+        'is_superadmin': bool(is_admin)
+    })
+
+@api_bp.route('/api/auth/invite', methods=['POST'])
+def auth_create_invite():
+    """Genera código de invitación (solo Admin)."""
+    user_email = get_user_from_request(request)
+    if not user_email:
+        return jsonify({"error": "No autorizado"}), 401
+    
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT is_superadmin FROM users WHERE email = ?", (user_email,))
+    row = c.fetchone()
+    conn.close()
+    
+    if not row or not row['is_superadmin']:
+        return jsonify({"error": "Solo administradores pueden invitar"}), 403
+    
+    code = generate_invite_code()
+    if '_invite_codes' not in state.STREAM_TOKENS:
+        state.STREAM_TOKENS['_invite_codes'] = {}
+    state.STREAM_TOKENS['_invite_codes'][code] = {
+        'created_by': user_email,
+        'created_at': time.time()
+    }
+    
+    return jsonify({'code': code})
+
+@api_bp.route('/api/auth/set_pin', methods=['POST'])
+def auth_set_pin():
+    """Establecer o cambiar PIN."""
+    user_email = get_user_from_request(request)
+    if not user_email:
+        return jsonify({"error": "No autorizado"}), 401
+    
+    data = request.get_json() or {}
+    new_pin = data.get('pin', '')
+    
+    conn = get_db()
+    if new_pin:
+        pin_h = hash_pin(new_pin)
+        conn.execute("UPDATE users SET pin_hash = ? WHERE email = ?", (pin_h, user_email))
+    else:
+        conn.execute("UPDATE users SET pin_hash = NULL WHERE email = ?", (user_email,))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({"ok": True})
+
+@api_bp.route('/api/auth/verify', methods=['GET'])
+def auth_verify():
+    """Verifica si el token actual es válido."""
+    user_email = get_user_from_request(request)
+    if not user_email:
+        return jsonify({"valid": False}), 401
+    
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT email, username, avatar_url, is_superadmin FROM users WHERE email = ?", (user_email,))
+    user = c.fetchone()
+    conn.close()
+    
+    if not user:
+        return jsonify({"valid": False}), 401
+    
+    return jsonify({
+        "valid": True,
+        "email": user['email'],
+        "username": user['username'],
+        "avatar_url": user['avatar_url'],
+        "is_superadmin": bool(user['is_superadmin'])
+    })
 
 @api_bp.route('/api/stream/token', methods=['POST'])
 def generate_stream_token():
