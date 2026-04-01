@@ -25,19 +25,23 @@ def _get_or_create_secret():
 JWT_SECRET = _get_or_create_secret()
 TOKEN_EXPIRY = 30 * 24 * 3600  # 30 días
 
-def hash_pin(pin):
-    """Hash a PIN with salt for storage."""
+def hash_password(password):
+    """Hash a password with salt for storage."""
     salt = secrets.token_hex(16)
-    h = hashlib.pbkdf2_hmac('sha256', pin.encode(), salt.encode(), 100000)
+    h = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
     return salt + ':' + h.hex()
 
-def verify_pin(pin, stored_hash):
-    """Verify a PIN against its stored hash."""
+def verify_password(password, stored_hash):
+    """Verify a password against its stored hash."""
     if not stored_hash or ':' not in stored_hash:
         return False
     salt, expected = stored_hash.split(':', 1)
-    h = hashlib.pbkdf2_hmac('sha256', pin.encode(), salt.encode(), 100000)
+    h = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
     return hmac.compare_digest(h.hex(), expected)
+
+# Alias for backwards compatibility
+hash_pin = hash_password
+verify_pin = verify_password
 
 def create_token(user_email, username='', is_superadmin=False):
     """Create a signed token (JWT-like) for a user."""
@@ -75,8 +79,7 @@ def generate_invite_code():
     return f"KRK-{code}"
 
 def get_user_from_request(request):
-    """Extract user email from request. Checks JWT first, then CF header, then fallback."""
-    # 1. Check Authorization header (JWT)
+    """Extract user email from request. Checks JWT only."""
     auth = request.headers.get('Authorization', '')
     if auth.startswith('Bearer '):
         token = auth[7:]
@@ -84,10 +87,4 @@ def get_user_from_request(request):
         if payload:
             return payload.get('email', '')
 
-    # 2. Fallback: Cloudflare header (transición)
-    cf_email = request.headers.get('Cf-Access-Authenticated-User-Email', '')
-    if cf_email:
-        return cf_email
-
-    # 3. No auth
     return ''

@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, send_file, render_template_string
 import os, time, json, shutil, subprocess, sys, threading, urllib.parse, re, copy
 import io
 from collections import deque
+from functools import wraps
 import requests
 from urllib.parse import unquote
 from pathlib import Path
@@ -18,7 +19,7 @@ from state import *
 import utils
 from utils import *
 from services.lastfm import *
-from services.auth import get_user_from_request, create_token, hash_pin, verify_pin, generate_invite_code, verify_token
+from services.auth import get_user_from_request, create_token, hash_password, verify_password, generate_invite_code, verify_token
 from services.metadata import *
 from services.library import *
 from services.media_analyzer import *
@@ -37,6 +38,66 @@ else:
 _RUNTIME_CONFIG_FILE = os.path.join(_app_data_dir, 'runtime_config.json')
 _DEFAULT_RUNTIME = {'media_path': r'F:\Kraken Media Server\descargas', 'pin': '3041'}
 
+# Rate limiting simple para auth
+_AUTH_RATE_LIMIT = {'attempts': {}, 'locks': {}}
+MAX_LOGIN_ATTEMPTS = 5
+LOCKOUT_DURATION = 300  # 5 minutos
+
+def _get_client_ip():
+    """Get real client IP considering Cloudflare."""
+    # Cloudflare puts real IP in this header
+    return request.headers.get('CF-Connecting-IP') or \
+           request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or \
+           request.remote_addr or 'unknown'
+
+def _check_rate_limit(ip):
+    """Check if IP is rate limited or locked out."""
+    now = time.time()
+    
+    # Check if locked out
+    if ip in _AUTH_RATE_LIMIT.get('locks', {}):
+        lock_data = _AUTH_RATE_LIMIT['locks'][ip]
+        if now < lock_data['until']:
+            return {'locked': True, 'remaining': int(lock_data['until'] - now)}
+        else:
+            del _AUTH_RATE_LIMIT['locks'][ip]
+    
+    if ip in _AUTH_RATE_LIMIT.get('attempts', {}):
+        _AUTH_RATE_LIMIT['attempts'][ip] = [
+            t for t in _AUTH_RATE_LIMIT['attempts'][ip] 
+            if now - t < 3600
+        ]
+    
+    return {'locked': False}
+
+def _record_failed_attempt(ip):
+    """Record failed login attempt with progressive delay."""
+    now = time.time()
+    if 'attempts' not in _AUTH_RATE_LIMIT:
+        _AUTH_RATE_LIMIT['attempts'] = {}
+    if ip not in _AUTH_RATE_LIMIT['attempts']:
+        _AUTH_RATE_LIMIT['attempts'][ip] = []
+    
+    _AUTH_RATE_LIMIT['attempts'][ip].append(now)
+    attempts = len(_AUTH_RATE_LIMIT['attempts'][ip])
+    
+    if attempts >= MAX_LOGIN_ATTEMPTS:
+        if 'locks' not in _AUTH_RATE_LIMIT:
+            _AUTH_RATE_LIMIT['locks'] = {}
+        _AUTH_RATE_LIMIT['locks'][ip] = {
+            'until': now + LOCKOUT_DURATION,
+            'reason': f'{attempts} intentos fallidos'
+        }
+        print(f'[SECURITY] IP {ip} locked for {LOCKOUT_DURATION}s after {attempts} failed attempts')
+        _AUTH_RATE_LIMIT['attempts'][ip] = []
+    
+    return attempts
+
+def _clear_failed_attempts(ip):
+    """Clear failed attempts on successful login."""
+    if ip in _AUTH_RATE_LIMIT.get('attempts', {}):
+        _AUTH_RATE_LIMIT['attempts'][ip] = []
+
 def _load_runtime_config():
     if os.path.exists(_RUNTIME_CONFIG_FILE):
         try:
@@ -45,6 +106,10 @@ def _load_runtime_config():
         except (json.JSONDecodeError, IOError):
             return _DEFAULT_RUNTIME.copy()
     return _DEFAULT_RUNTIME.copy()
+
+def get_master_pin():
+    """Obtiene el PIN maestro desde el JSON (nunca desde config.py)."""
+    return _load_runtime_config().get('pin', '3041')
 
 def _save_runtime_config(key, value):
     """Guarda en JSON y sincroniza con config.py local"""
@@ -269,7 +334,7 @@ def delete_folder_batch():
     
     # Validar PIN Maestro
     import config
-    if pin != config.MASTER_PIN:
+    if pin != get_master_pin():
         return jsonify({'error': 'PIN incorrecto. OperaciÃ³n denegada.'}), 401
     
     if not folder_rel_path or '..' in folder_rel_path:
@@ -517,7 +582,7 @@ def borrar_masivo():
     paths = data.get('paths', [])
     pin = data.get('pin')
     import config
-    if pin != config.MASTER_PIN: return jsonify({'error': 'PIN incorrecto'}), 401
+    if pin != get_master_pin(): return jsonify({'error': 'PIN incorrecto'}), 401
     deleted_count = 0
     history_modified = False
     
@@ -553,7 +618,7 @@ def mover_archivo():
         pin = data.get('pin')
 
         import config
-        if pin != config.MASTER_PIN: return jsonify({'error': 'PIN incorrecto'}), 401
+        if pin != get_master_pin(): return jsonify({'error': 'PIN incorrecto'}), 401
 
         # ðŸ” Validar origen
         src = validar_path(rel_src)
@@ -618,7 +683,7 @@ def update_tags():
         data = request.json or {}
         pin = data.get('pin')
         import config
-        if pin != config.MASTER_PIN: return jsonify({'error': 'PIN incorrecto'}), 401
+        if pin != get_master_pin(): return jsonify({'error': 'PIN incorrecto'}), 401
 
         # Soporta tanto ediciÃ³n individual ('path') como masiva ('paths')
         rel_paths = data.get('paths', [])
@@ -1344,7 +1409,7 @@ def update_ytdlp():
 def actualizar_cache():
     pin = request.args.get('pin')
     import config
-    if pin != config.MASTER_PIN: return jsonify({'error': 'PIN incorrecto'}), 401
+    if pin != get_master_pin(): return jsonify({'error': 'PIN incorrecto'}), 401
     
     # escaneo fÃ­sico
     escanear_archivos_fisicos()
@@ -1370,7 +1435,7 @@ def borrar():
         
         # ðŸ” Validar PIN Maestro
         import config
-        if pin != config.MASTER_PIN:
+        if pin != get_master_pin():
             return jsonify({'error': 'PIN incorrecto. OperaciÃ³n de borrado denegada.'}), 401
 
         # ðŸ” Ruta segura del archivo principal
@@ -1979,7 +2044,6 @@ def autotag_library():
 
 @api_bp.route('/api/setup/status', methods=['GET'])
 def setup_status():
-    import config
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT COUNT(*) as count FROM users WHERE is_superadmin = 1")
@@ -1987,53 +2051,49 @@ def setup_status():
     conn.close()
     
     needs_setup = row['count'] == 0 if row else True
+    runtime = _load_runtime_config()
     
     return jsonify({
         'needs_setup': needs_setup,
-        'current_email': config.SUPERADMIN_EMAIL,
-        'current_pin': '****' if config.MASTER_PIN else None,
-        'current_media_path': getattr(config, 'KRAKEN_MEDIA_PATH', '')
+        'current_pin': '****' if runtime.get('pin') else None,
+        'current_media_path': runtime.get('media_path', '')
     })
 
 
-@api_bp.route('/api/setup', methods=['POST'])
-def setup_complete():
+@api_bp.route('/api/setup/firsttime', methods=['POST'])
+def setup_firsttime():
+    """Primera configuración - crea admin con username/password y guarda PIN maestro."""
     data = request.json or {}
-    email = data.get('email', '').strip().lower()
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
     pin = data.get('pin', '')
     media_path = data.get('media_path', '').strip()
     
-    if not email:
-        return jsonify({'error': 'Email es requerido'}), 400
-    
-    if not email.endswith('@gmail.com'):
-        return jsonify({'error': 'Solo se permiten emails de Gmail'}), 400
-    
-    if len(pin) < 4:
-        return jsonify({'error': 'PIN debe tener al menos 4 digitos'}), 400
+    if not username:
+        return jsonify({'error': 'Nombre de usuario requerido'}), 400
+    if not password or len(password) < 4:
+        return jsonify({'error': 'Contraseña mínimo 4 caracteres'}), 400
+    if not pin or len(pin) < 4:
+        return jsonify({'error': 'PIN mínimo 4 dígitos'}), 400
     
     try:
-        import config
-        config.SUPERADMIN_EMAIL = email
-        
-        # Guardar pin y media_path en JSON (funciona en EXE)
+        # Guardar PIN maestro en JSON
         _save_runtime_config('pin', pin)
-        config.MASTER_PIN = pin
         
         if media_path:
             _save_runtime_config('media_path', media_path)
-            config.KRAKEN_MEDIA_PATH = media_path
-            config.DOWNLOAD_FOLDER = os.path.join(media_path, 'Kraken Media')
+        
+        # Crear usuario admin con contraseña
+        safe_name = username.lower().replace(' ', '_')
+        email = f"{safe_name}@kraken.local"
+        password_hash = hash_password(password)
         
         conn = get_db()
         c = conn.cursor()
-        c.execute("SELECT COUNT(*) as count FROM users WHERE email = ?", (email,))
-        existing = c.fetchone()['count']
-        
-        if existing == 0:
-            c.execute("INSERT INTO users (email, sid, username, is_superadmin, created_at) VALUES (?, ?, ?, ?, ?)",
-                      (email, 'local_setup', email.split('@')[0], 1, time.time()))
-        
+        c.execute("""
+            INSERT INTO users (email, username, pin_hash, is_superadmin, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (email, username, password_hash, 1, time.time()))
         conn.commit()
         conn.close()
         
@@ -2047,51 +2107,29 @@ def setup_complete():
 def update_settings():
     data = request.json or {}
     current_pin = data.get('pin', '')
-    new_email = data.get('email', '').strip().lower()
     new_pin = data.get('new_pin', '')
     new_media_path = data.get('media_path', '').strip()
     
-    import config
-    if current_pin != config.MASTER_PIN:
+    runtime = _load_runtime_config()
+    if current_pin != runtime.get('pin'):
         return jsonify({'error': 'PIN incorrecto'}), 401
     
     changes = {}
     
-    if new_email:
-        if not new_email.endswith('@gmail.com'):
-            return jsonify({'error': 'Solo se permiten emails de Gmail'}), 400
-        changes['email'] = new_email
-    
     if new_pin:
         if len(new_pin) < 4:
             return jsonify({'error': 'PIN debe tener al menos 4 digitos'}), 400
+        _save_runtime_config('pin', new_pin)
         changes['pin'] = new_pin
         
     if new_media_path:
+        _save_runtime_config('media_path', new_media_path)
         changes['media_path'] = new_media_path
     
     if not changes:
         return jsonify({'error': 'No hay cambios para aplicar'}), 400
     
-    try:
-        if new_email:
-            config.SUPERADMIN_EMAIL = new_email
-        
-        # Guardar pin en JSON
-        if new_pin:
-            _save_runtime_config('pin', new_pin)
-            config.MASTER_PIN = new_pin
-        
-        # Guardar media_path en JSON
-        if new_media_path:
-            _save_runtime_config('media_path', new_media_path)
-            config.KRAKEN_MEDIA_PATH = new_media_path
-            config.DOWNLOAD_FOLDER = os.path.join(new_media_path, "Kraken Media")
-        
-        return jsonify({"ok": True, "changes": changes})
-    
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"ok": True, "changes": changes})
 
 
 @api_bp.route('/analyze/start', methods=['POST'])
@@ -2099,7 +2137,7 @@ def start_analysis():
     data = request.json or {}
     pin = data.get('pin')
     import config
-    if pin != config.MASTER_PIN: return jsonify({'error': 'PIN incorrecto'}), 401
+    if pin != get_master_pin(): return jsonify({'error': 'PIN incorrecto'}), 401
     
     try:
         from services.audio_analyzer import start_library_analysis
@@ -2129,7 +2167,7 @@ def auto_tag_video_endpoint():
     path = data.get('path')
     
     import config
-    if pin != config.MASTER_PIN:
+    if pin != get_master_pin():
         return jsonify({'error': 'PIN incorrecto'}), 401
     
     if not path:
@@ -2219,7 +2257,7 @@ def auto_tag_library_videos():
     pin = data.get('pin')
     
     import config
-    if pin != config.MASTER_PIN:
+    if pin != get_master_pin():
         return jsonify({'error': 'PIN incorrecto'}), 401
     
     try:
@@ -2388,6 +2426,46 @@ def check_update():
 
 
 # ═══════════════════════════════════════════════════
+# HELPERS DE AUTENTICACIÓN
+# ═══════════════════════════════════════════════════
+
+def require_master_pin(f):
+    """Decorator que requiere PIN maestro válido."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        pin = request.headers.get('X-Master-Pin') or request.json.get('pin') if request.json else None
+        if not pin:
+            return jsonify({'error': 'PIN requerido'}), 401
+        runtime = _load_runtime_config()
+        if pin != runtime.get('pin'):
+            return jsonify({'error': 'PIN incorrecto'}), 403
+        return f(*args, **kwargs)
+    return wrapper
+
+def require_admin(f):
+    """Decorator que requiere usuario admin autenticado."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        try:
+            user_email = get_user_from_request(request)
+            if not user_email:
+                return jsonify({'error': 'No autorizado'}), 401
+            conn = get_db()
+            c = conn.cursor()
+            c.execute("SELECT is_superadmin FROM users WHERE email = ?", (user_email,))
+            row = c.fetchone()
+            conn.close()
+            if not row or not row['is_superadmin']:
+                return jsonify({'error': 'Solo admins'}), 403
+            return f(*args, **kwargs)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': str(e)}), 500
+    return wrapper
+
+
+# ═══════════════════════════════════════════════════
 # SISTEMA DE AUTENTICACIÓN LOCAL (Plex-Style)
 # ═══════════════════════════════════════════════════
 
@@ -2404,56 +2482,283 @@ def auth_list_users():
             'username': row['username'] or 'Usuario',
             'avatar_url': row['avatar_url'],
             'is_superadmin': bool(row['is_superadmin']),
-            'has_pin': bool(row['pin_hash'])
+            'has_password': bool(row['pin_hash'])
         })
     conn.close()
     return jsonify({'users': users, 'has_admin': any(u['is_superadmin'] for u in users)})
 
-@api_bp.route('/api/auth/login', methods=['POST'])
-def auth_login():
-    """Login por email + PIN opcional."""
+@api_bp.route('/api/admin/users', methods=['GET'])
+@require_admin
+def admin_list_users():
+    """Lista todos los usuarios (para panel de admin)."""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        # Ver qué columnas existen
+        c.execute("PRAGMA table_info(users)")
+        columns = [row[1] for row in c.fetchall()]
+        print('[ADMIN] Columns in users table:', columns)
+        
+        # Query sin id si no existe
+        if 'id' in columns:
+            c.execute("SELECT id, email, username, avatar_url, is_superadmin, created_at FROM users ORDER BY created_at")
+        else:
+            c.execute("SELECT email, username, avatar_url, is_superadmin, created_at FROM users ORDER BY created_at")
+            
+        users = []
+        for row in c.fetchall():
+            user_data = {
+                'email': row['email'],
+                'username': row['username'] or 'Usuario',
+                'avatar_url': row['avatar_url'],
+                'is_superadmin': bool(row['is_superadmin']),
+                'created_at': row['created_at']
+            }
+            if 'id' in columns:
+                user_data['id'] = row['id']
+            users.append(user_data)
+        conn.close()
+        return jsonify({'users': users})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/api/admin/users', methods=['POST'])
+@require_admin
+def admin_create_user():
+    """Crear usuario directamente (solo admins)."""
     data = request.get_json() or {}
-    email = data.get('email', '').strip()
-    pin = data.get('pin', '')
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
     
-    if not email:
-        return jsonify({"error": "Email requerido"}), 400
+    if not username:
+        return jsonify({'error': 'Nombre requerido'}), 400
+    if not password or len(password) < 4:
+        return jsonify({'error': 'Contraseña mínimo 4 caracteres'}), 400
     
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT email, username, avatar_url, is_superadmin, pin_hash FROM users WHERE email = ?", (email,))
-    user = c.fetchone()
+    
+    safe_name = username.lower().replace(' ', '_')
+    email = f"{safe_name}@kraken.local"
+    
+    c.execute("SELECT email FROM users WHERE email = ?", (email,))
+    if c.fetchone():
+        conn.close()
+        return jsonify({'error': 'Este nombre de usuario ya está registrado'}), 409
+    
+    password_hash = hash_password(password)
+    
+    c.execute("""
+        INSERT INTO users (email, username, avatar_url, is_superadmin, pin_hash, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (email, username, None, 0, password_hash, time.time()))
+    conn.commit()
     conn.close()
     
-    if not user:
-        return jsonify({"error": "Usuario no encontrado"}), 404
+    return jsonify({'ok': True, 'email': email})
+
+@api_bp.route('/api/admin/users/<email>', methods=['DELETE'])
+@require_admin
+def admin_delete_user(email):
+    """Eliminar usuario por email."""
+    conn = get_db()
+    c = conn.cursor()
     
-    # Verificar PIN si el usuario tiene uno
-    if user['pin_hash']:
-        if not pin:
-            return jsonify({"error": "PIN requerido", "needs_pin": True}), 401
-        if not verify_pin(pin, user['pin_hash']):
-            return jsonify({"error": "PIN incorrecto"}), 401
+    c.execute("SELECT is_superadmin FROM users WHERE email = ?", (email,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': 'Usuario no encontrado'}), 404
     
-    token = create_token(user['email'], user['username'] or '', bool(user['is_superadmin']))
+    if row['is_superadmin']:
+        conn.close()
+        return jsonify({'error': 'No se puede eliminar al admin'}), 403
+    
+    c.execute("DELETE FROM users WHERE email = ?", (email,))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'ok': True})
+
+@api_bp.route('/api/admin/users/<email>/password', methods=['PUT'])
+@require_admin
+def admin_reset_password(email):
+    """Resetear contraseña de usuario."""
+    data = request.get_json() or {}
+    new_password = data.get('password', '')
+    
+    if not new_password or len(new_password) < 4:
+        return jsonify({'error': 'Contraseña mínimo 4 caracteres'}), 400
+    
+    conn = get_db()
+    c = conn.cursor()
+    password_hash = hash_password(new_password)
+    c.execute("UPDATE users SET pin_hash = ? WHERE email = ?", (password_hash, email))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'ok': True})
+
+@api_bp.route('/api/admin/invite', methods=['POST'])
+@require_admin
+def admin_create_invite():
+    """Genera código de invitación con expiración configurable."""
+    data = request.get_json() or {}
+    # Duración en minutos: 0 = nunca expira, 5 = 5 min, 60 = 1 hora, 1440 = 24 horas
+    duration_minutes = data.get('duration_minutes', 0)
+    
+    code = generate_invite_code()
+    if '_invite_codes' not in state.STREAM_TOKENS:
+        state.STREAM_TOKENS['_invite_codes'] = {}
+    
+    # Guardar tiempo de creación y duración
+    state.STREAM_TOKENS['_invite_codes'][code] = {
+        'created_at': time.time(),
+        'duration_minutes': duration_minutes,
+        'expires_at': time.time() + (duration_minutes * 60) if duration_minutes > 0 else None
+    }
+    
+    response = {'code': code}
+    if duration_minutes > 0:
+        response['expires_at'] = state.STREAM_TOKENS['_invite_codes'][code]['expires_at']
+        response['duration_text'] = f'{duration_minutes} minutos' if duration_minutes < 60 else f'{duration_minutes // 60} horas'
+    
+    return jsonify(response)
+
+@api_bp.route('/api/admin/invite', methods=['DELETE'])
+@require_admin
+def admin_delete_invite():
+    """Invalidar todos los códigos de invitación."""
+    if '_invite_codes' in state.STREAM_TOKENS:
+        state.STREAM_TOKENS['_invite_codes'] = {}
+    return jsonify({'ok': True})
+
+@api_bp.route('/api/admin/invite/validate', methods=['POST'])
+def validate_invite_code():
+    """Validar código de invitación sin consumirlo."""
+    data = request.get_json() or {}
+    code = data.get('code', '').strip().upper()
+    
+    if not code:
+        return jsonify({'valid': False, 'error': 'Código requerido'}), 400
+    
+    codes = state.STREAM_TOKENS.get('_invite_codes', {})
+    
+    if code not in codes:
+        return jsonify({'valid': False, 'error': 'Código inválido'}), 404
+    
+    code_data = codes[code]
+    if isinstance(code_data, dict) and code_data.get('expires_at'):
+        if time.time() > code_data['expires_at']:
+            del state.STREAM_TOKENS['_invite_codes'][code]
+            return jsonify({'valid': False, 'error': 'Código expirado'}), 410
+    
+    # Código válido - no lo consumimos, solo validamos
+    response = {'valid': True}
+    if isinstance(code_data, dict) and code_data.get('expires_at'):
+        response['expires_at'] = code_data['expires_at']
+    
+    return jsonify(response)
+
+@api_bp.route('/api/admin/config', methods=['GET'])
+def admin_get_config():
+    """Obtener configuración actual (sin datos sensibles)."""
+    runtime = _load_runtime_config()
     return jsonify({
-        'token': token,
-        'email': user['email'],
-        'username': user['username'],
-        'avatar_url': user['avatar_url'],
-        'is_superadmin': bool(user['is_superadmin'])
+        'media_path': runtime.get('media_path', ''),
+        'has_pin': bool(runtime.get('pin'))
     })
+
+@api_bp.route('/api/admin/config', methods=['PUT'])
+@require_admin
+def admin_update_config():
+    """Actualizar configuración (PIN o media_path)."""
+    data = request.get_json() or {}
+    
+    if 'media_path' in data:
+        _save_runtime_config('media_path', data['media_path'])
+    
+    if 'pin' in data and data['pin']:
+        if len(data['pin']) < 4:
+            return jsonify({'error': 'PIN mínimo 4 caracteres'}), 400
+        _save_runtime_config('pin', data['pin'])
+    
+    return jsonify({'ok': True})
+
+@api_bp.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    """Login por email + contraseña obligatoria."""
+    try:
+        # Get real client IP (handles Cloudflare)
+        client_ip = _get_client_ip()
+        
+        # Check rate limit
+        rate_check = _check_rate_limit(client_ip)
+        if rate_check.get('locked'):
+            return jsonify({
+                "error": f"Demasiados intentos. Intenta en {rate_check['remaining']} segundos",
+                "retry_after": rate_check['remaining']
+            }), 429
+        
+        data = request.get_json() or {}
+        email = data.get('email', '').strip()
+        password = data.get('password', '')
+        
+        if not email:
+            return jsonify({"error": "Email requerido"}), 400
+        if not password:
+            return jsonify({"error": "Contraseña requerida"}), 400
+        
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT email, username, avatar_url, is_superadmin, pin_hash FROM users WHERE email = ?", (email,))
+        user = c.fetchone()
+        conn.close()
+        
+        if not user:
+            return jsonify({"error": "Usuario no encontrado"}), 404
+        
+        # Verificar contraseña
+        stored = user['pin_hash'] or ''
+        if not verify_password(password, stored):
+            attempts = _record_failed_attempt(client_ip)
+            remaining = MAX_LOGIN_ATTEMPTS - attempts
+            return jsonify({
+                "error": "Contraseña incorrecta",
+                "remaining_attempts": max(0, remaining)
+            }), 401
+        
+        # Login successful - clear failed attempts
+        _clear_failed_attempts(client_ip)
+        
+        token = create_token(user['email'], user['username'] or '', bool(user['is_superadmin']))
+        print(f'[AUTH] Login exitoso: {email} desde {client_ip}')
+        return jsonify({
+            'token': token,
+            'email': user['email'],
+            'username': user['username'],
+            'avatar_url': user['avatar_url'],
+            'is_superadmin': bool(user['is_superadmin'])
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/api/auth/register', methods=['POST'])
 def auth_register():
     """Registro de Admin (primer uso) o con código de invitación."""
     data = request.get_json() or {}
     username = data.get('username', '').strip()
-    pin = data.get('pin', '')
+    password = data.get('password', '')
     invite_code = data.get('invite_code', '').strip().upper()
     
     if not username:
         return jsonify({"error": "Nombre requerido"}), 400
+    if not password or len(password) < 4:
+        return jsonify({"error": "Contraseña mínimo 4 caracteres"}), 400
     
     conn = get_db()
     c = conn.cursor()
@@ -2468,9 +2773,19 @@ def auth_register():
     
     if invite_code:
         # Validar código de invitación
-        if invite_code not in state.STREAM_TOKENS.get('_invite_codes', {}):
+        codes = state.STREAM_TOKENS.get('_invite_codes', {})
+        if invite_code not in codes:
             conn.close()
             return jsonify({"error": "Código de invitación inválido"}), 403
+        
+        # Verificar expiración
+        code_data = codes[invite_code]
+        if isinstance(code_data, dict) and code_data.get('expires_at'):
+            if time.time() > code_data['expires_at']:
+                del state.STREAM_TOKENS['_invite_codes'][invite_code]
+                conn.close()
+                return jsonify({"error": "Código de invitación expirado"}), 403
+        
         # Consumir el código (un solo uso)
         del state.STREAM_TOKENS['_invite_codes'][invite_code]
     
@@ -2484,13 +2799,13 @@ def auth_register():
         conn.close()
         return jsonify({"error": "Este nombre de usuario ya está registrado"}), 409
     
-    pin_hash = hash_pin(pin) if pin else None
+    password_hash = hash_password(password)
     is_admin = 1 if not has_admin else 0
     
     c.execute("""
         INSERT INTO users (email, username, avatar_url, is_superadmin, pin_hash, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
-    """, (email, username, None, is_admin, pin_hash, time.time()))
+    """, (email, username, None, is_admin, password_hash, time.time()))
     conn.commit()
     conn.close()
     
@@ -2528,22 +2843,22 @@ def auth_create_invite():
     
     return jsonify({'code': code})
 
-@api_bp.route('/api/auth/set_pin', methods=['POST'])
-def auth_set_pin():
-    """Establecer o cambiar PIN."""
+@api_bp.route('/api/auth/set_password', methods=['POST'])
+def auth_set_password():
+    """Establecer o cambiar contraseña."""
     user_email = get_user_from_request(request)
     if not user_email:
         return jsonify({"error": "No autorizado"}), 401
     
     data = request.get_json() or {}
-    new_pin = data.get('pin', '')
+    new_password = data.get('password', '')
+    
+    if not new_password or len(new_password) < 4:
+        return jsonify({"error": "Contraseña mínimo 4 caracteres"}), 400
     
     conn = get_db()
-    if new_pin:
-        pin_h = hash_pin(new_pin)
-        conn.execute("UPDATE users SET pin_hash = ? WHERE email = ?", (pin_h, user_email))
-    else:
-        conn.execute("UPDATE users SET pin_hash = NULL WHERE email = ?", (user_email,))
+    password_hash = hash_password(new_password)
+    conn.execute("UPDATE users SET pin_hash = ? WHERE email = ?", (password_hash, user_email))
     conn.commit()
     conn.close()
     
@@ -2565,13 +2880,18 @@ def auth_verify():
     if not user:
         return jsonify({"valid": False}), 401
     
-    return jsonify({
+        return jsonify({
         "valid": True,
         "email": user['email'],
         "username": user['username'],
         "avatar_url": user['avatar_url'],
         "is_superadmin": bool(user['is_superadmin'])
     })
+
+@api_bp.route('/api/auth/logout', methods=['POST'])
+def auth_logout():
+    """Logout - invalidar token."""
+    return jsonify({"ok": True})
 
 @api_bp.route('/api/stream/token', methods=['POST'])
 def generate_stream_token():

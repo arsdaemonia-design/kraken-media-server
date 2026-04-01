@@ -63,7 +63,7 @@ def save_runtime_config_sync(key, value):
 _runtime = load_runtime_config()
 
 # Media Paths - LEE DESDE JSON SI EXISTE
-KRAKEN_MEDIA_PATH = _runtime.get('media_path', os.getenv('KRAKEN_MEDIA_PATH', r'D:\\Skazo\\Music'))
+KRAKEN_MEDIA_PATH = os.getenv('KRAKEN_MEDIA_PATH', r'D:\\Skazo\\Music')
 DOWNLOAD_FOLDER = os.path.join(KRAKEN_MEDIA_PATH, 'Kraken Media')
 FILES_CACHE_FILE = os.path.join(DOWNLOAD_FOLDER, 'cache_files.json')
 THUMBNAILS_FOLDER = os.path.join(DOWNLOAD_FOLDER, 'thumbnails')
@@ -91,7 +91,7 @@ else:
     FFPROBE_PATH = 'ffprobe'
 
 # Security - LEE DESDE JSON SI EXISTE
-MASTER_PIN = _runtime.get('pin', DEFAULT_RUNTIME['pin'])
+MASTER_PIN = os.getenv('MASTER_PIN', '3045')
 SUPERADMIN_EMAIL = os.getenv('SUPERADMIN_EMAIL', 'arsdaemonia@gmail.com')
 LASTFM_API_KEY = os.getenv('LASTFM_API_KEY', 'dfc4823f36b21278278f577357d8e7e7')
 

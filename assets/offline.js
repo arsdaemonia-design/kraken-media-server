@@ -6,48 +6,9 @@ let offlineIndicatorPending = false;
 let offlineStateReady = false;
 window.CF_ACCESS_EXPIRED = false;
 
-// ⭐ NUEVA FUNCIÓN: Verificar Cloudflare Access ANTES de todo
+// ⭐ CLOUDflare ACCESS - Ya no se usa (autenticación local JWT)
 async function checkCloudflareAccess() {
-    try {
-        const uniqueUrl = `/api/status?t=${Date.now()}&r=${Math.random()}`;
-        const response = await fetch(uniqueUrl, {
-            method: 'GET',
-            cache: 'no-store',
-            headers: { 
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache'
-            }
-        });
-
-        const contentType = response.headers.get("content-type");
-        
-        if (contentType && contentType.includes("text/html")) {
-            console.warn("🔒 Cloudflare Access detectado. Sesión caducada.");
-            window.CF_ACCESS_EXPIRED = true;
-            try { localStorage.setItem('kraken_force_reauth', '1'); } catch (_) {}
-            return false;
-        }
-
-        if (!response.ok) {
-            console.warn(`🔒 Cloudflare Access status inesperado: ${response.status}`);
-            window.CF_ACCESS_EXPIRED = true;
-            try { localStorage.setItem('kraken_force_reauth', '1'); } catch (_) {}
-            return false;
-        }
-        
-        console.log("✅ Cloudflare Access OK. Usuario autenticado.");
-        window.CF_ACCESS_EXPIRED = false;
-        try { localStorage.removeItem('kraken_force_reauth'); } catch (_) {}
-        return true;
-        
-    } catch (e) {
-        console.log("✈️ Error de red (probablemente offline real):", e);
-        // Si no hay red real, no forzamos expiración de sesión.
-        if (!navigator.onLine) {
-            return true;
-        }
-        return true;
-    }
+    return true;
 }
 
 async function initOfflineBootstrap() {
@@ -1010,96 +971,21 @@ async function batchDownloadTracks(tracks, label) {
 }
 
 /* ==========================================
-   GESTOR DE SESIÓN CLOUDFLARE (TRACKER)
+   GESTOR DE SESIÓN (LOCAL - JWT)
    ========================================== */
-const CF_SESSION_DAYS = 30; // Días que dura tu regla en Cloudflare
-const CF_WARNING_DAYS = 5;  // Cuándo empezar a avisar
+const CF_SESSION_DAYS = 30;
+const CF_WARNING_DAYS = 5;
 
-// 1. Función para checar estado y actualizar barra
-async function checkSessionStatus() {
-    try {
-        // Hacemos el ping a la API (el SW la dejará pasar por la excepción)
-        const response = await fetch(`/api/status?check=${Date.now()}`);
-        
-        if (response.ok) {
-            // Si responde OK, solo inicializamos la fecha la PRIMERA vez.
-            // No la renovamos en cada refresh para que el contador sí baje.
-            const data = await response.json();
-            if (data.authenticated) {
-                window.CF_ACCESS_EXPIRED = false;
-                try { localStorage.removeItem('kraken_force_reauth'); } catch (_) {}
-                const currentTs = parseInt(localStorage.getItem('kraken_last_login_ts') || '0', 10);
-                if (!Number.isFinite(currentTs) || currentTs <= 0) {
-                    localStorage.setItem('kraken_last_login_ts', Date.now());
-                }
-                renderSessionBar();
-            }
-        } else {
-            // Si falla (o devuelve HTML de Cloudflare), no actualizamos fecha
-            window.CF_ACCESS_EXPIRED = true;
-            try { localStorage.setItem('kraken_force_reauth', '1'); } catch (_) {}
-            renderSessionBar(); 
-        }
-    } catch (e) {
-        console.log("Modo Offline: Usando fecha guardada...");
-        renderSessionBar();
-    }
+function checkSessionStatus() {
+    // Ya no necesitamos verificar con el servidor
+    // El token JWT maneja la sesión
+    renderSessionBar();
 }
 
-// 2. Función que dibuja la barrita
+// 2. Función que dibuja la barrita (simplificada - JWT maneja su propia sesión)
 function renderSessionBar() {
-    const bar = document.getElementById('session-status-bar');
-    const spacer = document.getElementById('top-spacer');
-    if (!bar) return;
-
-    const forcedReauth = window.CF_ACCESS_EXPIRED || localStorage.getItem('kraken_force_reauth') === '1';
-    const lastLogin = localStorage.getItem('kraken_last_login_ts');
-    if (!lastLogin && !forcedReauth) return; // Si nunca ha entrado y no hay expiración, no mostramos nada
-
-    // Cálculos
-    const baseTs = parseInt(lastLogin || '0', 10);
-    const diffTime = Date.now() - (Number.isFinite(baseTs) ? baseTs : 0);
-    const diffDays = diffTime / (1000 * 60 * 60 * 24); 
-    const daysLeft = forcedReauth ? 0 : Math.ceil(CF_SESSION_DAYS - diffDays);
-
-    // Lógica de Colores
-    bar.classList.remove('hidden', 'bg-emerald-600', 'bg-yellow-500', 'bg-red-600', 'text-white', 'text-black');
-    
-    // ACCIÓN AL TOCAR: Usamos tu función existente de limpiar caché
-    bar.onclick = () => {
-        if(confirm("¿Limpiar caché y reconectar?")) {
-            if (daysLeft <= 0) {
-                localStorage.removeItem('kraken_last_login_ts');
-            }
-            localStorage.removeItem('kraken_force_reauth');
-            window.CF_ACCESS_EXPIRED = false;
-            // Aquí llama a tu función de limpieza que ya tienes en offline.js
-            // O usa caches.delete...
-             caches.keys().then(names => {
-                for (let name of names) caches.delete(name);
-                window.location.reload(true);
-            });
-        }
-    };
-
-    if (daysLeft <= 0) {
-        // 🔴 ROJO: Expirado
-        bar.className += " bg-red-600 text-white py-2 animate-pulse";
-        bar.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> SESIÓN EXPIRADA • TOCA PARA RECONECTAR`;
-        showBar(true);
-    } 
-    else if (daysLeft <= CF_WARNING_DAYS) {
-        // 🟡 AMARILLO: Advertencia
-        bar.className += " bg-yellow-500 text-black py-1";
-        bar.innerHTML = `⚠️ TU SESIÓN EXPIRA EN ${daysLeft} DÍAS`;
-        showBar(true);
-    } 
-    else {
-        // 🟢 VERDE: Todo bien (Opcional: Ocultar o mostrar sutil)
-        bar.className += " bg-emerald-900/80 text-emerald-400 py-0.5 backdrop-blur-md";
-        bar.innerHTML = `🛡️ CONEXIÓN SEGURA • RESTAN ${daysLeft} DÍAS`;
-        showBar(true); // Pon false si prefieres que se oculte
-    }
+    // No mostramos nada - JWT maneja la sesión internamente
+    // El auth screen de Kraken se encarga de la autenticación
 }
 
 function showBar(visible) {
