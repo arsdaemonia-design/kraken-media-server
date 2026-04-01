@@ -352,3 +352,55 @@ Invalidar BIB_CACHE_BY_OWNER automáticamente en endpoints de editar metadata / 
 Añadir modo “Simple/Completo” para labels de audio en UI.
 Agregar menú rápido de subtítulos (tamaño/color/fondo/posición) persistido en localStorage.
 Medir tiempos antes/después de /actualizar_cache para dejar benchmark real.
+
+---
+
+# Implementación: Streaming por ID + Token (Plex-Style) — v4.87
+
+## Resumen
+Se migró el motor de reproducción de video de **rutas físicas expuestas** a un sistema de **IDs de base de datos + Tokens temporales**, similar a la arquitectura de Plex, Netflix y Amazon Prime Video. Las URLs de streaming ya no revelan la estructura de carpetas del servidor.
+
+## Archivos Modificados
+
+### `state.py` (1 línea)
+- Se agregó `STREAM_TOKENS = {}` como diccionario global en memoria para almacenar tokens activos con su ID de media asociado y timestamp de expiración.
+
+### `services/library.py` (1 línea)
+- Se agregó `'id': row['id']` al diccionario `f` que se envía al frontend, exponiendo el Primary Key de SQLite de cada archivo multimedia.
+
+### `routes/api.py` (18 líneas)
+- **Nuevo endpoint `POST /api/stream/token`**: Recibe `{id: <media_id>}` en JSON. Genera un UUID v4 como token, lo almacena en `state.STREAM_TOKENS` con expiración de 4 horas, y devuelve `{token, id}` al frontend.
+
+### `routes/hls.py` (40 líneas)
+- **Refactorización de `play_hls()`**: Ahora acepta dos modos:
+  - **Modo nuevo (Plex-style)**: Recibe `id` + `token`. Valida token contra `state.STREAM_TOKENS`, verifica expiración, busca `rel_path` en SQLite por ID.
+  - **Modo legacy (fallback)**: Si recibe `file=` sin `id`/`token`, funciona como antes.
+- **Validaciones**: Token inválido → 403, Token expirado → 403 (auto-elimina), ID no en DB → 404.
+
+### `templates/index.html` (32 líneas)
+- **`playVideoMode(file)`** → `async function` para soportar `await`.
+- **Nuevo flujo**: Pide token primero (`POST /api/stream/token`), luego llama HLS con `id+token`.
+- **Fix títulos anidados**: `parts[2]` → `parts[Math.max(0, parts.length - 2)]` (dinámico).
+
+## Flujo de Reproducción
+```
+Click → playVideoMode(file)
+  → POST /api/stream/token {id: 455}
+  → Backend genera UUID con TTL 4h
+  → GET /api/hls/play?id=455&token=abc123&sid=default
+  → Backend valida token → busca rel_path en DB → sirve video
+```
+
+## Seguridad
+- Sin token válido: 403 Forbidden
+- Token expirado: auto-elimina, 403
+- Token de otro ID: 403
+- Rutas físicas del disco nunca se exponen en URL
+
+## Pruebas Esenciales Pendientes
+- [ ] Reproducir película (1-click desde vista Netflix)
+- [ ] Reproducir episodio de serie (navegando carpetas)
+- [ ] Verificar que música sigue funcionando normal (no usa tokens)
+- [ ] Verificar Chromecast/Cast (token viaja en URL del HLS)
+- [ ] Verificar expiración de tokens después de 4 horas
+- [ ] Probar con archivo con caracteres especiales en el nombre
