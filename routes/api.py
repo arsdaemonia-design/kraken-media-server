@@ -2880,7 +2880,7 @@ def auth_verify():
     if not user:
         return jsonify({"valid": False}), 401
     
-        return jsonify({
+    return jsonify({
         "valid": True,
         "email": user['email'],
         "username": user['username'],
@@ -2912,3 +2912,196 @@ def generate_stream_token():
     
     return jsonify({'token': token, 'id': media_id})
 
+# ============= PROGRESS TRACKING (Continue Watching) =============
+
+@api_bp.route('/api/progress', methods=['POST'])
+def save_progress():
+    """Save watch progress for the current user. Called silently by ArtPlayer every ~10s."""
+    try:
+        user_email = get_user_from_request(request) or 'anonymous'
+        data = request.get_json() or {}
+        media_id = data.get('media_id')
+        progress = float(data.get('progress_seconds', 0))
+        duration = float(data.get('duration_seconds', 0))
+
+        if not media_id:
+            return jsonify({"error": "Missing media_id"}), 400
+
+        is_finished = 1 if (duration > 0 and progress / duration >= 0.93) else 0
+
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO user_progress (user_email, media_id, progress_seconds, duration_seconds, is_finished, last_watched)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_email, media_id) DO UPDATE SET
+                progress_seconds = excluded.progress_seconds,
+                duration_seconds = excluded.duration_seconds,
+                is_finished = CASE WHEN excluded.is_finished = 1 THEN 1 ELSE user_progress.is_finished END,
+                last_watched = excluded.last_watched
+        """, (user_email, media_id, progress, duration, is_finished, time.time()))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
+    except Exception as e:
+        print(f"Error saving progress: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route('/api/progress/series')
+def get_series_resume():
+    """Get the resume point for a series (last watched episode for the current user).
+       Query: ?tmdb_id=12345
+    """
+    try:
+        user_email = get_user_from_request(request) or 'anonymous'
+        tmdb_id = request.args.get('tmdb_id')
+
+        if not tmdb_id:
+            return jsonify({"error": "Missing tmdb_id"}), 400
+
+        conn = get_db()
+        c = conn.cursor()
+
+        # Find all media items belonging to this series (by tmdb_id)
+        c.execute("""
+            SELECT m.id, m.rel_path, m.title, m.folder, m.tmdb_title, m.folder_type,
+                   p.progress_seconds, p.duration_seconds, p.is_finished, p.last_watched
+            FROM media m
+            LEFT JOIN user_progress p ON p.media_id = m.id AND p.user_email = ?
+            WHERE m.tmdb_id = ? AND m.media_type = 'video'
+            ORDER BY m.rel_path ASC
+        """, (user_email, tmdb_id))
+        rows = c.fetchall()
+        conn.close()
+
+        if not rows:
+            return jsonify({"has_progress": False, "first_episode": None})
+
+        # Find the last watched non-finished episode, or the first unfinished one
+        last_watched = None
+        first_unfinished = None
+        all_episodes = []
+
+        for row in rows:
+            ep = {
+                "id": row["id"],
+                "path": row["rel_path"],
+                "title": row["title"],
+                "folder": row["folder"],
+                "progress_seconds": row["progress_seconds"] or 0,
+                "duration_seconds": row["duration_seconds"] or 0,
+                "is_finished": bool(row["is_finished"]),
+                "last_watched": row["last_watched"] or 0
+            }
+            all_episodes.append(ep)
+
+            if ep["last_watched"] > 0:
+                if last_watched is None or ep["last_watched"] > last_watched["last_watched"]:
+                    last_watched = ep
+            if not ep["is_finished"] and first_unfinished is None:
+                first_unfinished = ep
+
+        # Determine resume point
+        resume_episode = None
+        if last_watched and not last_watched["is_finished"]:
+            resume_episode = last_watched
+        elif last_watched and last_watched["is_finished"]:
+            # Find the next episode after the last finished one
+            idx = next((i for i, e in enumerate(all_episodes) if e["id"] == last_watched["id"]), -1)
+            if idx >= 0 and idx + 1 < len(all_episodes):
+                resume_episode = all_episodes[idx + 1]
+        if not resume_episode:
+            resume_episode = first_unfinished or all_episodes[0]
+
+        return jsonify({
+            "has_progress": last_watched is not None,
+            "resume_episode": resume_episode,
+            "total_episodes": len(all_episodes),
+            "watched_count": sum(1 for e in all_episodes if e["is_finished"])
+        })
+    except Exception as e:
+        print(f"Error getting series resume: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ============= TMDB EXTENDED DETAILS (Live-Fetch) =============
+
+@api_bp.route('/api/tmdb/details')
+def tmdb_extended_details():
+    """Get extended TMDB details (cast, overview, backdrop) without saving to DB.
+       Query: ?id=12345&type=tv  (or type=movie)
+    """
+    tmdb_id = request.args.get('id')
+    media_type = request.args.get('type', 'tv')  # 'tv' or 'movie'
+
+    if not tmdb_id:
+        return jsonify({"error": "Missing id parameter"}), 400
+
+    try:
+        from services.video_tagger import TMDB_API_KEY, TMDB_BASE_URL
+
+        # 1. Get main details + credits in one call
+        params = {
+            'api_key': TMDB_API_KEY,
+            'language': 'es-MX',
+            'append_to_response': 'credits'
+        }
+
+        endpoint = f"{TMDB_BASE_URL}/{media_type}/{tmdb_id}"
+        r = requests.get(endpoint, params=params, timeout=10)
+
+        if r.status_code != 200:
+            return jsonify({"error": "TMDB API error", "status": r.status_code}), 502
+
+        data = r.json()
+
+        # Extract cast (top 12)
+        credits = data.get('credits', {})
+        cast_raw = credits.get('cast', [])[:12]
+        cast = [{
+            'name': c.get('name', ''),
+            'character': c.get('character', ''),
+            'photo': f"https://image.tmdb.org/t/p/w185{c['profile_path']}" if c.get('profile_path') else None,
+            'order': c.get('order', 99)
+        } for c in cast_raw]
+
+        # Extract crew (director / creator)
+        crew_raw = credits.get('crew', [])
+        directors = [c['name'] for c in crew_raw if c.get('job') in ('Director', 'Creator')][:3]
+
+        # For TV shows, also grab creators from the main data
+        if media_type == 'tv':
+            creators = [c.get('name', '') for c in data.get('created_by', [])]
+            if creators and not directors:
+                directors = creators
+
+        # Extract backdrop
+        backdrop = f"https://image.tmdb.org/t/p/w1280{data['backdrop_path']}" if data.get('backdrop_path') else None
+
+        # Build response
+        title = data.get('title') or data.get('name', '')
+        overview = data.get('overview', '')
+        genres = [g['name'] for g in data.get('genres', [])]
+        year = (data.get('release_date') or data.get('first_air_date') or '')[:4]
+        vote = data.get('vote_average', 0)
+        seasons = data.get('number_of_seasons')
+        episodes = data.get('number_of_episodes')
+
+        return jsonify({
+            "ok": True,
+            "title": title,
+            "overview": overview,
+            "genres": genres,
+            "year": year,
+            "vote_average": round(vote, 1),
+            "backdrop": backdrop,
+            "cast": cast,
+            "directors": directors,
+            "seasons": seasons,
+            "episodes": episodes
+        })
+
+    except Exception as e:
+        print(f"Error fetching TMDB details: {e}")
+        return jsonify({"error": str(e)}), 500

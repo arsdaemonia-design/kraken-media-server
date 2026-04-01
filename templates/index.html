@@ -2250,7 +2250,7 @@
                     </div>
 
                     <!-- FILA 4: Ordenar + Vista -->
-                    <div class="px-3 pb-3 flex gap-2 items-center relative">
+                    <div id="mobile-controls-row" class="px-3 pb-3 flex gap-2 items-center relative">
                         <button onclick="toggleSortMenuMobile()"
                             class="filter-chip shrink-0 text-[9px] flex items-center gap-1">
                             <i class="fa-solid fa-arrow-down-wide-short"></i> Ordenar
@@ -2348,7 +2348,7 @@
                             </div>
                         </div>
 
-                        <div
+                        <div id="lib-zoom-controls"
                             class="flex items-center gap-2 bg-[#18181b] px-3 py-1.5 rounded-lg border border-emerald-700 shrink-0">
                             <i class="fa-solid fa-magnifying-glass text-[10px] text-emerald-400"></i>
                             <input type="range" min="0" max="2" value="0" class="w-12 accent-emerald-500"
@@ -2376,7 +2376,7 @@
                         </div>
                     </div>
 
-                    <div class="flex items-center gap-2 relative">
+                    <div id="desktop-actions-row" class="flex items-center gap-2 relative">
                         <button onclick="toggleSortMenuDesktop()" class="filter-chip shrink-0 flex items-center gap-1">
                             <i class="fa-solid fa-arrow-down-wide-short"></i> Ordenar
                         </button>
@@ -6099,13 +6099,19 @@
                             }
 
                             // Auto-avanzar al terminar
-                            art.on('ended', () => { playNext(); });
+                            art.on('ended', () => { stopProgressTracking(); playNext(); });
 
                             // Guardar referencia para cleanup
                             window.currentArtPlayer = art;
 
+                            // Start progress tracking heartbeat (every 10s)
+                            if (typeof startProgressTracking === 'function' && file.id) {
+                                startProgressTracking(file.id, art);
+                            }
+
                             // Cleanup al cerrar
                             window.cleanupVideo = () => {
+                                stopProgressTracking();
                                 if (window.currentArtPlayer) {
                                     fetch(`/api/hls/stop?sid=${data.session_id}`, { method: 'POST' }).catch(() => {});
                                     window.currentArtPlayer.destroy();
@@ -7580,7 +7586,17 @@
 
                 // Header adaptativo por modo (video vs audio)
                 const isVideoMode = currentLibrary === 'video';
-                ['tracks', 'albums', 'artists', 'playlists'].forEach(s => {
+                const modeLabelDesktop = document.getElementById('lib-mode-label-desktop');
+                const modeLabelMobile = document.getElementById('lib-mode-label-mobile');
+                const zoomControls = document.getElementById('lib-zoom-controls');
+                const desktopActionsRow = document.getElementById('desktop-actions-row');
+                const mobileControlsRow = document.getElementById('mobile-controls-row');
+                if (modeLabelDesktop) modeLabelDesktop.classList.toggle('hidden', isVideoMode);
+                if (modeLabelMobile) modeLabelMobile.classList.toggle('hidden', isVideoMode);
+                if (zoomControls) zoomControls.classList.toggle('hidden', isVideoMode);
+                if (desktopActionsRow) desktopActionsRow.classList.toggle('hidden', isVideoMode);
+                if (mobileControlsRow) mobileControlsRow.classList.toggle('hidden', isVideoMode);
+                ['all', 'tracks', 'albums', 'artists', 'playlists'].forEach(s => {
                     const d = document.getElementById('tab-search-dsktp-' + s);
                     const m = document.getElementById('tab-search-mob-' + s);
                     if (d) d.classList.toggle('hidden', isVideoMode);
@@ -7609,7 +7625,6 @@
                     }
 
                     mixesContainer.classList.add('hidden');
-
                     const mobileInput = document.getElementById('lib-search-mobile');
                     const desktopInput = document.getElementById('lib-search-desktop');
                     const searchValue = (mobileInput && mobileInput.value) || (desktopInput && desktopInput.value) || '';
@@ -7757,59 +7772,51 @@
                             return;
                         }
 
-                        // 5. HERO BANNER
+                        // Subir categorías/pills arriba del hero en video root
+                        container.innerHTML += toolbarHtml;
+
+                        // 5. HERO BANNER (Modular - hero_series.js)
                         const recentShows = [...uniqueShows].sort((a, b) => (b.date || 0) - (a.date || 0)).slice(0, 30);
                         const heroItem = recentShows[Math.floor(Math.random() * recentShows.length)];
 
-                        const heroSource = heroItem.sample ? heroItem.sample : heroItem;
-                        const heroCover = (heroSource.tmdb_poster 
-                            ? `/caratula/${encodeURIComponent(heroSource.tmdb_poster)}` 
-                            : `/caratula/${heroSource._normalizedPath.split('/').map(p => encodeURIComponent(p)).join('/')}`);
-                        const heroDate = heroSource.date ? new Date(heroSource.date * 1000).getFullYear() : '';
-
-                        let heroActionHtml = '';
-                        const isHeroMovieFolder = heroItem.folder_type === 'movie';
-                        if (heroItem.type === 'folder' && !isHeroMovieFolder) {
-                            heroActionHtml = `<button onclick="event.stopPropagation(); currentPath='${escapeStr(heroItem.path)}'; renderLib();" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-sm md:text-base py-3 md:py-4 px-8 md:px-10 rounded-full shadow-xl hover:scale-105 transition flex items-center justify-center gap-3"><i class="fa-solid fa-folder-open text-lg"></i> Explorar Temporadas</button>`;
-                        } else {
-                            heroActionHtml = `<button onclick="event.stopPropagation(); playNow('${escapeStr(heroItem.path)}')" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-sm md:text-base py-3 md:py-4 px-8 md:px-10 rounded-full shadow-xl hover:scale-105 transition flex items-center justify-center gap-3"><i class="fa-solid fa-play text-lg"></i> Reproducir</button>`;
-                        }
-
-                        const heroHeightClass = "h-[16vh] min-h-[140px] md:h-[22vh] md:min-h-[180px]";
-
-                        const heroClickAction = isHeroMovieFolder 
-                            ? `playNow('${escapeStr(heroItem.path)}')` 
-                            : (heroItem.type === 'folder' ? `currentPath='${escapeStr(heroItem.path)}'; renderLib();` : `playNow('${escapeStr(heroItem.path)}')`);
-                        
-                        container.innerHTML += `
-                            <div class="relative w-full ${heroHeightClass} rounded-2xl md:rounded-3xl overflow-hidden shadow-2xl group border border-white/5 flex-shrink-0 mb-4 cursor-pointer transition-all duration-300" onclick="${heroClickAction}">
+                        // Use the modular hero component (non-blocking .then pattern)
+                        if (typeof renderSeriesHero === 'function') {
+                            // Show instant fallback hero first, then upgrade async
+                            const heroSource = heroItem.sample ? heroItem.sample : heroItem;
+                            const heroCover = heroSource.tmdb_poster 
+                                ? `/caratula/${encodeURIComponent(heroSource.tmdb_poster)}` 
+                                : `/caratula/${(heroSource._normalizedPath || heroSource.path || '').split('/').map(p => encodeURIComponent(p)).join('/')}`;
+                            const isHeroMovie = heroItem.folder_type === 'movie';
+                            const heroClickAction = isHeroMovie 
+                                ? `playNow('${escapeStr(heroItem.path)}')` 
+                                : (heroItem.type === 'folder' ? `currentPath='${escapeStr(heroItem.path)}'; renderLib();` : `playNow('${escapeStr(heroItem.path)}')`);
+                            
+                            const heroPlaceholderId = 'hero-placeholder-' + Date.now();
+                            container.innerHTML += `<div id="${heroPlaceholderId}" class="relative w-full h-[16vh] min-h-[140px] md:h-[22vh] md:min-h-[180px] rounded-2xl md:rounded-3xl overflow-hidden shadow-2xl group border border-white/5 flex-shrink-0 mb-4 cursor-pointer transition-all duration-500" onclick="${heroClickAction}">
                                 <img src="${heroCover}" class="absolute inset-0 w-full h-full object-cover opacity-60 group-hover:opacity-75 group-hover:scale-105 transition duration-1000" onerror="this.style.display='none'">
                                 <div class="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/60 to-transparent"></div>
                                 <div class="absolute inset-0 bg-gradient-to-r from-[#0a0a0a]/90 via-[#0a0a0a]/40 to-transparent"></div>
-                                
-                                <div class="absolute bottom-0 left-0 p-6 md:p-12 z-10 w-full md:w-full lg:w-3/4 flex flex-col justify-end">
-                                    <div class="flex items-center gap-2 mb-2">
-                                        <div class="w-1 h-3 bg-emerald-500 rounded"></div>
-                                        <div class="text-[10px] md:text-xs font-black text-white tracking-[0.2em] drop-shadow-md shadow-black uppercase">${window.netflixActiveCategory} ${isHeroMovieFolder ? 'PELÍCULA' : 'DESTACADO'}</div>
-                                    </div>
-                                    <h2 class="text-3xl md:text-5xl lg:text-6xl font-black text-white leading-[1.1] drop-shadow-xl shadow-black mb-3 line-clamp-2 md:line-clamp-3">${heroItem.name || heroItem.title}</h2>
-                                    
-                                    <div class="flex flex-wrap items-center gap-3 text-xs md:text-sm text-zinc-300 font-bold mb-4">
-                                        <span class="bg-emerald-900/40 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded backdrop-blur-sm shadow">${window.netflixActiveCategory}</span>
-                                        ${heroSource.rating === 1 ? '<i class="fa-solid fa-heart text-emerald-500 drop-shadow"></i>' : ''}
-                                        ${heroDate ? `<span class="opacity-80">${heroDate}</span>` : ''}
-                                        ${heroSource.genre ? `<span class="opacity-60 hidden sm:inline">•</span><span class="opacity-80 hidden sm:inline text-white">${heroSource.genre}</span>` : ''}
-                                    </div>
-                                    
-                                    <div class="flex flex-wrap gap-3 md:gap-4 mt-2">
-                                        ${heroActionHtml}
-                                    </div>
-</div>
-</div>
-`;
-
-                        // Agregar barra de herramientas DESPUÉS del hero
-                        container.innerHTML += toolbarHtml;
+                                <div class="absolute bottom-0 left-0 p-6 md:p-12 z-10">
+                                    <div class="flex items-center gap-2 mb-2"><div class="w-1 h-3 bg-emerald-500 rounded"></div><div class="text-[10px] md:text-xs font-black text-white tracking-[0.2em] uppercase">${window.netflixActiveCategory} ${isHeroMovie ? 'PEL\u00cdCULA' : 'DESTACADO'}</div></div>
+                                    <h2 class="text-3xl md:text-5xl lg:text-6xl font-black text-white leading-[1.1] drop-shadow-xl mb-3 line-clamp-2">${heroItem.name || heroItem.title}</h2>
+                                </div>
+                            </div>`;
+                            
+                            // Async upgrade: replace placeholder with rich hero (cast, synopsis, etc.)
+                            renderSeriesHero(heroItem, window.netflixActiveCategory).then(richHtml => {
+                                const placeholder = document.getElementById(heroPlaceholderId);
+                                if (placeholder && richHtml) {
+                                    const wrapper = document.createElement('div');
+                                    wrapper.innerHTML = richHtml;
+                                    const richEl = wrapper.firstElementChild;
+                                    if (richEl) {
+                                        richEl.style.opacity = '0';
+                                        placeholder.replaceWith(richEl);
+                                        requestAnimationFrame(() => { richEl.style.transition = 'opacity 0.5s'; richEl.style.opacity = '1'; });
+                                    }
+                                }
+                            }).catch(e => console.warn('[HERO] Async upgrade failed:', e));
+                        }
 
                         // 6. EXTRAER GÉNEROS DISPONIBLES PARA FILTROS
                         const allGenres = new Set();
@@ -7979,17 +7986,12 @@
                     // 2. BARRA DE NAVEGACIÓN Y BOTÓN "SUBIR"
                     if (currentPath !== "") {
                         const parts = currentPath.split('/').filter(p => p);
-                        let breadcrumbHtml = `<span class="opacity-50 cursor-pointer hover:text-white" onclick="navigateRoot()">Inicio</span>`;
-                        let accumPath = "";
-                        parts.forEach(p => {
-                            accumPath += p + "/";
-                            breadcrumbHtml += ` <i class="fa-solid fa-chevron-right text-[10px] mx-1 opacity-30"></i> <span class="cursor-pointer hover:text-emerald-400" onclick="currentPath='${accumPath}'; renderLib();">${p}</span>`;
-                        });
+                        const simpleTitle = parts[parts.length - 1] || "Mis Series y Videos";
 
                         const titleDesktop = document.getElementById('lib-title-desktop');
                         const titleMobile = document.getElementById('lib-title-mobile');
-                        if (titleDesktop) titleDesktop.innerHTML = breadcrumbHtml;
-                        if (titleMobile) titleMobile.innerHTML = breadcrumbHtml;
+                        if (titleDesktop) titleDesktop.innerText = simpleTitle;
+                        if (titleMobile) titleMobile.innerText = simpleTitle;
 
                         // BOTÓN SUBIR ADAPTATIVO (video siempre usa barra compacta)
                         if (shouldForceVideoList) {
@@ -8069,6 +8071,16 @@
                       const heroCover = heroSource.tmdb_poster 
                         ? `/caratula/${encodeURIComponent(heroSource.tmdb_poster)}`
                         : `/caratula/${heroSource.path.split('/').map(p => encodeURIComponent(p)).join('/')}`;
+                      const detailHeroItem = {
+                        type: 'folder',
+                        name: heroSource.tmdb_title || showTitle,
+                        title: heroSource.tmdb_title || showTitle,
+                        path: baseShowPath,
+                        sample: heroSource,
+                        folder_type: heroSource.folder_type,
+                        tmdb_id: heroSource.tmdb_id,
+                        tmdb_poster: heroSource.tmdb_poster
+                      };
 
                             const seasonSet = new Set();
                             showFiles.forEach(f => {
@@ -8097,30 +8109,57 @@
                                 </div>
                             ` : '';
 
-                            container.innerHTML += `
-                                <div class="col-span-full relative w-full h-[14vh] min-h-[100px] md:h-[18vh] md:min-h-[140px] rounded-2xl overflow-hidden border border-white/10 mb-3">
+                            if (typeof renderSeriesHero === 'function') {
+                                const detailHeroPlaceholderId = 'detail-hero-' + Date.now();
+                                container.innerHTML += `<div id="${detailHeroPlaceholderId}" class="col-span-full relative w-full h-[14vh] min-h-[100px] md:h-[18vh] md:min-h-[140px] rounded-2xl overflow-hidden border border-white/10 mb-3">
                                     <img src="${heroCover}" class="absolute inset-0 w-full h-full object-cover opacity-65" onerror="this.style.display='none'">
                                     <div class="absolute inset-0 bg-gradient-to-r from-[#0a0a0a]/95 via-[#0a0a0a]/65 to-transparent"></div>
                                     <div class="absolute inset-0 bg-gradient-to-t from-[#0a0a0a]/95 to-transparent"></div>
-
                                     <div class="relative z-10 h-full p-4 md:p-6 flex flex-col justify-end">
                                         <div class="flex items-center gap-2 mb-2">
                                             <div class="w-1 h-3 bg-emerald-500 rounded"></div>
                                             <span class="text-[10px] md:text-xs font-black tracking-[0.2em] text-white/90 uppercase">${escapeHtml(categoryName)} · TEMPORADAS</span>
                                         </div>
                                         <h2 class="text-2xl md:text-4xl font-black text-white leading-tight line-clamp-2 mb-3">${escapeHtml(showTitle)}</h2>
-                                        <div class="flex flex-wrap items-center gap-3">
-                                            <button onclick="currentPath='${escapeStr(baseShowPath)}'; currentFolderView=null; renderLib();" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-xs md:text-sm py-2.5 px-5 rounded-full transition flex items-center gap-2">
-                                                <i class="fa-solid fa-folder-open"></i> Explorar Temporadas
-                                            </button>
-                                            ${seasonSelect}
+                                    </div>
+                                </div>`;
+
+                                renderSeriesHero(detailHeroItem, categoryName, { showCastInHero: false, fullInfo: true, showInfoButton: false }).then(richHtml => {
+                                    const ph = document.getElementById(detailHeroPlaceholderId);
+                                    if (!ph || !richHtml) return;
+                                    const wrap = document.createElement('div');
+                                    wrap.innerHTML = richHtml;
+                                    const richEl = wrap.firstElementChild;
+                                    if (!richEl) return;
+                                    richEl.classList.add('col-span-full');
+                                    ph.replaceWith(richEl);
+                                }).catch(e => console.warn('[DETAIL HERO] render failed:', e));
+
+                            } else {
+                                container.innerHTML += `
+                                    <div class="col-span-full relative w-full h-[14vh] min-h-[100px] md:h-[18vh] md:min-h-[140px] rounded-2xl overflow-hidden border border-white/10 mb-3">
+                                        <img src="${heroCover}" class="absolute inset-0 w-full h-full object-cover opacity-65" onerror="this.style.display='none'">
+                                        <div class="absolute inset-0 bg-gradient-to-r from-[#0a0a0a]/95 via-[#0a0a0a]/65 to-transparent"></div>
+                                        <div class="absolute inset-0 bg-gradient-to-t from-[#0a0a0a]/95 to-transparent"></div>
+                                        <div class="relative z-10 h-full p-4 md:p-6 flex flex-col justify-end">
+                                            <div class="flex items-center gap-2 mb-2">
+                                                <div class="w-1 h-3 bg-emerald-500 rounded"></div>
+                                                <span class="text-[10px] md:text-xs font-black tracking-[0.2em] text-white/90 uppercase">${escapeHtml(categoryName)} · TEMPORADAS</span>
+                                            </div>
+                                            <h2 class="text-2xl md:text-4xl font-black text-white leading-tight line-clamp-2 mb-3">${escapeHtml(showTitle)}</h2>
                                         </div>
                                     </div>
-                                </div>
-                                
-                                <!-- Barra de herramientas para temporada -->
-                                <div class="w-full flex items-center justify-end gap-2 px-2 md:px-0 mt-4 mb-4 overflow-x-auto no-scrollbar">
-                                    <!-- Botones Select/Todos -->
+                                `;
+                            }
+
+                            container.innerHTML += `
+                                <div class="w-full flex items-center justify-between gap-2 px-2 md:px-0 mt-1 mb-4 overflow-x-auto no-scrollbar">
+                                    <div class="flex items-center gap-3">
+                                        <button onclick="currentPath='${escapeStr(baseShowPath)}'; currentFolderView=null; renderLib();" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-xs md:text-sm py-2.5 px-5 rounded-full transition flex items-center gap-2">
+                                            <i class="fa-solid fa-folder-open"></i> Explorar Temporadas
+                                        </button>
+                                        ${seasonSelect}
+                                    </div>
                                     <div class="flex gap-2 shrink-0">
                                         <button onclick="toggleSelectionMode()" class="px-3 py-1.5 rounded-full text-xs font-bold bg-white/10 text-white/70 hover:bg-white/20 border border-white/10 transition">
                                             <i class="fa-regular fa-square-check"></i>
@@ -8130,7 +8169,6 @@
                                         </button>
                                     </div>
                                 </div>
-                                
                                 `;
                         }
                     }
@@ -8305,9 +8343,53 @@ function getCoverUrl(f) {
   return `/caratula/${sourcePath.split('/').map(p => encodeURIComponent(p)).join('/')}`;
 }
 
+function showVideoInfoFromCard(path) {
+  try {
+    if (currentLibrary !== 'video' || typeof openHeroInfoForItem !== 'function') return;
+    let infoHost = document.getElementById('video-info-inline-host');
+    if (!infoHost) {
+      const container = document.getElementById('lib-container');
+      if (container) {
+        container.insertAdjacentHTML('afterbegin', '<div id="video-info-inline-host" class="hidden w-full mb-4"></div>');
+        infoHost = document.getElementById('video-info-inline-host');
+      }
+    }
+    if (typeof setVideoInfoHost === 'function') setVideoInfoHost('video-info-inline-host');
+
+    const normalized = (path || '').replace(/\\/g, '/');
+    const files = (libData && Array.isArray(libData.files)) ? libData.files : [];
+    let sample = files.find(f => (f.path || '').replace(/\\/g, '/') === normalized);
+
+    // Si es carpeta, buscamos un archivo dentro de esa ruta para extraer tmdb/metadata.
+    if (!sample) {
+      const folderPrefix = normalized.endsWith('/') ? normalized : (normalized + '/');
+      sample = files.find(f => (f.path || '').replace(/\\/g, '/').startsWith(folderPrefix));
+    }
+
+    if (!sample) return;
+
+    const heroItem = {
+      type: sample.type === 'video' ? 'video' : 'folder',
+      name: sample.tmdb_title || sample.clean_title || sample.title,
+      title: sample.tmdb_title || sample.clean_title || sample.title,
+      path: normalized,
+      sample: sample,
+      folder_type: sample.folder_type,
+      tmdb_id: sample.tmdb_id,
+      tmdb_poster: sample.tmdb_poster
+    };
+
+    openHeroInfoForItem(heroItem).catch(() => {});
+  } catch (e) {
+    console.warn('[VIDEO] showVideoInfoFromCard failed:', e);
+  }
+}
+
 function createCard(f) {
   const safePath = escapeStr(f.path);
   const coverUrl = getCoverUrl(f);
+                const source = f.sample ? f.sample : f;
+                const isMovieFolder = f.folder_type === 'movie';
                 const isSel = selectedFiles.has(f.path) ? 'ring-2 ring-emerald-500 bg-emerald-900/20' : 'bg-[#121212]';
 
                 // ⭐ INDICADOR DE FAVORITO (Corazón en la esquina)
@@ -8317,7 +8399,8 @@ function createCard(f) {
             <i class="fa-solid fa-heart text-emerald-400 text-xs drop-shadow-[0_0_6px_rgba(16,185,129,0.9)]"></i>
         </div>` : '';
 
-                const genreTag = f.genre ? `<span class="text-[9px] text-emerald-500 bg-emerald-900/20 px-1.5 rounded">${f.genre}</span>` : '';
+                const genreValue = (source.genre_lang || source.genre || f.genre_lang || f.genre || '').split(',')[0].trim();
+                const genreTag = genreValue ? `<span class="text-[9px] text-emerald-500 bg-emerald-900/20 px-1.5 rounded">${escapeHtml(genreValue)}</span>` : '';
                 const inPlaylistIcon = f.playlists && f.playlists.length > 0 ? `<i class="fa-solid fa-check-circle text-[9px] text-emerald-400 ml-1 opacity-80" title="En playlist"></i>` : '';
 
                 let pName = null;
@@ -8371,6 +8454,8 @@ function createCard(f) {
         <i class="fa-solid fa-tower-broadcast text-[10px]"></i>
     </button>`;
 
+                const videoInfoCta = '';
+
                 const editBtn = `<button 
         onclick="event.stopPropagation(); abrirEditorMasivo(this.dataset.path)" 
         data-path="${escapeHtml(f.path)}"
@@ -8393,17 +8478,22 @@ function createCard(f) {
     <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition flex flex-col gap-1 z-[200]">
         ${favBtn}
         ${queueBtn}
-        ${radioBtn}
+        ${currentLibrary === 'video' ? '' : radioBtn}
         ${editBtn}
         ${menuBtn}
     </div>`;
 
                 // Lógica para movie vs series: movie_folder = 1 click, series_folder = navegar
-                const isMovieFolder = f.folder_type === 'movie';
                 const clickAction = isMovieFolder 
                     ? `playNow('${escapeStr(f.path)}')` 
                     : (f.type === 'folder' ? `currentPath='${escapeStr(f.path)}'; renderLib();` : `playNow(this.dataset.path)`);
                 const folderIcon = isMovieFolder ? 'fa-play ml-1' : 'fa-folder-open';
+                const movieDetailPath = ((f.path || '').replace(/\\/g, '/').split('/').slice(0, 3).join('/') + '/');
+                const movieInfoHoverBtn = (currentLibrary === 'video' && isMovieFolder) ? `
+                <button onclick="event.stopPropagation(); currentPath='${escapeStr(movieDetailPath)}'; renderLib();"
+                        class="px-3 py-1.5 rounded-full bg-white/15 hover:bg-white/25 border border-white/25 text-white text-[11px] font-bold transition-all duration-200 mb-1">
+                    <i class="fa-solid fa-circle-info mr-1"></i> Más información
+                </button>` : '';
                 
                 return `
     <div class="${isSel} p-3 rounded-xl hover:bg-[#1e1e1e] transition duration-300 group cursor-pointer relative shadow-lg border border-white/5 hover:border-white/10" 
@@ -8418,13 +8508,14 @@ function createCard(f) {
             <div class="absolute inset-0 hidden items-center justify-center bg-emerald-800 z-0"><i class="fa-solid ${f.type === 'video' ? 'fa-film' : (f.type === 'folder' ? 'fa-folder' : 'fa-music')} text-4xl text-white/50"></i></div>
             
             <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center backdrop-blur-[2px] z-20 gap-2">
-                ${selectionMode ? '<i class="fa-regular fa-square-check text-4xl text-white"></i>' : `<div class="w-10 h-10 bg-emerald-500 text-black rounded-full flex items-center justify-center shadow-xl hover:scale-110 transition"><i class="fa-solid ${folderIcon}"></i></div>`}
+                ${selectionMode ? '<i class="fa-regular fa-square-check text-4xl text-white"></i>' : `${movieInfoHoverBtn}<div class="w-10 h-10 bg-emerald-500 text-black rounded-full flex items-center justify-center shadow-xl hover:scale-110 transition"><i class="fa-solid ${folderIcon}"></i></div>`}
             </div>
         </div>
         
         <h3 class="font-bold text-white truncate text-xs mb-0.5 leading-tight flex items-center gap-1">
             ${escapeHtml(f.clean_title || f.tmdb_title || (f.title || '').replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim())} ${inPlaylistIcon}
         </h3>
+        ${videoInfoCta}
         
         <div class="flex justify-between items-center">
     <button onclick="event.stopPropagation(); verArtista(this.dataset.artist)" 
@@ -12100,6 +12191,7 @@ checkForUpdates();
         <!-- ArtPlayer + HLS.js for video streaming -->
         <script src="/assets/hls.min.js"></script>
         <script src="/assets/artplayer.js"></script>
+        <script src="/assets/js/hero_series.js"></script>
 
         <!-- Console Toggle Bar -->
         <div id="console-bar" onclick="toggleConsole()" 
