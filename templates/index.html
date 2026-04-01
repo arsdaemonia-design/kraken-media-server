@@ -2909,17 +2909,13 @@
                 localStorage.setItem('kraken_sid', MY_SESSION_ID);
             }
 
-            let MY_NAME = localStorage.getItem('kraken_user');
-
-            // ⛔ BUCLE DE SEGURIDAD: Mientras no escriba nada, se lo vuelve a pedir
-            while (!MY_NAME || MY_NAME.trim() === "" || MY_NAME === "null") {
-                MY_NAME = prompt(`👾 KRAKEN OS\n\n⚠️ ACCESO DENEGADO ⚠️\n\nNecesitas un nombre para entrar.\n¿Quién eres?`);
-
-                // Si le da "Cancelar", prompt devuelve null, así que el bucle se repite.
+            // Identidad del usuario (ahora manejada por el sistema JWT en kraken-auth-screen)
+            let MY_NAME = localStorage.getItem('kraken_user') || '';
+            const savedUser = window.krakenAuth ? window.krakenAuth.getUser() : {};
+            if (savedUser.username) {
+                MY_NAME = savedUser.username;
+                localStorage.setItem('kraken_user', MY_NAME);
             }
-
-            // Si llegó aquí, es porque ya puso un nombre válido
-            localStorage.setItem('kraken_user', MY_NAME);
 
             let IS_SPEAKER = localStorage.getItem('kraken_is_speaker') !== 'false';
             // ====================================================================

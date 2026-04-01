@@ -1541,7 +1541,6 @@ def status():
     
     # Retornamos flag global para forzar al frontend de ESTE cliente a registrarse
     if session_id and session_id in ACTIVE_USERS:
-        response['require_registration'] = ACTIVE_USERS[session_id].get('needs_registration', False)
         response['my_email'] = db_email
     
     # CHEQUEO DE BUZÃ“N (CONTROL REMOTO)
