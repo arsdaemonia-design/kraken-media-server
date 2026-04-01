@@ -77,18 +77,54 @@ def _find_external_subtitles(full_video_path):
 
 @hls_bp.route('/api/hls/play')
 def play_hls():
-    video_path = request.args.get('file')
+    import sqlite3
+    import time as _time
+
+    media_id = request.args.get('id')
+    token = request.args.get('token')
+    video_path = request.args.get('file')  # Fallback legacy
     session_id = request.args.get('sid')
     audio_track_raw = request.args.get('audio_track')
-    
-    if not video_path or not session_id:
-        return jsonify({"error": "Missing file or session_id"}), 400
-    
+
+    if not session_id:
+        return jsonify({"error": "Missing session_id"}), 400
+
+    # --- Nueva ruta: por ID + Token (Plex-style) ---
+    if media_id and token:
+        token_data = state.STREAM_TOKENS.get(token)
+        if not token_data:
+            return jsonify({"error": "Token inválido o expirado"}), 403
+        if str(token_data.get('id')) != str(media_id):
+            return jsonify({"error": "Token no corresponde al media solicitado"}), 403
+        if _time.time() > token_data.get('expires', 0):
+            del state.STREAM_TOKENS[token]
+            return jsonify({"error": "Token expirado"}), 403
+
+        # Buscar ruta real en la DB
+        try:
+            conn = sqlite3.connect(os.path.join(config.DOWNLOAD_FOLDER, 'kraken.db'))
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            c.execute("SELECT rel_path FROM media WHERE id = ?", (media_id,))
+            row = c.fetchone()
+            conn.close()
+            if not row:
+                return jsonify({"error": f"ID {media_id} no encontrado en DB"}), 404
+            video_path = row['rel_path']
+        except Exception as e:
+            return jsonify({"error": f"DB error: {str(e)}"}), 500
+
+    # --- Fallback legacy: por file path ---
+    elif video_path:
+        pass  # Se usa video_path tal cual
+    else:
+        return jsonify({"error": "Missing id+token or file parameter"}), 400
+
     video_path = video_path.lstrip('/\\')
-    
+
     # Construir la ruta completa al video
     full_video_path = os.path.join(config.DOWNLOAD_FOLDER, video_path)
-    
+
     if not os.path.exists(full_video_path):
         return jsonify({"error": f"File not found: {full_video_path}"}), 404
     

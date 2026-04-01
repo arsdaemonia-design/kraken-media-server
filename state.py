@@ -13,6 +13,7 @@ RESCAN_IN_PROGRESS = False
 ACTIVE_USERS = {} 
 PENDING_COMMANDS = {}
 HLS_SESSIONS = {}
+STREAM_TOKENS = {}
 USERS_LOCK = threading.Lock()
 
 def cleanup_inactive_users():

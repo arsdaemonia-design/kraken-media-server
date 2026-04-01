@@ -387,6 +387,7 @@ def generar_biblioteca_viva(owner_email='public'):
     for row in rows:
         # Reconstruir el diccionario que el cliente espera
         f = {
+            'id': row['id'],
             'path': row['rel_path'],
             'filename': row['filename'],
             'folder': row['folder'],

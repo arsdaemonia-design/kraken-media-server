@@ -2385,3 +2385,22 @@ def check_update():
         print(f"Error check_update: {e}")
         return jsonify({'has_update': False, 'error': str(e)})
 
+@api_bp.route('/api/stream/token', methods=['POST'])
+def generate_stream_token():
+    data = request.get_json() or {}
+    media_id = data.get('id')
+    
+    if not media_id:
+        return jsonify({"error": "Missing id parameter"}), 400
+        
+    import uuid
+    import time
+    
+    token = str(uuid.uuid4())
+    state.STREAM_TOKENS[token] = {
+        'id': media_id,
+        'expires': time.time() + (4 * 3600)  # Expira en 4 horas
+    }
+    
+    return jsonify({'token': token, 'id': media_id})
+

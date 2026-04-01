@@ -4834,7 +4834,7 @@
 
 
 
-            function playVideoMode(file) {
+            async function playVideoMode(file) {
                 // Ocultar sidebar
                 const sb = document.getElementById('main-sidebar');
                 if (sb) sb.classList.add('hidden');
@@ -4885,7 +4885,23 @@
                     `;
                 }
 
-                // Llamar API HLS
+                // Obtener Security Token para streaming por ID (Plex-style)
+                const tokenRes = await fetch('/api/stream/token', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({id: file.id})
+                });
+                const tokenData = await tokenRes.json();
+                
+                if (!tokenData.token) {
+                    showToast("Error de Token: " + (tokenData.error || "No autorizado"), "error");
+                    if (loader) { loader.classList.add('opacity-0'); setTimeout(() => loader.classList.add('hidden'), 300); }
+                    return;
+                }
+                const mediaId = tokenData.id;
+                const streamToken = tokenData.token;
+
+                // Llamar API HLS con ID + Token
                 const videoPath = file.path.split('/').map(p => encodeURIComponent(p)).join('/');
                 
                 // Verificar si ArtPlayer está disponible
@@ -4895,11 +4911,11 @@
                 if (typeof Artplayer === 'undefined') {
                     console.error("ArtPlayer NO CARGADO - usando fallback");
                     showToast("ArtPlayer no cargado, usando reproductor nativo", "error");
-                    showFallbackPlayer(screen, videoPath);
+                    showFallbackPlayer(screen, `/descargas/${videoPath}`);
                     return;
                 }
                 
-                fetch(`/api/hls/play?file=${videoPath}&sid=${sid}`)
+                fetch(`/api/hls/play?id=${mediaId}&token=${streamToken}&sid=${sid}`)
                     .then(r => r.json())
                     .then(data => {
                         console.log("HLS API response:", data);
