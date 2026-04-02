@@ -10,12 +10,41 @@
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#10b981">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<script>window.APP_VERSION="4.86"; window.OFFLINE_VERSION="4.86"; window.OFFLINE_LIMIT=500; window.GITHUB_REPO="arsdaemonia-design/kraken-media-server";</script>
+<script>window.APP_VERSION="4.87"; window.OFFLINE_VERSION="4.87"; window.OFFLINE_LIMIT=500; window.GITHUB_REPO="arsdaemonia-design/kraken-media-server";</script>
 <script src="/assets/tailwind.min.js"></script>
 <script src="/assets/html2canvas.min.js"></script>
     <!-- Chromecast SDK & Plugin -->
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <script src="https://unpkg.com/artplayer-plugin-chromecast/dist/artplayer-plugin-chromecast.js"></script>
+    <script>
+        window.__krakenCastReady = false;
+
+        function initKrakenCastContext() {
+            try {
+                if (!(window.cast && window.cast.framework && window.chrome && window.chrome.cast)) {
+                    return false;
+                }
+                const castContext = window.cast.framework.CastContext.getInstance();
+                castContext.setOptions({
+                    receiverApplicationId: window.chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+                    autoJoinPolicy: window.chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED
+                });
+                window.__krakenCastReady = true;
+                return true;
+            } catch (e) {
+                console.warn('[CAST] init failed:', e);
+                return false;
+            }
+        }
+
+        window.__onGCastApiAvailable = function(isAvailable) {
+            if (!isAvailable) {
+                console.warn('[CAST] Google Cast API not available in this browser/device');
+                return;
+            }
+            initKrakenCastContext();
+        };
+    </script>
     <script>
         tailwind.config = {
             theme: {
@@ -5623,7 +5652,7 @@
                 if (typeof Artplayer === 'undefined') {
                     console.error("ArtPlayer NO CARGADO - usando fallback");
                     showToast("ArtPlayer no cargado, usando reproductor nativo", "error");
-                    showFallbackPlayer(screen, `/descargas/${videoPath}`);
+                    showFallbackPlayer(screen, `/descargas/${videoPath}`, file);
                     return;
                 }
                 
@@ -5639,7 +5668,7 @@
                                 setTimeout(() => loader.classList.add('hidden'), 300);
                             }
                             // Fallback al reproductor nativo
-                            showFallbackPlayer(screen, videoPath);
+                            showFallbackPlayer(screen, videoPath, file);
                             return;
                         }
 
@@ -5778,6 +5807,11 @@
                                 }
                             }
 
+                            const castSupported = !!(
+                                window.__krakenCastReady &&
+                                typeof artplayerPluginChromecast === 'function'
+                            );
+
                             let art = null;
                             const artSettings = [audioSettingBase, subtitleSettingBase];
                             let artConfig = {
@@ -5793,11 +5827,14 @@
                                 playbackRate: true,
                                 screenshot: false,
                                 airplay: true,
-                                plugins: [
+                                plugins: castSupported ? [
                                     artplayerPluginChromecast({
                                         mimeType: data.direct_play ? 'video/mp4' : 'application/x-mpegURL',
+                                        receiverApplicationId: (window.chrome && window.chrome.cast && window.chrome.cast.media)
+                                            ? window.chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID
+                                            : undefined
                                     }),
-                                ],
+                                ] : [],
                                 mobile: {
                                     // Gestos táctiles nativos de ArtPlayer
                                     gestureType: 'lrud'
@@ -5848,6 +5885,9 @@
                                     }
                                 ]
                             };
+                            if (!castSupported) {
+                                console.warn('[CAST] disabled in current environment (SDK/plugin not ready)');
+                            }
                             
                             // Si hay subtítulo detectado, cargarlo
                             if (data.subtitle_url) {
@@ -6122,14 +6162,14 @@
                     })
                     .catch(err => {
                         console.error("Error con HLS:", err);
-                        showFallbackPlayer(screen, videoPath);
+                        showFallbackPlayer(screen, videoPath, file);
                     });
 
                 updateQueueUI();
             }
 
             // Fallback directo sin HLS
-            function showFallbackPlayer(screen, videoPath) {
+            function showFallbackPlayer(screen, videoPath, file) {
                 if (screen) {
                     screen.innerHTML = `
                         <video id="main-video"
@@ -6141,11 +6181,11 @@
                                style="object-fit: contain; max-width: 100vw; max-height: 100vh;">
                         </video>`;
                 }
-                fallbackVideoSetup();
+                fallbackVideoSetup(file);
             }
 
             // Función de fallback para cuando HLS falla
-            function fallbackVideoSetup() {
+            function fallbackVideoSetup(file) {
                 
                 // Asegurar que la UI nativa se muestre si caemos en el fallback
                 document.querySelectorAll('.cine-controls, .cine-header, #dt-left, #dt-right, #dt-center').forEach(el => {
@@ -6154,6 +6194,11 @@
 
                 const videoEl = document.getElementById('main-video');
                 if (videoEl) {
+                    // Start progress tracking in fallback mode too (same heartbeat every 10s)
+                    if (typeof startProgressTracking === 'function' && file && file.id) {
+                        startProgressTracking(file.id, videoEl);
+                    }
+
                     const loader = document.getElementById('video-loader');
                     const pbPlayed = document.getElementById('video-played-bar');
                     const pbBuffered = document.getElementById('video-buffered-bar');
@@ -6190,7 +6235,7 @@
                         }
                     });
                     videoEl.addEventListener('timeupdate', updateVideoProgress);
-                    videoEl.onended = () => { playNext(); };
+                    videoEl.onended = () => { stopProgressTracking(); playNext(); };
                     videoEl.volume = parseFloat(localStorage.getItem('vortex_vol') || '1');
                     if (window.innerWidth < 768) {
                         document.body.style.overflow = 'hidden';
@@ -6542,6 +6587,9 @@
                 // Cleanup HLS session si existe
                 if (typeof window.cleanupVideo === 'function') {
                     window.cleanupVideo();
+                }
+                if (typeof stopProgressTracking === 'function') {
+                    stopProgressTracking();
                 }
 
                 
@@ -12125,17 +12173,32 @@ async function checkForUpdates() {
       }
     }
     
-    const res = await fetch('/api/check_update');
+    const currentVersionRaw = typeof APP_VERSION !== 'undefined' ? APP_VERSION : '0.0';
+    const res = await fetch(`/api/check_update?current_version=${encodeURIComponent(currentVersionRaw)}`);
     const data = await res.json();
     
     if (data.has_update) {
-      const currentVersionRaw = typeof APP_VERSION !== 'undefined' ? APP_VERSION : '0.0';
       const newVersionRaw = data.version;
       
-      // Normalizar versiones: quitar 'v' o 'V' inicial, espacios, y comparar
+      // Normalizar y comparar versiones numericamente (4.10 > 4.9)
       const normalizeVersion = (v) => {
-        if (!v) return '0.0';
+        if (!v) return '0.0.0';
         return v.toString().toLowerCase().replace(/^v\s*/, '').trim();
+      };
+      const toTuple = (v) => {
+        const parts = normalizeVersion(v).match(/\d+/g) || [];
+        const nums = parts.slice(0, 3).map(n => parseInt(n, 10));
+        while (nums.length < 3) nums.push(0);
+        return nums;
+      };
+      const compareVersion = (a, b) => {
+        const av = toTuple(a);
+        const bv = toTuple(b);
+        for (let i = 0; i < 3; i++) {
+          if (av[i] > bv[i]) return 1;
+          if (av[i] < bv[i]) return -1;
+        }
+        return 0;
       };
       
       const currentVersion = normalizeVersion(currentVersionRaw);
@@ -12143,8 +12206,8 @@ async function checkForUpdates() {
       
       console.log(`Version check: local=${currentVersionRaw}→${currentVersion}, remote=${newVersionRaw}→${newVersion}`);
       
-      // Solo mostrar si es versión diferente
-      if (newVersion !== currentVersion) {
+      // Solo mostrar si la remota es estrictamente mayor
+      if (compareVersion(newVersion, currentVersion) > 0) {
         // Crear banner de actualización
         const banner = document.createElement('div');
         banner.id = 'update-banner';

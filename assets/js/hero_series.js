@@ -42,7 +42,7 @@
         if (tmdbId) {
             const [tmdbRes, progressRes] = await Promise.allSettled([
                 fetchTmdbDetails(tmdbId, mediaType),
-                !isMovie ? fetchSeriesResume(tmdbId) : Promise.resolve(null)
+                fetchSeriesResume(tmdbId)
             ]);
             tmdbData = tmdbRes.status === 'fulfilled' ? tmdbRes.value : null;
             resumeData = progressRes.status === 'fulfilled' ? progressRes.value : null;
@@ -178,24 +178,33 @@
     }
 
     function buildActionButton(heroItem, isMovie, resumeData) {
-        if (isMovie) {
-            return `<button onclick="event.stopPropagation(); playNow('${escapeStr(heroItem.path)}')" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-sm md:text-base py-2.5 md:py-3 px-7 md:px-10 rounded-full shadow-xl hover:scale-105 transition flex items-center justify-center gap-2">
-                <i class="fa-solid fa-play"></i> Reproducir
-            </button>`;
-        }
-
         if (resumeData && resumeData.has_progress && resumeData.resume_episode) {
             const ep = resumeData.resume_episode;
-            const epPath = ep.path;
-            const label = extractEpisodeLabel(epPath) || 'Continuar';
+            const epPath = ep.path || heroItem.path;
+            const label = isMovie
+                ? 'viendo'
+                : (extractEpisodeLabel(epPath) || 'Continuar');
             const progressPct = ep.duration_seconds > 0
                 ? Math.round((ep.progress_seconds / ep.duration_seconds) * 100)
                 : 0;
+            const hasRealMovieProgress = isMovie && ep.progress_seconds > 0 && !ep.is_finished;
+
+            if (isMovie && !hasRealMovieProgress) {
+                return `<button onclick="event.stopPropagation(); playNow('${escapeStr(heroItem.path)}')" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-sm md:text-base py-2.5 md:py-3 px-7 md:px-10 rounded-full shadow-xl hover:scale-105 transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-play"></i> Reproducir
+                </button>`;
+            }
 
             return `<button onclick="event.stopPropagation(); playNow('${escapeStr(epPath)}')" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-sm md:text-base py-2.5 md:py-3 px-7 md:px-10 rounded-full shadow-xl hover:scale-105 transition flex items-center justify-center gap-2 relative overflow-hidden">
                 <div class="absolute bottom-0 left-0 h-[3px] bg-emerald-500 transition-all" style="width:${progressPct}%"></div>
-                <i class="fa-solid fa-play"></i> Continuar ${escapeHtml(label)}
-                ${resumeData.watched_count > 0 ? `<span class="text-[10px] opacity-60 ml-1">(${resumeData.watched_count}/${resumeData.total_episodes})</span>` : ''}
+                <i class="fa-solid fa-play"></i> ${isMovie ? 'Continuar' : 'Continuar ' + escapeHtml(label)}
+                ${(!isMovie && resumeData.watched_count > 0) ? `<span class="text-[10px] opacity-60 ml-1">(${resumeData.watched_count}/${resumeData.total_episodes})</span>` : ''}
+            </button>`;
+        }
+
+        if (isMovie) {
+            return `<button onclick="event.stopPropagation(); playNow('${escapeStr(heroItem.path)}')" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-sm md:text-base py-2.5 md:py-3 px-7 md:px-10 rounded-full shadow-xl hover:scale-105 transition flex items-center justify-center gap-2">
+                <i class="fa-solid fa-play"></i> Reproducir
             </button>`;
         }
 

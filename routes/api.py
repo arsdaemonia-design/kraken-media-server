@@ -2383,9 +2383,19 @@ def check_update():
     try:
         import config
         import requests
+        import re
+
+        def parse_version(raw):
+            """Parse versions like v4.87, 4.87-beta, 4.87.1 into comparable tuple."""
+            value = str(raw or '').strip().lower()
+            value = re.sub(r'^[v\s]+', '', value)
+            nums = [int(n) for n in re.findall(r'\d+', value)]
+            nums = (nums + [0, 0, 0])[:3]
+            return tuple(nums)
         
         repo = config.GITHUB_REPO
         api_url = f"https://api.github.com/repos/{repo}/releases/latest"
+        current_version_raw = (request.args.get('current_version') or '').strip()
         
         response = requests.get(api_url, timeout=10)
         
@@ -2393,7 +2403,11 @@ def check_update():
             data = response.json()
             
             # Extraer versión del tag
-            tag_name = data.get('tag_name', 'v0.0').replace('v', '')
+            tag_name_raw = data.get('tag_name', 'v0.0')
+            tag_name = str(tag_name_raw).replace('v', '')
+            latest_tuple = parse_version(tag_name_raw)
+            current_tuple = parse_version(current_version_raw) if current_version_raw else None
+            has_update = True if current_tuple is None else (latest_tuple > current_tuple)
             
             # Buscar archivos de descarga (exe o zip)
             assets = data.get('assets', [])
@@ -2409,8 +2423,9 @@ def check_update():
                     break
             
             return jsonify({
-                'has_update': True,
+                'has_update': has_update,
                 'version': tag_name,
+                'current_version': current_version_raw,
                 'download_url': download_url,
                 'release_notes': data.get('body', ''),
                 'repo': repo
