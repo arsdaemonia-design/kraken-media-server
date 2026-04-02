@@ -10,6 +10,81 @@ class HLSTranscoder:
         self.ffmpeg = ffmpeg_path
         self.ffprobe = ffprobe_path
         self.system = platform.system()
+        self._video_encoder = None  # Cache para el encoder detectado
+
+    def _detect_video_encoder(self):
+        """Detecta el mejor encoder de video disponible (NVIDIA, Apple Silicon o CPU)."""
+        if self._video_encoder:
+            return self._video_encoder
+        
+        system = self.system
+        
+        # Test rápido de encoder
+        def test_encoder(enc):
+            cmd = [
+                self.ffmpeg, "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", "color=c=black:s=320x240:d=1",
+                "-c:v", enc, "-preset", "fast", "-b:v", "1M",
+                "-frames:v", "1", "-f", "null", "-"
+            ]
+            try:
+                kwargs = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
+                result = subprocess.run(cmd, capture_output=True, timeout=10, **kwargs)
+                return result.returncode == 0
+            except:
+                return False
+        
+        # 1. Probar NVIDIA en Windows
+        if system == 'Windows':
+            nvenc_encoders = ['h264_nvenc', 'hevc_nvenc']
+            for enc in nvenc_encoders:
+                print(f"[HLS] Probando {enc}...")
+                if test_encoder(enc):
+                    print(f"[HLS] ✓ NVIDIA encoder disponible: {enc}")
+                    self._video_encoder = enc
+                    return enc
+        
+        # 2. Probar Apple VideoToolbox en Mac
+        elif system == 'Darwin':
+            mac_encoders = ['h264_videotoolbox', 'hevc_videotoolbox']
+            for enc in mac_encoders:
+                print(f"[HLS] Probando {enc}...")
+                if test_encoder(enc):
+                    print(f"[HLS] ✓ Apple VideoToolbox disponible: {enc}")
+                    self._video_encoder = enc
+                    return enc
+        
+        # 3. Fallback a CPU
+        print(f"[HLS] Usando CPU de respaldo: libx264")
+        self._video_encoder = 'libx264'
+        return 'libx264'
+
+    def _get_encoder_settings(self, encoder):
+        """Retorna los settings apropiados para cada encoder."""
+        if encoder == 'libx264':
+            return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv420p"]
+        elif '_nvenc' in encoder:  # NVIDIA
+            return [
+                "-c:v", encoder,
+                "-preset", "p4",
+                "-pix_fmt", "yuv420p",
+                "-profile:v", "main",
+                "-b:v", "8M",
+                "-maxrate", "10M",
+                "-bufsize", "16M"
+            ]
+        elif '_videotoolbox' in encoder:  # Apple Silicon (Mac)
+            # VideoToolbox no usa presets como NVIDIA, se ajusta diferente
+            return [
+                "-c:v", encoder,
+                "-pix_fmt", "yuv420p",
+                "-profile:v", "main",
+                "-b:v", "8M",
+                "-maxrate", "10M",
+                "-bufsize", "16M"
+            ]
+        else:
+            return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv420p"]
 
     def analyze_media(self, input_file):
         """Analiza el archivo para decidir si requiere transcodificación."""
@@ -122,7 +197,19 @@ class HLSTranscoder:
             print("[HLS] MP4/WebM nativo detectado, bypass HLS (Direct Play)")
             return "DIRECT", audio_tracks, normalized_audio_index, None
         
-        cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-i", input_file]
+        # Detectar el mejor encoder (GPU o CPU)
+        video_encoder = self._detect_video_encoder()
+        encoder_settings = self._get_encoder_settings(video_encoder)
+        
+        cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error"]
+        
+        # Activar aceleración de hardware para decodificación si hay GPU
+        if '_nvenc' in video_encoder:
+            cmd += ["-hwaccel", "auto"]  # NVIDIA
+        elif '_videotoolbox' in video_encoder:
+            cmd += ["-hwaccel", "videotoolbox"]  # Apple Silicon
+        
+        cmd += ["-i", input_file]
         cmd += ["-map", "0:v:0"]
         if audio_tracks:
             cmd += ["-map", f"0:a:{normalized_audio_index}?"]
@@ -131,9 +218,9 @@ class HLSTranscoder:
 
         if force_hls_for_audio:
             # When forcing HLS just to switch audio track, re-encode video for maximum mux compatibility
-            cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23"]
+            cmd += encoder_settings
         elif analysis.get('video_needs_transcode', True):
-            cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23"]
+            cmd += encoder_settings
         else:
             cmd += ["-c:v", "copy"]
 

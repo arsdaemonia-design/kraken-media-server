@@ -925,3 +925,64 @@ Capas de Seguridad:
 - Fecha: 2026-04-01
 - Estado: Listo para testing
 
+---
+
+# v4.87.1 - 2026-04-02 (Hotfix UX + Playback + Update + Cast)
+
+## Novedades Principales
+
+### 1. Vista de detalle unificada en Video (Series/Peliculas)
+- Se consolido la experiencia de detalle para evitar duplicados al abrir "Mas informacion".
+- La vista de series mantiene banner + info + selector de temporada + lista de episodios en el mismo flujo.
+- Se corrigio el flujo de peliculas para entrar a detalle desde card sin romper el layout general.
+
+### 2. UX del Hero en detalle
+- Ajustes de botones en hero (Reproducir / Episodios / Mas informacion segun contexto).
+- Eliminacion de elementos duplicados en cabecera cuando la informacion ya se muestra abajo.
+- Limpieza del header de video (menos ruido visual en modo detalle).
+
+### 3. Continue Watching (progreso real)
+- Se completo el tracking de progreso para modo fallback (reproductor nativo), no solo ArtPlayer/HLS.
+- Ahora el heartbeat de progreso se detiene correctamente al terminar o salir de reproduccion.
+- Se habilito logica de "Continuar" tambien para peliculas en hero cuando existe progreso valido.
+
+### 4. Banner de "Nueva version" corregido
+- Fix backend en `/api/check_update`: ya no devuelve update siempre.
+- Comparacion semantica de version (ej: 4.10 > 4.9) en backend y frontend.
+- Se envia version local en query para validar correctamente si realmente existe update.
+
+### 5. Cast (Chromecast) reforzado
+- Inicializacion explicita de Google Cast con `__onGCastApiAvailable`.
+- Setup de `CastContext` con `DEFAULT_MEDIA_RECEIVER_APP_ID`.
+- Fallback seguro: si SDK/plugin no estan listos, no rompe el player y se desactiva plugin de forma controlada.
+
+---
+
+## Archivos Modificados (Hotfix)
+
+| Archivo | Tipo | Descripcion |
+|---------|------|-------------|
+| templates/index.html | MODIFICADO | UX video detalle, cast init, update check semantico, progreso fallback |
+| assets/js/hero_series.js | MODIFICADO | Logica de accion "Continuar" (series + peliculas) |
+| routes/api.py | MODIFICADO | `/api/check_update` con comparacion de version real |
+| app_offline.py | MODIFICADO | Version bump a 4.87 |
+
+---
+
+## Build y Distribucion
+
+- PyInstaller ejecutado con `KrakenOffline.spec`.
+- Installer generado con Inno Setup (`kraken_installer.iss`).
+- Resultado:
+  - `dist/KrakenOffline/KrakenOffline.exe`
+  - `dist/Kraken_Media_Server_Installer_v4.87.exe`
+- Se actualizaron archivos en `dist/Kraken_Mac` para mantener consistencia del paquete.
+
+---
+
+## Estado
+
+- Version base de release: 4.87
+- Hotfix aplicado: 4.87.1 (fecha 2026-04-02)
+- Estado: Listo para validacion final de UX y Cast en dispositivos reales
+

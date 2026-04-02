@@ -116,6 +116,17 @@ def init_db():
             tmdb_type TEXT,
             updated_at REAL DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE IF NOT EXISTS user_progress (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_email TEXT NOT NULL,
+            media_id INTEGER NOT NULL,
+            progress_seconds REAL DEFAULT 0,
+            duration_seconds REAL DEFAULT 0,
+            is_finished INTEGER DEFAULT 0,
+            last_watched REAL DEFAULT 0,
+            UNIQUE(user_email, media_id)
+        );
     ''')
 
     # Add 'language' column to media table if it doesn't exist
