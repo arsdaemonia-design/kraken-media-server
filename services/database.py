@@ -8,6 +8,12 @@ import config
 os.makedirs(config.DOWNLOAD_FOLDER, exist_ok=True)
 DB_PATH = os.path.join(config.DOWNLOAD_FOLDER, 'kraken.db')
 
+def get_db():
+    """Get database connection with row factory."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
 def init_db():
     """Initialize SQLite database with required tables."""
     conn = sqlite3.connect(DB_PATH)
