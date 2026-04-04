@@ -1291,12 +1291,31 @@
             transform: scale(1.05) translateY(-2px);
         }
 
-        @keyframes neon-breathe {
+@keyframes neon-breathe {
+  0%,
+  100% {
+    opacity: 0.9;
+  }
 
-            0%,
-            100% {
-                opacity: 0.9;
-            }
+  50% {
+    opacity: 1;
+    drop-shadow(0 0 15px rgba(16, 185, 129, 0.8));
+  }
+}
+
+/* Shimmer animation for progress bar */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite;
+}
 
             50% {
                 opacity: 1;
@@ -1939,32 +1958,37 @@
                         </div>
                     </div>
 
-                    <div class="mt-auto bg-[#080808] border-t border-white/5 shrink-0">
-                        <div class="px-4 pt-3 pb-4 flex gap-2">
-            <button onclick="rescanLibrary()" id="btn-rescan"
-              class="flex-1 bg-emerald-900/10 hover:bg-emerald-600 border border-emerald-500/20 hover:border-emerald-500 text-emerald-500 hover:text-white transition-all duration-300 py-2 rounded-md text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 group shadow-[0_0_10px_rgba(0,0,0,0.5)]">
-              <i
-                class="fa-solid fa-rotate group-hover:rotate-180 transition-transform duration-500"></i>
-              <span>Sincronizar</span>
-            </button>
-            
-            <!-- Barra de progreso del escaneo -->
-            <div id="rescan-progress-container" class="hidden w-full mt-2">
-              <div class="flex justify-between text-[10px] text-gray-400 mb-1">
-                <span id="rescan-stage-text">Contando archivos...</span>
-                <span id="rescan-percent-text">0%</span>
-              </div>
-              <div class="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
-                <div id="rescan-progress-bar" class="h-full bg-emerald-500 transition-all duration-300 rounded-full" style="width: 0%"></div>
-              </div>
-              <div id="rescan-message" class="text-[10px] text-gray-500 mt-1 truncate"></div>
-            </div>
-                            <button onclick="showSettingsPanel()" id="btn-settings" title="Configuración"
-                                class="bg-zinc-800/50 hover:bg-zinc-700 border border-white/10 hover:border-white/20 text-zinc-400 hover:text-white transition-all duration-300 p-2 rounded-md shadow-[0_0_10px_rgba(0,0,0,0.5)]">
-                                <i class="fa-solid fa-gear text-sm"></i>
-                            </button>
-                        </div>
-                    </div>
+<div class="mt-auto bg-[#080808] border-t border-white/5 shrink-0">
+  <div class="px-4 pt-3 pb-4">
+    <!-- Botones -->
+    <div class="flex gap-2 mb-0" id="rescan-buttons-row">
+      <button onclick="rescanLibrary()" id="btn-rescan"
+        class="flex-1 bg-emerald-900/10 hover:bg-emerald-600 border border-emerald-500/20 hover:border-emerald-500 text-emerald-500 hover:text-white transition-all duration-300 py-2 rounded-md text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 group shadow-[0_0_10px_rgba(0,0,0,0.5)]">
+        <i
+          class="fa-solid fa-rotate group-hover:rotate-180 transition-transform duration-500"></i>
+        <span>Sincronizar</span>
+      </button>
+      <button onclick="showSettingsPanel()" id="btn-settings" title="Configuración"
+        class="bg-zinc-800/50 hover:bg-zinc-700 border border-white/10 hover:border-white/20 text-zinc-400 hover:text-white transition-all duration-300 p-2 rounded-md shadow-[0_0_10px_rgba(0,0,0,0.5)]">
+        <i class="fa-solid fa-gear text-sm"></i>
+      </button>
+    </div>
+
+    <!-- Barra de progreso del escaneo -->
+    <div id="rescan-progress-container" class="hidden w-full mt-4">
+      <div class="flex justify-between items-center text-[11px] text-emerald-400 mb-2">
+        <span id="rescan-stage-text" class="font-medium tracking-wide">Contando archivos...</span>
+        <span id="rescan-percent-text" class="font-bold">0%</span>
+      </div>
+      <div class="w-full h-3 bg-gray-800/80 rounded-lg overflow-hidden border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.15)]">
+        <div id="rescan-progress-bar" class="h-full bg-gradient-to-r from-emerald-600 via-emerald-400 to-emerald-500 transition-all duration-500 rounded-lg relative" style="width: 0%">
+          <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-shimmer"></div>
+        </div>
+      </div>
+      <div id="rescan-message" class="text-[10px] text-gray-500 mt-2 text-center"></div>
+    </div>
+  </div>
+</div>
                 </div>
                 <div class="p-4 border-t border-emerald-900/20 bg-[#080808] relative overflow-hidden group">
                 </div>
