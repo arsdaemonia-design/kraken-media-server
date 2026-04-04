@@ -292,32 +292,69 @@ def escanear_archivos_fisicos():
     )
     return []
 
-    top = sorted([f for f in audio_only if f['play_count'] > 0], key=lambda x: x['play_count'], reverse=True)[:50]
-    if top: 
-        smart_mixes.append({'id':'smart_top50', 'name':'Top 50 Más Escuchadas', 'icon':'fa-fire', 'color':'text-orange-500', 'files':[x['path'] for x in top], 'cover':top[0]['path']})
+
+def recalcular_mixes(files):
+    """Regenera los mixes inteligentes basados en la biblioteca actual."""
+    audio_only = [f for f in files if f.get('type') == 'audio']
     
+    if not audio_only:
+        return []
+    
+    smart_mixes = []
+    
+    # Top 50 más escuchadas
+    top = sorted([f for f in audio_only if f.get('play_count', 0) > 0], 
+                 key=lambda x: x.get('play_count', 0), reverse=True)[:50]
+    if top:
+        smart_mixes.append({
+            'id': 'smart_top50',
+            'name': 'Top 50 Más Escuchadas',
+            'icon': 'fa-fire',
+            'color': 'text-orange-500',
+            'files': [x['path'] for x in top],
+            'cover': top[0]['path']
+        })
+    
+    # Joyas olvidadas (rating >= 4, no escuchadas en 30 días)
     month_ago = time.time() - (30 * 86400)
     gems = [f for f in audio_only if f.get('rating', 0) >= 4 and f.get('last_played', 0) < month_ago]
     if gems:
         random.shuffle(gems)
-        smart_mixes.append({'id': 'smart_gems', 'name': 'Joyas Olvidadas', 'icon': 'fa-gem', 'color': 'text-purple-400', 'files': [x['path'] for x in gems[:50]], 'cover': gems[0]['path']})
-
-    week_ago = time.time() - (7 * 86400)
-    new_f = sorted([f for f in audio_only if f['date'] > week_ago], key=lambda x: x['date'], reverse=True)
-    if new_f: 
-        smart_mixes.append({'id':'smart_new', 'name':'Radar de Novedades', 'icon':'fa-rss', 'color':'text-emerald-400', 'files':[x['path'] for x in new_f], 'cover':new_f[0]['path']})
+        smart_mixes.append({
+            'id': 'smart_gems',
+            'name': 'Joyas Olvidadas',
+            'icon': 'fa-gem',
+            'color': 'text-purple-400',
+            'files': [x['path'] for x in gems[:50]],
+            'cover': gems[0]['path']
+        })
     
+    # Radar de novedades (última semana)
+    week_ago = time.time() - (7 * 86400)
+    new_f = sorted([f for f in audio_only if f['date'] > week_ago],
+                   key=lambda x: x['date'], reverse=True)[:50]
+    if new_f:
+        smart_mixes.append({
+            'id': 'smart_new',
+            'name': 'Radar de Novedades',
+            'icon': 'fa-rss',
+            'color': 'text-emerald-400',
+            'files': [x['path'] for x in new_f],
+            'cover': new_f[0]['path']
+        })
+    
+    # Radio Kraken (aleatorio)
     rnd = list(audio_only)
     random.shuffle(rnd)
     rnd = rnd[:50]
     
     smart_mixes.append({
-        'id': 'smart_shuffle', 
+        'id': 'smart_shuffle',
         'name': 'Radio Kraken',
         'icon': 'fa-broadcast-tower',
         'color': 'text-cyan-400',
-        'files': [x['path'] for x in rnd], 
-        'cover': rnd[0]['path'] if rnd else '' 
+        'files': [x['path'] for x in rnd],
+        'cover': rnd[0]['path'] if rnd else ''
     })
     
     state.MIXES_CACHE = smart_mixes

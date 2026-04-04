@@ -238,8 +238,6 @@ def init_db():
     
     # Create performance indexes for faster queries
     _create_performance_indexes(c)
-    
-    conn.close()
 
 
 def _create_performance_indexes(cursor):
@@ -261,6 +259,7 @@ def _create_performance_indexes(cursor):
             cursor.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {idx_def}")
             print(f"  ✓ Index {idx_name} created/verified")
         except sqlite3.OperationalError as e:
+            # Skip if column doesn't exist yet
             print(f"  ⚠ Index {idx_name} skipped: {e}")
 
 
