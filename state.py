@@ -10,6 +10,15 @@ BIB_CACHE = None
 BIB_CACHE_TIME = 0
 MIXES_CACHE = []
 RESCAN_IN_PROGRESS = False
+RESCAN_STATUS = {
+    "active": False,
+    "stage": "idle",
+    "total": 0,
+    "processed": 0,
+    "percent": 0,
+    "message": "",
+    "start_time": 0
+}
 ACTIVE_USERS = {} 
 PENDING_COMMANDS = {}
 HLS_SESSIONS = {}

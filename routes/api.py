@@ -1154,7 +1154,10 @@ def descargar():
 
 @api_bp.route('/estado')
 def estado():
-    return jsonify({"rescan": RESCAN_IN_PROGRESS})
+    return jsonify({
+        "rescan": RESCAN_IN_PROGRESS,
+        "rescan_status": RESCAN_STATUS
+    })
 
 @api_bp.route('/analizar', methods=['POST'])
 def analizar():

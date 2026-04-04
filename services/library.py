@@ -115,6 +115,19 @@ def detect_folder_type(file_path):
 
 def escanear_archivos_fisicos():
     """PASO 1 (DELTA): Lee disco y solo reprocesa archivos nuevos/modificados."""
+    import state
+    
+    # Inicializar estado de escaneo
+    state.RESCAN_STATUS = {
+        "active": True,
+        "stage": "counting",
+        "total": 0,
+        "processed": 0,
+        "percent": 0,
+        "message": "Contando archivos...",
+        "start_time": time.time()
+    }
+    
     print("📀 Iniciando escaneo físico de disco...")
     
     conn = get_db()
@@ -127,20 +140,49 @@ def escanear_archivos_fisicos():
         for rel_path, row in existing_rows.items()
         if row['genre'] not in [None, '', 'Otros', 'Unknown']
     }
-
+    
     scanned_paths = set()
     unchanged_count = 0
     upserted_count = 0
     
+    # Contar archivos totales primero
+    total_files = 0
     for root, dirs, files in os.walk(config.DOWNLOAD_FOLDER):
-        if 'thumbnails' in root: continue
+        if 'thumbnails' in root: 
+            continue
+        for f in files:
+            ext = f.split('.')[-1].lower()
+            if ext in ['mp3', 'm4a', 'wav', 'mp4', 'webm', 'mkv']:
+                total_files += 1
+    
+    state.RESCAN_STATUS["total"] = total_files
+    state.RESCAN_STATUS["stage"] = "scanning"
+    state.RESCAN_STATUS["message"] = f"Escaneando 0/{total_files} archivos..."
+    
+    processed = 0
+    batch_size = 100  # Commit cada 100 archivos
+    batch_count = 0
+    
+    for root, dirs, files in os.walk(config.DOWNLOAD_FOLDER):
+        if 'thumbnails' in root: 
+            continue
         
         folder_name = os.path.relpath(root, config.DOWNLOAD_FOLDER)
         serie_name = "Raíz" if folder_name == '.' else get_smart_folder_name(root)
-
+        
         for f in files:
             ext = f.split('.')[-1].lower()
-            if ext not in ['mp3', 'm4a', 'wav', 'mp4', 'webm', 'mkv']: continue
+            if ext not in ['mp3', 'm4a', 'wav', 'mp4', 'webm', 'mkv']: 
+                continue
+            
+            processed += 1
+            
+            # Actualizar progreso cada 10 archivos
+            if processed % 10 == 0:
+                percent = int((processed / total_files) * 100) if total_files > 0 else 0
+                state.RESCAN_STATUS["processed"] = processed
+                state.RESCAN_STATUS["percent"] = percent
+                state.RESCAN_STATUS["message"] = f"Escaneando {processed}/{total_files} ({percent}%)"
             
             path = os.path.join(root, f)
             rel_path = os.path.relpath(path, config.DOWNLOAD_FOLDER).replace('\\', '/')
@@ -149,7 +191,7 @@ def escanear_archivos_fisicos():
             try:
                 stat = os.stat(path)
                 existing = existing_rows.get(rel_path)
-
+                
                 # Delta skip: si tamaño y mtime no cambiaron, no reprocesar
                 if existing:
                     same_size = int(existing['size_bytes'] or 0) == int(stat.st_size)
@@ -158,14 +200,14 @@ def escanear_archivos_fisicos():
                     if same_size and same_mtime:
                         unchanged_count += 1
                         continue
-
+                
                 meta = obtener_metadata_completa(path, f)
                 
                 # Restaurar el género modificado manualmente si existe y el actual es malo
                 if rel_path in existing_genres:
                     if meta.get('genre') in ['Otros', 'Unknown', '', 'Generos']:
                         meta['genre'] = existing_genres[rel_path]
-                        
+                
                 tipo_archivo = 'video' if ext in ['mp4', 'webm', 'mkv'] else 'audio'
                 
                 # Extraer TMDB ID de la ruta y detectar tipo
@@ -175,7 +217,7 @@ def escanear_archivos_fisicos():
                 # Limpiar título - quitar TMDB ID, deixar solo o nome limpo
                 raw_title = meta['title'] or f
                 # Primero quitar (tmdb-123) ou [tmdb-123] ou {tmdb-123}
-                clean_title = re.sub(r'\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?', '', raw_title, flags=re.IGNORECASE).strip()
+                clean_title = re.sub(r'\s*[\(\[\{]?tmdb[-_]?\d+[\)\]\}]?', '', raw_title, flags=re.IGNORECASE).strip()
                 # Quitar guiones extra al final
                 clean_title = re.sub(r'[\s\-_]+$', '', clean_title).strip()
                 # Si quedó vacío, usar el nombre del archivo
@@ -187,19 +229,19 @@ def escanear_archivos_fisicos():
                 lang = detect_language_from_folder(folder_name)
                 
                 c.execute('''
-                    INSERT INTO media (
-                        rel_path, filename, folder, full_folder, media_type,
-                        title, artist, album, genre, duration_sec, size_bytes, date_added, language,
-                        tmdb_id, folder_type
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(rel_path) DO UPDATE SET
-                        filename=excluded.filename, folder=excluded.folder, 
-                        full_folder=excluded.full_folder, media_type=excluded.media_type,
-                        title=excluded.title, artist=excluded.artist, 
-                        album=excluded.album, genre=excluded.genre, 
-                        duration_sec=excluded.duration_sec, size_bytes=excluded.size_bytes,
-                        language=excluded.language,
-                        tmdb_id=excluded.tmdb_id, folder_type=excluded.folder_type
+                INSERT INTO media (
+                    rel_path, filename, folder, full_folder, media_type,
+                    title, artist, album, genre, duration_sec, size_bytes, date_added, language,
+                    tmdb_id, folder_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(rel_path) DO UPDATE SET
+                filename=excluded.filename, folder=excluded.folder,
+                full_folder=excluded.full_folder, media_type=excluded.media_type,
+                title=excluded.title, artist=excluded.artist,
+                album=excluded.album, genre=excluded.genre,
+                duration_sec=excluded.duration_sec, size_bytes=excluded.size_bytes,
+                language=excluded.language,
+                tmdb_id=excluded.tmdb_id, folder_type=excluded.folder_type
                 ''', (
                     rel_path, f, serie_name, folder_name, tipo_archivo,
                     final_title, meta['artist'], meta['album'], meta['genre'],
@@ -207,18 +249,39 @@ def escanear_archivos_fisicos():
                     tmdb_id, folder_type
                 ))
                 upserted_count += 1
+                batch_count += 1
+                
+                # Commit en lotes para mejor rendimiento
+                if batch_count >= batch_size:
+                    conn.commit()
+                    batch_count = 0
+                    
             except Exception as e:
                 print("Error indexando archivo:", rel_path, e)
-
+    
+    # Commit final de lotes pendientes
+    if batch_count > 0:
+        conn.commit()
+    
     # Eliminar de la base de datos los archivos que ya no existen en disco
+    state.RESCAN_STATUS["stage"] = "cleaning"
+    state.RESCAN_STATUS["message"] = "Limpiando archivos inexistentes..."
+    
     deleted_count = 0
     for dp in existing_rows.keys():
         if dp not in scanned_paths:
             c.execute("DELETE FROM media WHERE rel_path = ?", (dp,))
             deleted_count += 1
-            
+    
     conn.commit()
     conn.close()
+    
+    # Finalizar estado
+    elapsed = time.time() - state.RESCAN_STATUS["start_time"]
+    state.RESCAN_STATUS["active"] = False
+    state.RESCAN_STATUS["stage"] = "done"
+    state.RESCAN_STATUS["percent"] = 100
+    state.RESCAN_STATUS["message"] = f"Escaneo completado en {elapsed:.1f}s"
     
     print(
         f"✅ Escaneo físico terminado. "
@@ -227,77 +290,7 @@ def escanear_archivos_fisicos():
         f"{unchanged_count} sin cambios | "
         f"{deleted_count} eliminados."
     )
-    return [] # We no longer return the huge JSON array
-
-def calcular_similitud(cancion_actual, cancion_candidata):
-    """
-    Calcula qué tan similar es una canción a otra.
-    """
-    score = 0
-    if cancion_actual.get('artist') and cancion_candidata.get('artist'):
-        if cancion_actual['artist'].lower() == cancion_candidata['artist'].lower():
-            score += config.SIMILARITY_SCORE_SAME_ARTIST
-    if cancion_actual.get('album') and cancion_candidata.get('album'):
-        if cancion_actual['album'].lower() == cancion_candidata['album'].lower():
-            score += config.SIMILARITY_SCORE_SAME_ALBUM
-    if cancion_actual.get('genre') and cancion_candidata.get('genre'):
-        if (cancion_actual['genre'].lower() == cancion_candidata['genre'].lower() 
-            and cancion_actual['genre'].lower() not in ['otros', 'unknown', '']):
-            score += config.SIMILARITY_SCORE_SIMILAR_GENRE
-    rating_actual = cancion_actual.get('rating', 0)
-    rating_candidata = cancion_candidata.get('rating', 0)
-    if abs(rating_actual - rating_candidata) <= 1:
-        score += config.SIMILARITY_SCORE_SIMILAR_RATING
-    return score
-
-def generar_radio_inteligente(cancion_referencia, biblioteca, limite=config.RADIO_LIMIT):
-    if not cancion_referencia or not biblioteca:
-        rnd = list(biblioteca)
-        random.shuffle(rnd)
-        return rnd[:limite]
-    
-    candidatas = []
-    for cancion in biblioteca:
-        if cancion.get('path') == cancion_referencia.get('path'):
-            continue
-        score = calcular_similitud(cancion_referencia, cancion)
-        candidatas.append({
-            'cancion': cancion,
-            'score': score
-        })
-    
-    candidatas.sort(key=lambda x: x['score'], reverse=True)
-    
-    resultado = []
-    muy_similares = [c for c in candidatas if c['score'] >= 60]
-    resultado.extend([c['cancion'] for c in muy_similares[:30]])
-    
-    medio_similares = [c for c in candidatas if 20 <= c['score'] < 60]
-    if medio_similares:
-        random.shuffle(medio_similares)
-        resultado.extend([c['cancion'] for c in medio_similares[:10]])
-    
-    poco_similares = [c for c in candidatas if c['score'] < 20]
-    if poco_similares:
-        random.shuffle(poco_similares)
-        resultado.extend([c['cancion'] for c in poco_similares[:10]])
-    
-    if len(resultado) < limite:
-        resto = [c['cancion'] for c in candidatas if c['cancion'] not in resultado]
-        random.shuffle(resto)
-        resultado.extend(resto[:limite - len(resultado)])
-    
-    return resultado[:limite]
-
-def recalcular_mixes(files_data):
-    print("🍹 Preparando cócteles (Smart Mixes)...")
-    
-    smart_mixes = []
-    audio_only = [f for f in files_data if f['type'] == 'audio']
-    
-    if not audio_only:
-        state.MIXES_CACHE = []
-        return []
+    return []
 
     top = sorted([f for f in audio_only if f['play_count'] > 0], key=lambda x: x['play_count'], reverse=True)[:50]
     if top: 

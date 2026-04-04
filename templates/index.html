@@ -1941,12 +1941,24 @@
 
                     <div class="mt-auto bg-[#080808] border-t border-white/5 shrink-0">
                         <div class="px-4 pt-3 pb-4 flex gap-2">
-                            <button onclick="rescanLibrary()" id="btn-rescan"
-                                class="flex-1 bg-emerald-900/10 hover:bg-emerald-600 border border-emerald-500/20 hover:border-emerald-500 text-emerald-500 hover:text-white transition-all duration-300 py-2 rounded-md text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 group shadow-[0_0_10px_rgba(0,0,0,0.5)]">
-                                <i
-                                    class="fa-solid fa-rotate group-hover:rotate-180 transition-transform duration-500"></i>
-                                <span>Sincronizar</span>
-                            </button>
+            <button onclick="rescanLibrary()" id="btn-rescan"
+              class="flex-1 bg-emerald-900/10 hover:bg-emerald-600 border border-emerald-500/20 hover:border-emerald-500 text-emerald-500 hover:text-white transition-all duration-300 py-2 rounded-md text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 group shadow-[0_0_10px_rgba(0,0,0,0.5)]">
+              <i
+                class="fa-solid fa-rotate group-hover:rotate-180 transition-transform duration-500"></i>
+              <span>Sincronizar</span>
+            </button>
+            
+            <!-- Barra de progreso del escaneo -->
+            <div id="rescan-progress-container" class="hidden w-full mt-2">
+              <div class="flex justify-between text-[10px] text-gray-400 mb-1">
+                <span id="rescan-stage-text">Contando archivos...</span>
+                <span id="rescan-percent-text">0%</span>
+              </div>
+              <div class="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                <div id="rescan-progress-bar" class="h-full bg-emerald-500 transition-all duration-300 rounded-full" style="width: 0%"></div>
+              </div>
+              <div id="rescan-message" class="text-[10px] text-gray-500 mt-1 truncate"></div>
+            </div>
                             <button onclick="showSettingsPanel()" id="btn-settings" title="Configuración"
                                 class="bg-zinc-800/50 hover:bg-zinc-700 border border-white/10 hover:border-white/20 text-zinc-400 hover:text-white transition-all duration-300 p-2 rounded-md shadow-[0_0_10px_rgba(0,0,0,0.5)]">
                                 <i class="fa-solid fa-gear text-sm"></i>
@@ -9981,59 +9993,109 @@ function createEpisodeRow(f, index) {
                 }
             }
 
-            async function rescanLibrary() {
-                const pin = getMasterPin("PIN Maestro requerido para Re-escaneo profundo de disco:");
-                if (!pin) return;
+async function rescanLibrary() {
+  const pin = getMasterPin("PIN Maestro requerido para Re-escaneo profundo de disco:");
+  if (!pin) return;
 
-                const btn = document.getElementById('btn-rescan');
+  const btn = document.getElementById('btn-rescan');
+  const progressContainer = document.getElementById('rescan-progress-container');
+  const progressBar = document.getElementById('rescan-progress-bar');
+  const percentText = document.getElementById('rescan-percent-text');
+  const stageText = document.getElementById('rescan-stage-text');
+  const messageText = document.getElementById('rescan-message');
 
-                // Animación del botón
-                if (btn) {
-                    const icon = btn.querySelector('i');
-                    if (icon) icon.classList.add('fa-spin');
-                    btn.disabled = true;
-                    btn.innerHTML = '<i class="fa-solid fa-spin fa-rotate"></i> Escaneando...';
-                }
+  // Mostrar barra de progreso
+  if (progressContainer) progressContainer.classList.remove('hidden');
 
-                try {
-                    showToast("💿 Escaneando disco duro...", "info");
+  // Animación del botón
+  if (btn) {
+    const icon = btn.querySelector('i');
+    if (icon) icon.classList.add('fa-spin');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spin fa-rotate"></i> Escaneando...';
+  }
 
-                    // 1. ESCANEO FÍSICO (Servidor)
-                    const res = await fetch('/actualizar_cache?pin=' + encodeURIComponent(pin));
-                    const data = await res.json();
+  let pollInterval = null;
 
-                    if (data.error) {
-                        clearPinIfInvalid(data.error);
-                        alert(data.error);
-                        return;
-                    }
+  // Función para consultar progreso
+  async function pollProgress() {
+    try {
+      const res = await fetch('/estado');
+      const data = await res.json();
+      const status = data.rescan_status;
+      
+      if (status && status.active) {
+        const percent = status.percent || 0;
+        if (progressBar) progressBar.style.width = percent + '%';
+        if (percentText) percentText.textContent = percent + '%';
+        if (stageText) {
+          const stages = {
+            'counting': 'Contando archivos...',
+            'scanning': 'Escaneando...',
+            'cleaning': 'Limpiando archivos...',
+            'done': 'Completado'
+          };
+          stageText.textContent = stages[status.stage] || status.stage;
+        }
+        if (messageText) messageText.textContent = status.message || '';
+      }
+    } catch (e) {
+      console.error('Error polling progress:', e);
+    }
+  }
 
-                    if (data.ok) {
-                        // 2. RECARGAR DATOS (Para tener las rutas nuevas en memoria)
-                        // Esto es CRUCIAL: Doctor Kraken necesita saber dónde están los archivos AHORA
-                        await cargarLib();
+  try {
+    showToast("💿 Escaneando disco duro...", "info");
 
-                        // 3. DOCTOR KRAKEN AL RESCATE (Modo Silencioso)
-                        // Ejecutamos la reparación automática
-                        showToast("🚑 Verificando salud de playlists...", "info");
-                        repairPlaylists(true); // 'true' para que no pida confirmación
+    // Iniciar polling cada 500ms
+    pollInterval = setInterval(pollProgress, 500);
 
-                        showToast("✅ Biblioteca Sincronizada y Reparada", "success");
-                    }
-                } catch (e) {
-                    console.error(e);
-                    showToast("❌ Error en la sincronización", "error");
-                }
+    // 1. ESCANEO FÍSICO (Servidor)
+    const res = await fetch('/actualizar_cache?pin=' + encodeURIComponent(pin));
+    const data = await res.json();
 
-                // Restaurar botón
-                if (btn) {
-                    btn.classList.remove('fa-spin');
-                    btn.disabled = false;
-                    // Restaurar texto original (Dependiendo de si estás en móvil o desktop puede variar, 
-                    // pero esto lo deja genérico y funcional)
-                    btn.innerHTML = '<i class="fa-solid fa-rotate"></i> <span>Sincronizar</span>';
-                }
-            }
+    // Detener polling
+    if (pollInterval) clearInterval(pollInterval);
+
+    if (data.error) {
+      clearPinIfInvalid(data.error);
+      alert(data.error);
+      return;
+    }
+
+    if (data.ok) {
+      // Consultar progreso final
+      await pollProgress();
+      
+      // 2. RECARGAR DATOS
+      await cargarLib();
+
+      // 3. DOCTOR KRAKEN AL RESCATE
+      showToast("🚑 Verificando salud de playlists...", "info");
+      repairPlaylists(true);
+
+      showToast("✅ Biblioteca Sincronizada y Reparada", "success");
+    }
+  } catch (e) {
+    console.error(e);
+    showToast("❌ Error en la sincronización", "error");
+  } finally {
+    // Detener polling si sigue activo
+    if (pollInterval) clearInterval(pollInterval);
+    
+    // Ocultar barra de progreso después de un momento
+    setTimeout(() => {
+      if (progressContainer) progressContainer.classList.add('hidden');
+    }, 2000);
+  }
+
+  // Restaurar botón
+  if (btn) {
+    btn.classList.remove('fa-spin');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-rotate"></i> <span>Sincronizar</span>';
+  }
+}
 
             function abrirPlaylist(nombre) {
                 if (!libData.playlists[nombre]) {
