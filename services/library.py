@@ -193,11 +193,19 @@ def escanear_archivos_fisicos():
                 existing = existing_rows.get(rel_path)
                 
                 # Delta skip: si tamaño y mtime no cambiaron, no reprocesar
+                # EXCEPCIÓN: Si es video y folder_type es NULL, actualizar aunque no cambió
                 if existing:
                     same_size = int(existing['size_bytes'] or 0) == int(stat.st_size)
                     previous_mtime = float(existing['date_added'] or 0)
                     same_mtime = abs(previous_mtime - float(stat.st_mtime)) < 0.0001
                     if same_size and same_mtime:
+                        # Verificar si necesita folder_type
+                        ext_lower = ext.lower()
+                        if ext_lower in ['mp4', 'webm', 'mkv'] and not existing.get('folder_type'):
+                            # Video sin folder_type: actualizar solo ese campo
+                            folder_type = detect_folder_type(rel_path)
+                            c.execute("UPDATE media SET folder_type = ? WHERE rel_path = ?", (folder_type, rel_path))
+                            batch_count += 1
                         unchanged_count += 1
                         continue
                 
@@ -371,7 +379,7 @@ def generar_biblioteca_viva(owner_email='public'):
         SELECT id, rel_path, filename, folder, full_folder, media_type,
                title, artist, album, genre, duration_sec, size_bytes, date_added,
                rating, play_count, last_played, language, folder_type, tmdb_id,
-               tmdb_title, tmdb_year, tmdb_genres, tmdb_poster
+               tmdb_title, tmdb_year, tmdb_genres, tmdb_poster, tmdb_rating
         FROM media
         ORDER BY folder, title
     ''')
@@ -435,12 +443,13 @@ def generar_biblioteca_viva(owner_email='public'):
             'last_played': row['last_played'],
             'language': row['language'],
             'folder_type': row['folder_type'],
-            'tmdb_id': row['tmdb_id'],
-            'tmdb_title': row['tmdb_title'],
-            'tmdb_year': row['tmdb_year'],
-            'tmdb_genres': row['tmdb_genres'],
-            'tmdb_poster': row['tmdb_poster']
-        }
+        'tmdb_id': row['tmdb_id'],
+        'tmdb_title': row['tmdb_title'],
+        'tmdb_year': row['tmdb_year'],
+        'tmdb_genres': row['tmdb_genres'],
+        'tmdb_poster': row['tmdb_poster'],
+        'tmdb_rating': row['tmdb_rating']
+    }
         
         rel_path = f['path']
         f['playlists'] = playlist_map.get(rel_path, [])

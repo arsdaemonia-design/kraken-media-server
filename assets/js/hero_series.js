@@ -109,9 +109,14 @@
                         <div class="flex flex-wrap gap-3 mt-3">
                             ${actionBtn}
                             ${infoButton}
-                            ${!isMovie ? `<button onclick="event.stopPropagation(); currentPath='${escapeStr(heroItem.path)}'; renderLib();" class="bg-white/10 hover:bg-white/20 backdrop-blur text-white font-bold text-xs md:text-sm py-2.5 md:py-3 px-6 md:px-8 rounded-full shadow-lg hover:scale-105 transition flex items-center justify-center gap-2 border border-white/10">
-                                <i class="fa-solid fa-list"></i> Episodios
-                            </button>` : ''}
+                            ${!isMovie ? `
+                                <button onclick="event.stopPropagation(); playShuffleSeries('${escapeStr(heroItem.path)}')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs md:text-sm py-2.5 md:py-3 px-6 md:px-8 rounded-full shadow-lg hover:scale-105 transition flex items-center justify-center gap-2 border border-emerald-400/30">
+                                    <i class="fa-solid fa-shuffle"></i> Aleatorio
+                                </button>
+                                <button onclick="event.stopPropagation(); currentPath='${escapeStr(heroItem.path)}'; renderLib();" class="bg-white/10 hover:bg-white/20 backdrop-blur text-white font-bold text-xs md:text-sm py-2.5 md:py-3 px-6 md:px-8 rounded-full shadow-lg hover:scale-105 transition flex items-center justify-center gap-2 border border-white/10">
+                                    <i class="fa-solid fa-list"></i> Episodios
+                                </button>
+                            ` : ''}
                         </div>
                     </div>
                 </div>
@@ -159,23 +164,23 @@
         return `<div class="flex gap-3 mt-2 mb-1 overflow-x-auto no-scrollbar pb-1">${items}</div>`;
     }
 
-    function buildFullCastGrid(cast) {
-        if (!cast || cast.length === 0) return '';
-        const cards = cast.slice(0, 12).map(c => `
-            <div class="flex items-center gap-2 p-2 rounded-lg bg-white/[0.04] border border-white/5">
-                ${c.photo ? `<img src="${c.photo}" class="w-8 h-8 rounded-full object-cover" onerror="this.style.display='none'">` : '<div class="w-8 h-8 rounded-full bg-white/10"></div>'}
-                <div class="min-w-0">
-                    <div class="text-xs text-white truncate">${escapeHtml(c.name || '')}</div>
-                    <div class="text-[10px] text-zinc-400 truncate">${escapeHtml(c.character || '')}</div>
-                </div>
-            </div>
-        `).join('');
+function buildFullCastGrid(cast) {
+  if (!cast || cast.length === 0) return '';
+  const cards = cast.slice(0, 12).map(c => `
+    <div class="flex items-center gap-2 p-2 rounded-lg bg-white/[0.04] border border-white/5">
+      ${c.photo ? `<img src="${c.photo}" class="w-8 h-8 rounded-full object-cover" onerror="this.style.display='none'">` : '<div class="w-8 h-8 rounded-full bg-white/10"></div>'}
+      <div class="min-w-0">
+        <div class="text-xs text-white truncate">${escapeHtml(c.name || '')}</div>
+        <div class="text-[10px] text-zinc-400 truncate">${escapeHtml(c.character || '')}</div>
+      </div>
+    </div>
+  `).join('');
 
-        return `<div class="mt-4">
-            <div class="text-xs uppercase tracking-[0.16em] text-zinc-400 font-bold mb-2">Reparto</div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">${cards}</div>
-        </div>`;
-    }
+  return `<div class="mt-4">
+    <div class="text-xs uppercase tracking-[0.16em] text-zinc-400 font-bold mb-2">Reparto</div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">${cards}</div>
+  </div>`;
+}
 
     function buildActionButton(heroItem, isMovie, resumeData) {
         if (resumeData && resumeData.has_progress && resumeData.resume_episode) {
@@ -445,6 +450,53 @@
     // PUBLIC: clear session caches
     window.clearHeroCache = function () {
         Object.keys(_progressCache).forEach(k => delete _progressCache[k]);
+    };
+
+    /**
+     * playShuffleSeries - Gathers all video files under a path, shuffles them,
+     * and starts playback of a random selection.
+     */
+    window.playShuffleSeries = function (path) {
+        if (typeof libData === 'undefined' || !libData.files) {
+            console.error('[HERO] libData not available');
+            return;
+        }
+
+        const normalizedPath = path.replace(/\\/g, '/').replace(/\/$/, '');
+        
+        // Find all videos in this folder or subfolders (entire show)
+        const episodes = libData.files.filter(f => {
+            if (f.type !== 'video') return false;
+            const fPath = (f.path || '').replace(/\\/g, '/');
+            return fPath.startsWith(normalizedPath + '/') || fPath === normalizedPath;
+        });
+
+        if (episodes.length === 0) {
+            if (typeof showToast === 'function') showToast("No hay episodios para barajar", "warning");
+            return;
+        }
+
+        // Fisher-Yates Shuffle
+        const shuffled = [...episodes];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+
+        // Limit to 20 for a reasonable session
+        const queueLimit = 20;
+        const playQueueReady = shuffled.slice(0, queueLimit);
+
+        if (typeof playVideoMode === 'function') {
+            playerQueue = playQueueReady;
+            currentTrackIndex = 0;
+            playVideoMode(playQueueReady[0]);
+            if (typeof showToast === 'function') {
+                showToast(`🔀 Modo Aleatorio: Reproduciendo ${playQueueReady.length} episodios de la serie`, "success");
+            }
+        } else {
+            console.error('[HERO] playVideoMode not found');
+        }
     };
 
 })();

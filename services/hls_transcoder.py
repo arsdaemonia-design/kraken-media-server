@@ -231,7 +231,7 @@ class HLSTranscoder:
             "-f", "hls",
             "-hls_time", "6",
             "-hls_list_size", "0",
-            "-hls_flags", "delete_segments+append_list",
+            "-hls_flags", "append_list",
             "-hls_segment_filename", os.path.join(output_dir, "seg_%03d.ts"),
             playlist_path
         ]

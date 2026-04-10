@@ -10,7 +10,104 @@ Kraken es un servidor multimedia local con modo online/offline. Permite:
 - Acceso via LAN o Cloudflare tunnel
 
 ## Versión Actual
-- **v4.86** (2026-04-01)
+- **v4.88** (2026-04-09)
+
+---
+
+# Cambios Recientes (v4.88 - 2026-04-09)
+
+## 🎨 Optimización de Interfaz y UX (Header Unificado)
+- **Cabecera Persistente:** Se refactorizó el `desktop-header` para que la barra de búsqueda y los filtros de género sean omnipresentes. Ya no desaparecen al entrar en modo Video.
+- **Fix de Menús Desplegables:** Corregido el error de "clipping" donde los menús de ordenamiento se cortaban en móvil. Se eliminó el scroll horizontal forzado y se permitió el wrap de elementos.
+- **Limpieza de UI:** Eliminada la fila de géneros redundante dentro del contenedor de video, centralizando todo el control en el header superior.
+
+## 📊 Rediseño de Estadísticas (Premium Dashboard)
+- **Sistema de 4 Cajas Independientes:** Nuevo layout con estética "Netflix-Glass" usando gradientes y efectos de hover.
+  - **Caja 1 (Mis Estadísticas / Artistas):** Dividida internamente con un botón de acceso al panel maestro y conteo de artistas.
+  - **Caja 2 (Música):** Conteo total de canciones con acento en color esmeralda.
+  - **Caja 3 (Películas):** Conteo de títulos/carpetas únicos de cine.
+  - **Caja 4 (Series):** Conteo de títulos únicos de series.
+- **Visibilidad de Archivos:** Se mantuvo el conteo total de archivos de video (ej. "2,121 archivos") para control de volumen de la biblioteca.
+
+## 🔀 Reproducción Aleatoria Mejorada
+- **Series Shuffle (Modo Maratón):**
+  - Nuevo botón **"Aleatorio"** en el banner Hero de las series.
+  - Implementación de `playShuffleSeries` en `assets/js/hero_series.js`.
+  - Escaneo recursivo de episodios + Algoritmo Fisher-Yates.
+  - Creación automática de cola de 20 episodios.
+- **Maratón de Video Global:** Optimización de la lógica para que respete los filtros activos y se limite a 10 elementos, evitando sobrecarga del reproductor.
+- **Fix de Referencia Crítico:** Corregido error donde la cola de reproducción no se actualizaba al usar `window.playerQueue` (cambiado a referencia global directa).
+
+## 🛠️ Mejoras Técnicas Adicionales
+- **Consolidación de `playerQueue`:** Sincronización de las variables de estado del reproductor entre los módulos externos (`hero_series.js`) y el núcleo de la aplicación (`index.html`).
+- **Optimización de `renderLibraryStats`:** Refactorización de la lógica de detección de películas/series basada en la estructura de carpetas y metadatos de TMDB.
+
+## 🎬 Motor de Video y HLS (Core Streaming v2.0)
+- **Aceleración por Hardware (GPU):**
+  - Implementación de detección automática de hardware para transcodificación en tiempo real.
+  - Soporte nativo para **NVIDIA NVENC** (Windows) y **Apple VideoToolbox** (Mac/Silicon).
+  - Reducción drástica del uso de CPU y latencia durante el streaming de archivos de alta resolución.
+- **Gestión Avanzada de Audio:**
+  - Mapeo inteligente de metadatos: los códigos de idioma se transforman en nombres legibles (Español, Japonés, Inglés, etc.).
+  - Cambio de pista de audio "en caliente" sincronizado con la posición actual del reproductor.
+  - Normalización forzada a **AAC Estéreo (192k)** para máxima compatibilidad, eliminando fallos en navegadores al reproducir audios 5.1 o DTS.
+- **Subtítulos Externos Automáticos:**
+  - Escaneo de archivos `.srt` y `.vtt` en la raíz del video y en subcarpetas de soporte (`/subs`, `/subtitles`).
+  - Integración directa en el selector de pistas del ArtPlayer.
+- **Inteligencia DirectPlay:** Algoritmo de bypass automático que detecta cuándo un archivo (MP4/WebM) es 100% compatible para saltarse la transcodificación y reproducirse al instante.
+
+## 🛠️ Herramientas de Mantenimiento
+- **Kraken Media Doctor (`doctor_videos.py`):** Nueva utilidad independiente para optimizar archivos MP4 mediante el flag `faststart`.
+  - Permite que los videos en formato MP4 comiencen la reproducción instantáneamente (DirectPlay) sin necesidad de descargar el archivo completo primero.
+  - Proceso seguro: usa una copia temporal y reemplaza el original solo si la optimización es exitosa.
+
+## 🔒 Sistema de Control Parental (Kid Mode)
+- **Modo Niños por Usuario:** Cada usuario puede activar/desactivar el modo niños desde el panel de administración.
+  - Columna `is_kid_mode` en tabla `users` para persistencia por usuario.
+  - Toggle visual en el panel de administración de usuarios.
+- **Filtrado de Contenido por Rating:**
+  - Ratings bloqueados automáticamente: `PG-13`, `R`, `NC-17`, `TV-14`, `TV-MA`, `18`, `16`, `16+`, `18+`, `MA15+`, `M`, `C`, `D`, `MA`, `R18+`, `R15+`.
+  - Contenido permitido: `G`, `PG`, y contenido sin clasificar (asume seguro).
+  - Función `filtrar_contenido_kid_mode()` en `routes/api.py` que filtra la biblioteca en tiempo real.
+- **Extracción Automática de Ratings:** El sistema extrae automáticamente el rating de certificación desde TMDB API:
+  - Para películas: endpoint `release_dates` con prioridad MX > US > otros.
+  - Para series: endpoint `content_ratings` con prioridad MX > US > otros.
+  - Guardado en columna `tmdb_rating` de la tabla `media`.
+- **Visualización de Ratings:**
+  - Badges de rating visibles en las tarjetas de contenido.
+  - Colores diferenciados: rojo para contenido restringido, verde para todo público.
+  - Soporte para múltiples sistemas de clasificación (MPAA, BBFC, CERO, etc.).
+
+## 🎨 Mejoras en la Vista de Video (Netflix-Style)
+- **Rediseño Completo de la Vista de Video:**
+  - Nueva interfaz tipo Netflix con hero banner dinámico.
+  - Botones de acción reorganizados: "Reproducir", "Aleatorio", "Episodios", "Más información".
+  - Eliminación de elementos duplicados en cabecera para reducir ruido visual.
+- **Hero Banner Premium:**
+  - Backdrop de TMDB con gradientes superpuestos.
+  - Información enriquecida: año, rating de estrellas, número de temporadas.
+  - Géneros como chips visuales.
+  - Carrusel del reparto principal con fotos de actores.
+  - Sinopsis con límite de líneas y botón "Más información".
+- **Botonería Contextual Inteligente:**
+  - Series: Botón "Reproducir" (abre lista de episodios), "Aleatorio" (modo maratón), "Episodios".
+  - Películas: Botón "Reproducir" (play directo), "Más información".
+  - Detección automática de tipo de contenido vía `folder_type`.
+
+## 📺 Reproductor de Video Mejorado
+- **Continuar Reproducción (Resume Playback):**
+  - Tracking de progreso guardado cada 10 segundos vía API `/api/progress`.
+  - Soporte para modo fallback (reproductor nativo) y ArtPlayer/HLS.
+  - Botón "Continuar" en hero con barra de progreso visual y etiqueta del episodio.
+  - Funciona para series (muestra temporada y episodio) y películas.
+- **Metadatas Enriquecidas en Reproductor:**
+  - Título dinámico en controles del player.
+  - Información de temporada/episodio para series.
+  - Soporte para cambio de pista de audio "en caliente" manteniendo posición actual.
+- **Integración de Thumbnails:**
+  - Sistema de carátulas `tmdb_poster` priorizado sobre thumbnails generados.
+  - Fallback a thumbnails FFmpeg para videos sin metadata TMDB.
+  - Posters de series guardados por carpeta (no por episodio individual).
 
 ---
 

@@ -58,48 +58,142 @@ def search_tv_show(title, year=None):
 
 
 def get_movie_details(movie_id):
-    """Obtiene detalles completos de una película"""
-    # Usar cache si ya tenemos el resultado
+    """Obtiene detalles completos de una película incluyendo rating"""
     cache_key = f"movie_{movie_id}"
     if cache_key in _TMDB_CACHE:
         return _TMDB_CACHE[cache_key]
-    
+
     params = {
         'api_key': TMDB_API_KEY,
         'language': 'es-MX',
-        'append_to_response': 'credits'
+        'append_to_response': 'credits,release_dates'
     }
-    
+
     try:
         response = requests.get(f"{TMDB_BASE_URL}/movie/{movie_id}", params=params, timeout=10)
         result = response.json()
+        
+        # Extraer rating de certificación
+        rating = extract_movie_rating(result)
+        result['content_rating'] = rating
+        
         _TMDB_CACHE[cache_key] = result
         return result
     except Exception as e:
         print(f"Error obteniendo detalles: {e}")
-    return None
+        return None
 
 
 def get_tv_details(tv_id):
-    """Obtiene detalles completos de una serie"""
-    # Usar cache si ya tenemos el resultado
+    """Obtiene detalles completos de una serie incluyendo rating"""
     cache_key = f"tv_{tv_id}"
     if cache_key in _TMDB_CACHE:
         return _TMDB_CACHE[cache_key]
-    
+
     params = {
         'api_key': TMDB_API_KEY,
-        'language': 'es-MX'
+        'language': 'es-MX',
+        'append_to_response': 'credits,content_ratings'
     }
-    
+
     try:
         response = requests.get(f"{TMDB_BASE_URL}/tv/{tv_id}", params=params, timeout=10)
         result = response.json()
+        
+        # Extraer rating de certificación
+        rating = extract_tv_rating(result)
+        result['content_rating'] = rating
+        
         _TMDB_CACHE[cache_key] = result
         return result
     except Exception as e:
         print(f"Error obteniendo detalles: {e}")
+        return None
+
+
+def extract_movie_rating(tmdb_data):
+    """Extrae el rating de certificación de película (MX > US > otros)"""
+    release_dates = tmdb_data.get('release_dates', {}).get('results', [])
+    
+    # Buscar certificación MX primero, luego US, luego cualquiera
+    for country in ['MX', 'US']:
+        for entry in release_dates:
+            if entry.get('iso_3166_1') == country:
+                for release in entry.get('release_dates', []):
+                    cert = release.get('certification')
+                    if cert:
+                        return normalize_rating(cert)
+    
+    # Si no encontramos, buscar cualquier certificación
+    for entry in release_dates:
+        for release in entry.get('release_dates', []):
+            cert = release.get('certification')
+            if cert:
+                return normalize_rating(cert)
+    
     return None
+
+
+def extract_tv_rating(tmdb_data):
+    """Extrae el rating de certificación de serie (MX > US > otros)"""
+    content_ratings = tmdb_data.get('content_ratings', {}).get('results', [])
+    
+    # Buscar rating MX primero, luego US, luego cualquiera
+    for country in ['MX', 'US']:
+        for entry in content_ratings:
+            if entry.get('iso_3166_1') == country:
+                rating = entry.get('rating')
+                if rating:
+                    return normalize_rating(rating)
+    
+    # Si no encontramos, buscar cualquier rating
+    for entry in content_ratings:
+        rating = entry.get('rating')
+        if rating:
+            return normalize_rating(rating)
+    
+    return None
+
+
+def normalize_rating(rating):
+    """Normaliza el rating a formato estándar (G, PG, PG-13, R, NC-17)"""
+    if not rating:
+        return None
+    
+    rating = rating.strip().upper()
+    
+    # Mapeo de ratings MX (México)
+    mx_map = {
+        'AA': 'G',      # Aptas para todos
+        'A': 'G',       # Aptas para todos
+        'B': 'PG',      # Recomendadas para mayores de 12 años
+        'B-15': 'PG-13', # Mayores de 15 años
+        'C': 'R',       # Mayores de 18 años
+        'D': 'NC-17',   # Contenido para adultos
+    }
+    
+    # Mapeo de ratings US
+    us_map = {
+        'G': 'G',
+        'PG': 'PG',
+        'PG-13': 'PG-13',
+        'R': 'R',
+        'NC-17': 'NC-17',
+        'TV-Y': 'G',
+        'TV-Y7': 'PG',
+        'TV-G': 'G',
+        'TV-PG': 'PG',
+        'TV-14': 'PG-13',
+        'TV-MA': 'R',
+    }
+    
+    # Intentar mapeo MX o US
+    normalized = mx_map.get(rating) or us_map.get(rating)
+    if normalized:
+        return normalized
+    
+    # Si no hay mapeo, devolver el rating original
+    return rating
 
 
 def download_poster(poster_path, thumbnails_folder, filename_base):
@@ -246,6 +340,35 @@ def extract_series_name_from_path(file_path):
         
         if clean_name and len(clean_name) > 1:
             return clean_name
+    
+    return None
+
+
+def get_series_folder_name(file_path):
+    """
+    Retorna el nombre EXACTO de la carpeta padre de la serie (con TMDB ID incluido).
+    Ej: 'Dragon Ball (tmdb-12609)' → 'Dragon Ball (tmdb-12609)'
+    """
+    parts = Path(file_path).parts
+    
+    skip_words = {'video', 'series', 'anime', 'peliculas', 'movies', 'tv', 'documentales'}
+    season_words = {'temporada', 'season', 'temp', 's0', 't0'}
+    
+    for part in parts:
+        part_lower = part.lower()
+        
+        if part_lower in skip_words:
+            continue
+        
+        if any(k in part_lower for k in season_words):
+            continue
+        
+        if re.match(r'^\d+$', part):
+            continue
+        
+        # Retornar nombre EXACTO de la carpeta (sin limpiar)
+        if len(part) > 1:
+            return part
     
     return None
 

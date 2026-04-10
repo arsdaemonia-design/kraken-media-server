@@ -10,15 +10,15 @@
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#10b981">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<script>window.APP_VERSION="4.87"; window.OFFLINE_VERSION="4.87"; window.OFFLINE_LIMIT=500; window.GITHUB_REPO="arsdaemonia-design/kraken-media-server";</script>
+<script>window.APP_VERSION="4.88"; window.OFFLINE_VERSION="4.88"; window.OFFLINE_LIMIT=500; window.GITHUB_REPO="arsdaemonia-design/kraken-media-server";</script>
 <script src="/assets/tailwind.min.js"></script>
 <script src="/assets/html2canvas.min.js"></script>
-    <!-- Chromecast SDK & Plugin -->
+    <!-- Chromecast: SDK + Plugin (el plugin maneja la inicialización) -->
+    <script>window.__krakenCastReady = false;</script>
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
-    <script src="https://unpkg.com/artplayer-plugin-chromecast/dist/artplayer-plugin-chromecast.js"></script>
+    <script src="/assets/artplayer-plugin-chromecast.js"></script>
     <script>
-        window.__krakenCastReady = false;
-
+        // Conectar con la inicialización del plugin
         function initKrakenCastContext() {
             try {
                 if (!(window.cast && window.cast.framework && window.chrome && window.chrome.cast)) {
@@ -39,7 +39,7 @@
 
         window.__onGCastApiAvailable = function(isAvailable) {
             if (!isAvailable) {
-                console.warn('[CAST] Google Cast API not available in this browser/device');
+                console.warn('[CAST] Google Cast API not available');
                 return;
             }
             initKrakenCastContext();
@@ -1350,40 +1350,17 @@
 
 
 
-        /* ==================== FIX MÓVIL - PEGAR EN TU <style> ====================
+        /* ==================== FIX MÓVIL ====================
    SOLUCIONA:
-   1. Forzar orientación vertical (bloquear rotación)
+   1. Orientación: se maneja por JS (landscape al ver video)
    2. Botones flotantes NO se enciman con reproductor
    3. Reducir espacio vacío inferior
 */
 
-        /* 1. FORZAR ORIENTACIÓN VERTICAL EN MÓVILES */
+        /* Orientación móvil: solo mostrar aviso si NO hay video activo */
         @media screen and (max-width: 768px) {
-
-            /* Bloquear rotación horizontal en móviles */
             html {
                 transform-origin: left top;
-            }
-
-            /* Si el usuario rota el dispositivo, mostrar mensaje */
-            @media (orientation: landscape) {
-                body::before {
-                    content: "Por favor, gira tu dispositivo verticalmente 📱";
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    bottom: 0;
-                    background: rgba(0, 0, 0, 0.95);
-                    color: white;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    z-index: 99999;
-                    font-size: 1.2rem;
-                    text-align: center;
-                    padding: 2rem;
-                }
             }
         }
 
@@ -1523,7 +1500,8 @@
                 },
                 headers: () => {
                     const token = localStorage.getItem(AUTH_KEY);
-                    return token ? { 'Authorization': 'Bearer ' + token } : {};
+                    return token ? { 'Authorization': 'Bearer ' + token,
+                        'X-Master-Pin': sessionStorage.getItem('kraken_master_pin') || '' } : {};
                 }
             };
             
@@ -1549,7 +1527,8 @@
                 console.log('[AUTH] Token found:', token ? 'yes' : 'no');
                 if (token) {
                     try {
-                        const res = await originalFetch('/api/auth/verify', { headers: { 'Authorization': 'Bearer ' + token } });
+                        const res = await originalFetch('/api/auth/verify', { headers: { 'Authorization': 'Bearer ' + token,
+                        'X-Master-Pin': sessionStorage.getItem('kraken_master_pin') || '' } });
                         const data = await res.json();
                         console.log('[AUTH] Verify response:', data);
                         if (data.valid) {
@@ -2263,13 +2242,13 @@
 
             </div>
             <div id="view-library" class="animate-fade-in pb-32">
-                <div id="lib-stats" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6"></div>
+                <div id="lib-stats" class="grid grid-cols-2 sm:grid-cols-4 gap-2 md:gap-3 mb-3 md:mb-4"></div>
 <!-- ========== MÓVIL: HEADER SUPERIOR ========== -->
             <div id="mobile-header"
                 class="md:hidden sticky top-0 bg-[#171717]/95 backdrop-blur-md z-40 border-b border-white/5 shadow-xl">
 
                     <!-- FILA 1: Título -->
-                    <div class="text-center pb-3 px-3 border-t border-white/5 pt-3">
+                    <div class="text-center py-2 px-3 border-t border-white/5">
                         <div class="text-[10px] font-bold text-emerald-500 uppercase tracking-widest flex items-center justify-center gap-1"
                             id="lib-mode-label-mobile">
                             <i class="fa-solid fa-music"></i> MÚSICA
@@ -2279,26 +2258,26 @@
                     </div>
 
                     <!-- FILA 2: Menú / Play / Select -->
-                    <div class="flex gap-2 p-3">
+                    <div class="flex gap-2 px-3 py-2">
                         <button onclick="toggleSidebar()"
-                            class="flex-1 bg-[#18181b] hover:bg-emerald-700 border border-emerald-700 text-white rounded-lg py-3 font-bold text-xs transition flex items-center justify-center gap-2">
+                            class="flex-1 bg-[#18181b] hover:bg-emerald-700 border border-emerald-700 text-white rounded-lg py-2.5 font-bold text-xs transition flex items-center justify-center gap-2">
                             <i class="fa-solid fa-bars"></i>
                             <span class="hidden sm:inline">Menú</span>
                         </button>
 
                         <button onclick="playContext()"
-                            class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg py-3 font-bold text-xs transition shadow-lg flex items-center justify-center gap-2">
+                            class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg py-2.5 font-bold text-xs transition shadow-lg flex items-center justify-center gap-2">
                             <i class="fa-solid fa-play ml-0.5"></i>
                             <span class="hidden sm:inline">Play</span>
                         </button>
 
                         <button onclick="toggleSelectionMode()" id="btn-select-mode-mobile"
-                            class="flex-1 bg-[#18181b] hover:bg-emerald-700 border border-emerald-700 text-emerald-300 rounded-lg py-3 font-bold text-xs transition flex items-center justify-center gap-2">
+                            class="flex-1 bg-[#18181b] hover:bg-emerald-700 border border-emerald-700 text-emerald-300 rounded-lg py-2.5 font-bold text-xs transition flex items-center justify-center gap-2">
                             <i class="fa-regular fa-square-check"></i>
                             <span class="hidden sm:inline">Sel</span>
                         </button>
                         <button onclick="selectAllVisible()" id="btn-select-all-vis-mobile" class="hidden flex-1 bg-[#18181b] hover:bg-emerald-700 border border-dashed
-               border-emerald-700 text-emerald-300 rounded-lg py-3 font-bold text-xs
+               border-emerald-700 text-emerald-300 rounded-lg py-2.5 font-bold text-xs
                transition flex items-center justify-center gap-2">
                             <i class="fa-solid fa-check-double"></i>
                             <span class="hidden sm:inline">Todos</span>
@@ -2306,7 +2285,7 @@
                     </div>
 
                     <!-- FILA 3: Búsqueda -->
-                    <div class="px-3 pb-3">
+                    <div class="px-3 pb-2">
                         <div class="relative">
                             <i class="fa-solid fa-search absolute left-3 top-2.5 text-emerald-500 text-xs"></i>
                             <input type="text" id="lib-search-mobile" onkeyup="renderLib()" placeholder="Buscar..."
@@ -2314,8 +2293,11 @@
                         </div>
                     </div>
 
+                    <!-- FILA VIDEO MOBILE: Pills de filtros (Solo visible en modo video) -->
+                    <div id="video-pills-row-mobile" class="hidden flex-wrap items-center gap-1.5 px-3 pb-2"></div>
+
                     <!-- FILA 4: Ordenar + Vista -->
-                    <div id="mobile-controls-row" class="px-3 pb-3 flex gap-2 items-center relative">
+                    <div id="mobile-controls-row" class="px-3 pb-2 flex gap-2 items-center relative">
                         <button onclick="toggleSortMenuMobile()"
                             class="filter-chip shrink-0 text-[9px] flex items-center gap-1">
                             <i class="fa-solid fa-arrow-down-wide-short"></i> Ordenar
@@ -2374,9 +2356,8 @@
 
 <!-- ========== DESKTOP: HEADER ========== -->
             <div id="desktop-header"
-                class="hidden md:block sticky top-0 bg-[#171717]/95 backdrop-blur-md p-3 z-40 rounded-xl border border-white/5 shadow-xl mb-4 flex flex-col gap-3">
-
-                    <div class="flex items-center justify-between">
+                class="hidden md:flex sticky top-0 bg-[#171717]/95 backdrop-blur-md p-2.5 z-40 rounded-xl border border-white/5 shadow-xl mb-3 flex-col gap-2">
+                <div class="flex items-center justify-between">
                         <div class="min-w-[150px] shrink-0">
                             <div class="text-[9px] font-bold text-emerald-500 uppercase tracking-widest flex items-center gap-1"
                                 id="lib-mode-label-desktop">
@@ -2422,23 +2403,29 @@
                         </div>
                     </div>
 
-                    <div class="flex flex-col gap-2">
-                        <div class="flex gap-2">
+                    <!-- UNIFIED SEARCH + ACTIONS ROW -->
+                    <div class="flex flex-col gap-1.5">
+                        <div class="flex items-center gap-2">
+                            <!-- Buscador Universal -->
                             <div class="relative flex-1">
                                 <i class="fa-solid fa-search absolute left-3 top-2.5 text-emerald-500 text-xs"></i>
                                 <input type="text" id="lib-search-desktop" onkeyup="renderLib()" placeholder="Buscar..."
                                     class="w-full bg-[#18181b] border border-emerald-700 rounded-lg py-2 pl-9 pr-4 text-xs outline-none focus:border-emerald-500 text-white">
                             </div>
 
-                            <div
-                                class="bg-[#18181b] rounded-lg p-1 border border-emerald-700 flex items-center shrink-0">
-                                <button onclick="setView('grid')" id="view-grid" class="btn-view"><i
-                                        class="fa-solid fa-border-all text-sm"></i></button>
+                            <!-- Controles de Vista Audio (Grid/List) -->
+                            <div id="audio-view-controls" class="bg-[#18181b] rounded-lg p-1 border border-emerald-700 flex items-center shrink-0">
+                                <button onclick="setView('grid')" id="view-grid" class="btn-view"><i class="fa-solid fa-border-all text-sm"></i></button>
                                 <div class="w-px h-4 bg-emerald-600 mx-1"></div>
-                                <button onclick="setView('list')" id="view-list" class="btn-view"><i
-                                        class="fa-solid fa-list text-sm"></i></button>
+                                <button onclick="setView('list')" id="view-list" class="btn-view"><i class="fa-solid fa-list text-sm"></i></button>
                             </div>
+
+                            <!-- Botones Select/Todos (Movidos aquí para que no estorben en video) -->
+                            <div id="audio-actions-header" class="hidden gap-2 shrink-0"></div>
                         </div>
+
+                        <!-- FILA VIDEO: Pills de filtros (Solo visible en modo video) -->
+                        <div id="video-pills-row" class="hidden flex flex-wrap items-center gap-2 pb-1"></div>
                     </div>
 
                     <div id="desktop-actions-row" class="flex items-center gap-2 relative">
@@ -2452,13 +2439,17 @@
                             <i class="fa-solid fa-play mr-1"></i> Play All
                         </button>
 
-                        <button onclick="toggleSelectionMode()" id="btn-select-mode" class="filter-chip shrink-0">
-                            <i class="fa-regular fa-square-check mr-1"></i> Select
-                        </button>
-                        <button onclick="selectAllVisible()" id="btn-select-all-vis"
-                            class="filter-chip hidden border-dashed shrink-0">
-                            <i class="fa-solid fa-check-double mr-1"></i> Todos
-                        </button>
+                        <div id="desktop-selection-anchor" class="shrink-0">
+                            <div id="desktop-selection-controls" class="flex items-center gap-2">
+                                <button onclick="toggleSelectionMode()" id="btn-select-mode" class="filter-chip shrink-0">
+                                    <i class="fa-regular fa-square-check mr-1"></i> Select
+                                </button>
+                                <button onclick="selectAllVisible()" id="btn-select-all-vis"
+                                    class="filter-chip hidden border-dashed shrink-0">
+                                    <i class="fa-solid fa-check-double mr-1"></i> Todos
+                                </button>
+                            </div>
+                        </div>
 
 
                         <div id="sort-menu-desktop"
@@ -3072,10 +3063,11 @@
 
                     if (cancionActual && cancionActual.path) {
                         try {
-                            console.log(`🔍 Buscando similares a: ${cancionActual.title}`);
+                            console.log(`🔍 Buscando similares a: ${cancionActual.title} | path: ${cancionActual.path}`);
                             showToast("🎵 Analizando gustos musicales...", "info");
 
-                            const encodedPath = encodeURIComponent(cancionActual.path);
+                            // Codificar cada segmento por separado para preservar las barras en la URL
+                            const encodedPath = cancionActual.path.split('/').map(s => encodeURIComponent(s)).join('/');
                             const response = await fetch(`/similar/${encodedPath}`);
                             const data = await response.json();
 
@@ -3909,7 +3901,8 @@
                 
                 fetch('/api/admin/users', {
                     headers: { 
-                        'Authorization': 'Bearer ' + token
+                        'Authorization': 'Bearer ' + token,
+                        'X-Master-Pin': sessionStorage.getItem('kraken_master_pin') || ''
                     }
                 })
                 .then(r => {
@@ -3930,16 +3923,26 @@
                                         <div class="text-zinc-500 text-xs">${u.email} ${u.is_superadmin ? '<span class="text-yellow-400">ADMIN</span>' : ''}</div>
                                     </div>
                                 </div>
-                            ${!u.is_superadmin ? `
-                                <div class="flex gap-2">
-                                    <button onclick="adminResetPassword('${u.email}')" class="text-zinc-400 hover:text-white text-sm">
-                                        <i class="fa-solid fa-key"></i>
-                                    </button>
-                                    <button onclick="adminDeleteUser('${u.email}')" class="text-red-400 hover:text-red-300 text-sm">
-                                        <i class="fa-solid fa-trash"></i>
-                                    </button>
-                                </div>
-                            ` : ''}
+                                ${!u.is_superadmin ? `
+                                    <div class="flex items-center gap-3">
+                                        <!-- Switch Modo Niños -->
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs text-zinc-400">Niños</span>
+                                            <button onclick="adminToggleKidMode('${u.email}', ${u.is_kid_mode ? 'false' : 'true'})" 
+                                                class="w-12 h-6 rounded-full transition-colors duration-200 ${u.is_kid_mode ? 'bg-emerald-500' : 'bg-zinc-600'}">
+                                                <div class="w-4 h-4 bg-white rounded-full transition-transform duration-200 ${u.is_kid_mode ? 'translate-x-7' : 'translate-x-1'}"></div>
+                                            </button>
+                                        </div>
+                                        <div class="flex gap-2 ml-2">
+                                            <button onclick="adminResetPassword('${u.email}')" class="text-zinc-400 hover:text-white text-sm">
+                                                <i class="fa-solid fa-key"></i>
+                                            </button>
+                                            <button onclick="adminDeleteUser('${u.email}')" class="text-red-400 hover:text-red-300 text-sm">
+                                                <i class="fa-solid fa-trash"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                ` : ''}
                             </div>
                         `).join('');
                     } else {
@@ -3982,27 +3985,54 @@
                 });
             }
             
-            function adminDeleteUser(email) {
-                if (!confirm('¿Eliminar a ' + email + '?')) return;
-                
-                fetch('/api/admin/users/' + encodeURIComponent(email), {
-                    method: 'DELETE',
-                    headers: { 
-                        'Authorization': 'Bearer ' + (window.krakenAuth?.getToken() || '')
-                    }
-                })
-                .then(r => r.json())
-                .then(d => {
-                    if (d.ok) {
-                        showToast('Usuario eliminado', 'success');
-                        loadAdminUsers();
-                    } else {
-                        showToast(d.error, 'error');
-                    }
-                });
-            }
-            
-            function adminResetPassword(email) {
+function adminDeleteUser(email) {
+            if (!confirm('¿Eliminar a ' + email + '?')) return;
+
+            fetch('/api/admin/users/' + encodeURIComponent(email), {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': 'Bearer ' + (window.krakenAuth?.getToken() || '')
+                }
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.ok) {
+                    showToast('Usuario eliminado', 'success');
+                    loadAdminUsers();
+                } else {
+                    showToast(d.error, 'error');
+                }
+            });
+        }
+
+        function adminToggleKidMode(email, enable) {
+            const action = enable ? 'activar' : 'desactivar';
+            if (!confirm(`¿${action.charAt(0).toUpperCase() + action.slice(1)} modo niños para ${email}?`)) return;
+
+            fetch('/api/admin/users/' + encodeURIComponent(email) + '/kidmode', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (window.krakenAuth?.getToken() || '')
+                },
+                body: JSON.stringify({ is_kid_mode: enable })
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.ok) {
+                    showToast(`Modo niños ${enable ? 'activado' : 'desactivado'}`, 'success');
+                    loadAdminUsers();
+                } else {
+                    showToast(d.error || 'Error al cambiar modo niños', 'error');
+                }
+            })
+            .catch(e => {
+                console.error('Error:', e);
+                showToast('Error de conexión', 'error');
+            });
+        }
+
+        function adminResetPassword(email) {
                 const newPass = prompt('Nueva contraseña para ' + email + ':');
                 if (!newPass || newPass.length < 4) {
                     showToast('Contraseña mínimo 4 caracteres', 'error');
@@ -4952,17 +4982,23 @@
 
                 // --- MODO SINGLE ---
                 if (paths.length === 1) {
-                    const f = libData.files.find(x => x.path === paths[0]);
+                    const reqPath = paths[0];
+                    const cleanPath = reqPath.endsWith('/') ? reqPath.slice(0, -1) : reqPath;
+                    let f = libData.files.find(x => x.path === reqPath || x.path === cleanPath);
+                    const isVirtualFolder = !f && libData.files.some(x => x.path.startsWith(cleanPath + '/'));
+                    if (!f && isVirtualFolder) f = libData.files.find(x => x.path.startsWith(cleanPath + '/'));
+                    
                     if (!f) return;
 
-                    // Detectar si es video
-                    const isVideo = f.path.endsWith('.mkv') || f.path.endsWith('.mp4') || f.path.endsWith('.avi') || f.path.endsWith('.mov') || f.path.endsWith('.webm');
+                    // Detectar si es video (o carpeta virtual de video)
+                    const isVideo = isVirtualFolder || f.path.endsWith('.mkv') || f.path.endsWith('.mp4') || f.path.endsWith('.avi') || f.path.endsWith('.mov') || f.path.endsWith('.webm');
                     
-                    title.innerText = isVideo ? "Editar Video" : "Editar Canción";
+                    title.innerText = isVideo ? (isVirtualFolder ? "Editar Serie/Carpeta" : "Editar Video") : "Editar Canción";
 
                     let fieldsHtml = `
             <input type="hidden" id="edit-mode" value="single">
-            <input type="hidden" id="edit-path" value="${f.path}">`;
+            <input type="hidden" id="edit-path" value="${reqPath}">
+            <input type="hidden" id="edit-is-virtual" value="${isVirtualFolder ? 'true' : 'false'}">`;
 
                     if (!isVideo) {
                         fieldsHtml += `
@@ -4991,12 +5027,56 @@
             </div>
 
             <hr class="border-white/10">`;
+                    } else {
+                        // VIDEO FIELDS
+                        fieldsHtml += `
+            <div>
+                <label class="text-[10px] text-emerald-500 font-bold uppercase">Título / Serie</label>
+                <input type="text" id="edit-tmdb-title" value="${f.tmdb_title || f.title || ''}"
+                       class="w-full bg-emerald-900 border border-emerald-700 rounded-lg px-3 py-2 text-xs text-white outline-none mb-2">
+            </div>
+            
+            <div class="flex gap-2 mb-2">
+                <div class="flex-1">
+                    <label class="text-[10px] text-emerald-500 font-bold uppercase">Clasificación (Rating)</label>
+                    <select id="edit-tmdb-rating" class="w-full bg-emerald-900 border border-emerald-700 rounded-lg px-3 py-2 text-xs text-white outline-none">
+                        <option value="">- Vacío (Apto para todos) -</option>
+                        <option value="G" ${f.tmdb_rating=='G'?'selected':''}>G</option>
+                        <option value="PG" ${f.tmdb_rating=='PG'?'selected':''}>PG</option>
+                        <option value="PG-13" ${f.tmdb_rating=='PG-13'?'selected':''}>PG-13</option>
+                        <option value="B-15" ${f.tmdb_rating=='B-15'?'selected':''}>B-15</option>
+                        <option value="R" ${f.tmdb_rating=='R'?'selected':''}>R</option>
+                        <option value="M" ${f.tmdb_rating=='M'?'selected':''}>M</option>
+                        <option value="16" ${f.tmdb_rating=='16'?'selected':''}>16</option>
+                        <option value="18" ${f.tmdb_rating=='18'?'selected':''}>18</option>
+                        <option value="R18+" ${f.tmdb_rating=='R18+'?'selected':''}>R18+</option>
+                        <option value="NC-17" ${f.tmdb_rating=='NC-17'?'selected':''}>NC-17</option>
+                    </select>
+                </div>
+                <div class="flex-1">
+                    <label class="text-[10px] text-emerald-500 font-bold uppercase">Año</label>
+                    <input type="text" id="edit-tmdb-year" value="${f.tmdb_year || ''}"
+                           class="w-full bg-emerald-900 border border-emerald-700 rounded-lg px-3 py-2 text-xs text-white outline-none">
+                </div>
+            </div>
+            
+            <div>
+                <label class="text-[10px] text-emerald-500 font-bold uppercase">Géneros</label>
+                <input type="text" id="edit-tmdb-genres" value="${f.tmdb_genres || ''}" placeholder="Ej: Animación, Horror..."
+                       class="w-full bg-emerald-900 border border-emerald-700 rounded-lg px-3 py-2 text-xs text-white outline-none mb-2">
+            </div>
+            
+            <div>
+                <label class="text-[10px] text-emerald-500 font-bold uppercase">Sinopsis (Overview)</label>
+                <textarea id="edit-tmdb-overview" rows="3" class="w-full bg-emerald-900 border border-emerald-700 rounded-lg px-3 py-2 text-xs text-white outline-none resize-none">${f.tmdb_overview || ''}</textarea>
+            </div>
+            <hr class="border-white/10 my-2">`;
                     }
 
                     fieldsHtml += `
             <div>
-                <label class="text-[10px] text-emerald-500 font-bold uppercase">Carátula (URL)</label>
-                <input type="text" id="edit-cover" placeholder="http://..."
+                <label class="text-[10px] text-emerald-500 font-bold uppercase">Póster / Carátula (URL opcional)</label>
+                <input type="text" id="edit-cover" placeholder="http://... (Reemplaza imagen actual)"
                        class="w-full bg-emerald-900 border border-emerald-700 rounded-lg px-3 py-2 text-xs text-white outline-none">
             </div>`;
                     
@@ -5006,8 +5086,45 @@
                 // --- MODO BATCH ---
                 else {
                     title.innerText = `Editar ${paths.length} archivos`;
+                    
+                    let fBatch = libData.files.find(x => x.path === paths[0]);
+                    let isVideoBatch = (fBatch && (fBatch.path.endsWith('.mkv') || fBatch.path.endsWith('.mp4') || fBatch.path.endsWith('.avi')));
 
-                    fields.innerHTML = `
+                    if(isVideoBatch) {
+                        fields.innerHTML = `
+            <input type="hidden" id="edit-mode" value="batch-video">
+            <p class="text-[10px] text-emerald-400 mb-3 block">Deja un campo en blanco si NO quieres alterarlo.</p>
+            <div class="flex gap-2 mb-2">
+                <div class="flex-1">
+                    <label class="text-[10px] text-emerald-500 font-bold uppercase">Rating</label>
+                    <select id="edit-tmdb-rating" class="w-full bg-emerald-900 border border-emerald-700 rounded-lg px-3 py-2 text-xs text-white outline-none">
+                        <option value="">- No cambiar -</option>
+                        <option value="VACIO">- Borrar Rating (Vacío) -</option>
+                        <option value="G">G</option>
+                        <option value="PG">PG</option>
+                        <option value="PG-13">PG-13</option>
+                        <option value="B-15">B-15</option>
+                        <option value="R">R</option>
+                        <option value="M">M</option>
+                        <option value="16">16</option>
+                        <option value="18">18</option>
+                        <option value="R18+">R18+</option>
+                        <option value="NC-17">NC-17</option>
+                    </select>
+                </div>
+                <div class="flex-1">
+                    <label class="text-[10px] text-emerald-500 font-bold uppercase">Año</label>
+                    <input type="text" id="edit-tmdb-year" placeholder="Ej: 2024" class="w-full bg-emerald-900 border border-emerald-700 rounded-lg px-3 py-2 text-xs text-white outline-none">
+                </div>
+            </div>
+            <div>
+                <label class="text-[10px] text-emerald-500 font-bold uppercase">Título Padre</label>
+                <input type="text" id="edit-tmdb-title" placeholder="Ej: The Office..." class="w-full bg-emerald-900 border border-emerald-700 rounded-lg px-3 py-2 text-xs text-white outline-none mb-2">
+            </div>
+            <p class="text-[9px] text-red-400 mt-2 italic">* Se sobreescribirá en TODOS los videos seleccionados.</p>
+        `;
+                    } else {
+                        fields.innerHTML = `
             <input type="hidden" id="edit-mode" value="batch">
             <input type="hidden" id="batch-target" value="genre">
 
@@ -5032,8 +5149,8 @@
                 * Se aplicará a todos los seleccionados.
             </p>
         `;
-
-                    renderBatchField('genre');
+                        renderBatchField('genre');
+                    }
                 }
 
                 document.getElementById('edit-modal').classList.remove('hidden');
@@ -5117,9 +5234,36 @@
                     if (artist) dataTags.artist = artist;
                 }
 
-                // Para videos, NUNCA llamar a update_tags (lo corrompe). Solo update_cover
-                const isVideo = paths[0] && (paths[0].endsWith('.mkv') || paths[0].endsWith('.mp4') || paths[0].endsWith('.avi') || paths[0].endsWith('.mov') || paths[0].endsWith('.webm'));
-                if (!isVideo && Object.keys(dataTags).length > 1) {
+                const isVirtualFolder = document.getElementById('edit-is-virtual')?.value === 'true';
+                const isVideo = isVirtualFolder || (paths[0] && (paths[0].endsWith('.mkv') || paths[0].endsWith('.mp4') || paths[0].endsWith('.avi') || paths[0].endsWith('.mov') || paths[0].endsWith('.webm')));
+                
+                if (mode === 'batch-video' || (isVideo && mode === 'single')) {
+                    const rValue = document.getElementById('edit-tmdb-rating')?.value;
+                    const rToSend = (rValue === 'VACIO') ? 'VACIO' : (rValue || "");
+                    
+                    const videoTags = {
+                        path: (mode === 'batch-video') ? null : paths[0],
+                        paths_array: (mode === 'batch-video') ? paths : [],
+                        is_virtual: (mode === 'batch-video') ? false : isVirtualFolder,
+                        tmdb_title: document.getElementById('edit-tmdb-title')?.value || "",
+                        tmdb_rating: rToSend,
+                        tmdb_year: document.getElementById('edit-tmdb-year')?.value || "",
+                        tmdb_genres: document.getElementById('edit-tmdb-genres')?.value || "",
+                        tmdb_overview: document.getElementById('edit-tmdb-overview')?.value || "",
+                        pin: pin
+                    };
+                    const r = await fetch('/library/update_video_meta', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(videoTags)
+                    });
+                    const d = await r.json();
+                    if (d.error) {
+                        clearPinIfInvalid(d.error);
+                        alert(d.error);
+                        return;
+                    }
+                } else if (!isVideo && Object.keys(dataTags).length > 1) {
                     dataTags.pin = pin; // 🔐 inyectar el PIN
                     const r = await fetch('/update_tags', {
                         method: 'POST',
@@ -5622,6 +5766,11 @@
                 const view = document.getElementById('view-player');
                 if (view) view.classList.remove('hidden');
 
+                // Forzar landscape en móvil al ver video
+                if (window.innerWidth < 768 && window.screen && window.screen.orientation && window.screen.orientation.lock) {
+                    window.screen.orientation.lock('landscape').catch(() => {});
+                }
+
                 // Ocultar modal de ajustes por defecto
                 const modalAjustes = document.getElementById('audio-subtitle-modal');
                 if (modalAjustes) {
@@ -5629,7 +5778,7 @@
                     modalAjustes.style.pointerEvents = 'none';
                 }
 
-                const screen = document.getElementById('cine-screen');
+                const screenEl = document.getElementById('cine-screen');
 
                 // Mostrar loader
                 const loader = document.getElementById('video-loader');
@@ -5653,8 +5802,8 @@
                 const sid = localStorage.getItem('kraken_sid') || 'default';
 
                 // Preparar container para ArtPlayer
-                if (screen) {
-                    screen.innerHTML = `
+                if (screenEl) {
+                    screenEl.innerHTML = `
                         <button onclick="exitVideoMode()" class="absolute top-4 left-4 z-[9999] bg-black/50 hover:bg-black/80 text-white rounded-full w-10 h-10 flex items-center justify-center transition backdrop-blur border border-white/10 shadow-lg group">
                             <i class="fa-solid fa-arrow-left transition-transform group-hover:-translate-x-1"></i>
                         </button>
@@ -5852,7 +6001,7 @@
                             const artSettings = [audioSettingBase, subtitleSettingBase];
                             let artConfig = {
                                 container: container,
-                                url: data.url,
+                                url: data.url.startsWith('/') ? (window.location.origin + data.url) : data.url,
                                 title: file.title || '',
                                 theme: '#10b981',
                                 setting: true,
@@ -5866,9 +6015,7 @@
                                 plugins: castSupported ? [
                                     artplayerPluginChromecast({
                                         mimeType: data.direct_play ? 'video/mp4' : 'application/x-mpegURL',
-                                        receiverApplicationId: (window.chrome && window.chrome.cast && window.chrome.cast.media)
-                                            ? window.chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID
-                                            : undefined
+                                        receiverApplicationId: 'CC1AD845'
                                     }),
                                 ] : [],
                                 mobile: {
@@ -5928,7 +6075,7 @@
                             // Si hay subtítulo detectado, cargarlo
                             if (data.subtitle_url) {
                                 artConfig.subtitle = {
-                                    url: data.subtitle_url,
+                                    url: data.subtitle_url.startsWith('/') ? (window.location.origin + data.subtitle_url) : data.subtitle_url,
                                     type: data.subtitle_url.endsWith('.vtt') ? 'vtt' : 'srt',
                                     style: { color: '#fff', fontSize: '20px' },
                                     encoding: 'utf-8'
@@ -5964,6 +6111,19 @@
                                                 if (window.currentArtPlayer && window.currentArtPlayer.refreshAudioTracks) {
                                                     window.currentArtPlayer.refreshAudioTracks();
                                                 }
+                                            });
+                                            // FIX: Detectar fin de stream HLS para auto-avanzar
+                                            hls.on(Hls.Events.BUFFER_EOS, () => {
+                                                console.log('[HLS] BUFFER_EOS detectado — fin del stream');
+                                                setTimeout(() => {
+                                                    if (window.currentArtPlayer) {
+                                                        const art = window.currentArtPlayer;
+                                                        if (art.duration > 0 && art.currentTime >= art.duration - 2) {
+                                                            stopProgressTracking();
+                                                            playNext();
+                                                        }
+                                                    }
+                                                }, 1500);
                                             });
                                         }
                                         art.on('destroy', () => hls.destroy());
@@ -6177,6 +6337,135 @@
                             // Auto-avanzar al terminar
                             art.on('ended', () => { stopProgressTracking(); playNext(); });
 
+                            // Safety net: timeupdate backup para HLS streams que no disparan ended
+                            let _endedTriggered = false;
+
+                            // ═══════ OVERLAY "SIGUIENTE EPISODIO" ESTILO NETFLIX ═══════
+                            let _nextEpShown = false;
+                            let _nextEpCountdown = null;
+                            const NEXT_EP_SECONDS = 30; // Mostrar 30s antes del final
+
+                            function showNextEpisodeOverlay() {
+                                if (_nextEpShown) return;
+                                const nextIdx = currentTrackIndex + 1;
+                                if (nextIdx >= playerQueue.length) return; // No hay siguiente
+                                const nextFile = playerQueue[nextIdx];
+                                if (!nextFile) return;
+                                const isVid = nextFile.type === 'video' || (nextFile.path && (nextFile.path.endsWith('.mp4') || nextFile.path.endsWith('.mkv') || nextFile.path.endsWith('.avi') || nextFile.path.endsWith('.webm')));
+                                if (!isVid) return;
+
+                                _nextEpShown = true;
+                                const nextTitle = nextFile.title || nextFile.path.split('/').pop().replace(/\.[^.]+$/, '');
+
+                                // Crear el overlay
+                                const overlay = document.createElement('div');
+                                overlay.id = 'next-ep-overlay';
+                                overlay.style.cssText = `
+                                    position: absolute; bottom: 80px; right: 20px; z-index: 9998;
+                                    background: rgba(0,0,0,0.85); backdrop-filter: blur(12px);
+                                    border: 1px solid rgba(16,185,129,0.4); border-radius: 12px;
+                                    padding: 14px 20px; min-width: 220px; max-width: 320px;
+                                    animation: slideInRight 0.4s ease-out;
+                                    cursor: pointer; transition: all 0.2s;
+                                    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+                                `;
+                                overlay.innerHTML = `
+                                    <div style="display:flex; align-items:center; gap:12px;">
+                                        <div style="flex:1; min-width:0;">
+                                            <div style="font-size:10px; color:#10b981; font-weight:800; text-transform:uppercase; letter-spacing:1.5px; margin-bottom:4px;">
+                                                Siguiente Episodio
+                                            </div>
+                                            <div style="font-size:13px; color:white; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                                ${nextTitle}
+                                            </div>
+                                            <div id="next-ep-countdown" style="font-size:10px; color:#a1a1aa; margin-top:4px;">
+                                                Reproduciendo en <span id="next-ep-seconds" style="color:#10b981; font-weight:bold;">${NEXT_EP_SECONDS}</span>s
+                                            </div>
+                                        </div>
+                                        <div style="display:flex; align-items:center; justify-content:center; width:40px; height:40px; background:linear-gradient(135deg,#10b981,#059669); border-radius:50%; flex-shrink:0;">
+                                            <i class="fa-solid fa-forward-step" style="color:white; font-size:14px;"></i>
+                                        </div>
+                                    </div>
+                                    <div style="margin-top:8px; height:3px; background:rgba(255,255,255,0.1); border-radius:2px; overflow:hidden;">
+                                        <div id="next-ep-progress" style="height:100%; background:#10b981; width:100%; transition: width linear;"></div>
+                                    </div>
+                                `;
+
+                                // Eventos del overlay
+                                overlay.addEventListener('click', () => {
+                                    clearInterval(_nextEpCountdown);
+                                    removeNextEpOverlay();
+                                    _endedTriggered = true;
+                                    stopProgressTracking();
+                                    playNext();
+                                });
+                                overlay.addEventListener('mouseenter', () => {
+                                    overlay.style.borderColor = 'rgba(16,185,129,0.8)';
+                                    overlay.style.transform = 'scale(1.02)';
+                                });
+                                overlay.addEventListener('mouseleave', () => {
+                                    overlay.style.borderColor = 'rgba(16,185,129,0.4)';
+                                    overlay.style.transform = 'scale(1)';
+                                });
+
+                                // Insertar en el container de ArtPlayer
+                                const artContainer = document.getElementById('artplayer-container');
+                                if (artContainer) artContainer.appendChild(overlay);
+
+                                // Countdown
+                                let secondsLeft = NEXT_EP_SECONDS;
+                                _nextEpCountdown = setInterval(() => {
+                                    secondsLeft--;
+                                    const secEl = document.getElementById('next-ep-seconds');
+                                    const progEl = document.getElementById('next-ep-progress');
+                                    if (secEl) secEl.textContent = secondsLeft;
+                                    if (progEl) progEl.style.width = `${(secondsLeft / NEXT_EP_SECONDS) * 100}%`;
+                                    if (secondsLeft <= 0) {
+                                        clearInterval(_nextEpCountdown);
+                                        removeNextEpOverlay();
+                                        _endedTriggered = true;
+                                        stopProgressTracking();
+                                        playNext();
+                                    }
+                                }, 1000);
+                            }
+
+                            function removeNextEpOverlay() {
+                                const el = document.getElementById('next-ep-overlay');
+                                if (el) el.remove();
+                                if (_nextEpCountdown) clearInterval(_nextEpCountdown);
+                            }
+
+                            // Inyectar CSS de animación si no existe
+                            if (!document.getElementById('next-ep-css')) {
+                                const style = document.createElement('style');
+                                style.id = 'next-ep-css';
+                                style.textContent = `
+                                    @keyframes slideInRight {
+                                        from { transform: translateX(100px); opacity: 0; }
+                                        to { transform: translateX(0); opacity: 1; }
+                                    }
+                                `;
+                                document.head.appendChild(style);
+                            }
+
+                            art.on('video:timeupdate', () => {
+                                if (_endedTriggered) return;
+
+                                // Mostrar overlay de siguiente episodio
+                                if (art.duration > 0 && art.currentTime >= art.duration - NEXT_EP_SECONDS && !_nextEpShown) {
+                                    showNextEpisodeOverlay();
+                                }
+
+                                // Safety net: auto-avance si el video llega al final sin disparar ended
+                                if (art.duration > 0 && art.currentTime >= art.duration - 0.5) {
+                                    _endedTriggered = true;
+                                    removeNextEpOverlay();
+                                    console.log('[ArtPlayer] timeupdate safety -> near end, triggering playNext');
+                                    setTimeout(() => { stopProgressTracking(); playNext(); }, 1000);
+                                }
+                            });
+
                             // Guardar referencia para cleanup
                             window.currentArtPlayer = art;
 
@@ -6206,8 +6495,8 @@
 
             // Fallback directo sin HLS
             function showFallbackPlayer(screen, videoPath, file) {
-                if (screen) {
-                    screen.innerHTML = `
+                if (screenEl) {
+                    screenEl.innerHTML = `
                         <video id="main-video"
                                src="/descargas/${videoPath}"
                                preload="auto"
@@ -6628,7 +6917,10 @@
                     stopProgressTracking();
                 }
 
-                
+                // Desbloquear orientación al salir de video
+                if (window.screen && window.screen.orientation && window.screen.orientation.unlock) {
+                    window.screen.orientation.unlock();
+                }
                 // Mostrar la UI nativa de Kraken de nuevo
                 document.querySelectorAll('.cine-controls, .cine-header, #dt-left, #dt-right, #dt-center').forEach(el => {
                     if (el) el.classList.remove('hidden');
@@ -6640,8 +6932,8 @@
                     v.src = "";
                 }
 
-                const screen = document.getElementById('cine-screen');
-                if (screen) screen.innerHTML = "";
+                const screenEl = document.getElementById('cine-screen');
+                if (screenEl) screenEl.innerHTML = "";
 
                 const view = document.getElementById('view-player');
                 if (view) view.classList.add('hidden');
@@ -7675,18 +7967,56 @@
                 const zoomControls = document.getElementById('lib-zoom-controls');
                 const desktopActionsRow = document.getElementById('desktop-actions-row');
                 const mobileControlsRow = document.getElementById('mobile-controls-row');
+                const audioViewControls = document.getElementById('audio-view-controls');
+                const audioActionsHeader = document.getElementById('audio-actions-header');
+                const videoPillsRow = document.getElementById('video-pills-row');
+                const videoPillsRowMobile = document.getElementById('video-pills-row-mobile');
+                const desktopSelectionAnchor = document.getElementById('desktop-selection-anchor');
+                const desktopSelectionControls = document.getElementById('desktop-selection-controls');
+                const videoPathDepth = (currentPath || '').split('/').filter(Boolean).length;
+                const isVideoDetailView = isVideoMode && videoPathDepth >= 3;
+
+                if (desktopSelectionAnchor && desktopSelectionControls && desktopSelectionControls.parentElement !== desktopSelectionAnchor) {
+                    desktopSelectionAnchor.appendChild(desktopSelectionControls);
+                }
+
                 if (modeLabelDesktop) modeLabelDesktop.classList.toggle('hidden', isVideoMode);
                 if (modeLabelMobile) modeLabelMobile.classList.toggle('hidden', isVideoMode);
                 if (zoomControls) zoomControls.classList.toggle('hidden', isVideoMode);
-                if (desktopActionsRow) desktopActionsRow.classList.toggle('hidden', isVideoMode);
+                if (desktopActionsRow) desktopActionsRow.classList.remove('hidden');
                 if (mobileControlsRow) mobileControlsRow.classList.toggle('hidden', isVideoMode);
+
+                // Controles específicos de Audio en el header
+                if (audioViewControls) audioViewControls.classList.toggle('hidden', isVideoMode);
+                if (audioActionsHeader) audioActionsHeader.classList.add('hidden');
+
+                // Pills de Video en el header (Desktop)
+                if (videoPillsRow) {
+                    if (isVideoMode && !isVideoDetailView) {
+                        videoPillsRow.classList.remove('hidden');
+                        videoPillsRow.classList.add('flex');
+                    } else {
+                        videoPillsRow.classList.add('hidden');
+                        videoPillsRow.classList.remove('flex');
+                    }
+                }
+                // Pills de Video en el header (Mobile)
+                if (videoPillsRowMobile) {
+                    if (isVideoMode && !isVideoDetailView) {
+                        videoPillsRowMobile.classList.remove('hidden');
+                        videoPillsRowMobile.classList.add('flex');
+                    } else {
+                        videoPillsRowMobile.classList.add('hidden');
+                        videoPillsRowMobile.classList.remove('flex');
+                    }
+                }
                 ['all', 'tracks', 'albums', 'artists', 'playlists'].forEach(s => {
                     const d = document.getElementById('tab-search-dsktp-' + s);
                     const m = document.getElementById('tab-search-mob-' + s);
                     if (d) d.classList.toggle('hidden', isVideoMode);
                     if (m) m.classList.toggle('hidden', isVideoMode);
                 });
-                document.querySelectorAll('button[onclick="playContext()"], button[onclick="toggleSelectionMode()"], button[onclick="toggleSortMenuDesktop()"], button[onclick="toggleSortMenuMobile()"]').forEach(btn => {
+                document.querySelectorAll('button[onclick="playContext()"], button[onclick="toggleSortMenuDesktop()"], button[onclick="toggleSortMenuMobile()"]').forEach(btn => {
                     btn.classList.toggle('hidden', isVideoMode);
                 });
 
@@ -7790,17 +8120,21 @@
 
                             if (!uniqueShowsMap.has(showKey)) {
                                 if (isSeries) {
+                                    const cleanName = f.tmdb_title || showTitle.replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim();
+                                    // Calcular poster de la carpeta usando el nombre exacto de la carpeta
+                                    const folderPoster = f.tmdb_poster ? f.tmdb_poster : (showTitle + '.jpg');
                                     uniqueShowsMap.set(showKey, {
                                         type: 'folder',
-                                        name: f.tmdb_title || showTitle.replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim(),
-                                        title: f.tmdb_title || showTitle.replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim(),
+                                        name: cleanName,
+                                        title: cleanName,
                                         path: showPathToOpen,
-                                        sample: f, // Para extraer carátula, género y metadata original
+                                        sample: f,
                                         date: f.date,
                                         rating: f.rating,
                                         folder_type: f.folder_type,
                                         tmdb_id: f.tmdb_id,
-                                        tmdb_poster: f.tmdb_poster
+                                        tmdb_poster: folderPoster,
+                                        tmdb_rating: libData.files.find(v => v.path.startsWith(showPathToOpen) && v.tmdb_rating)?.tmdb_rating
                                     });
                                 } else {
                                     uniqueShowsMap.set(showKey, f);
@@ -7810,54 +8144,335 @@
 
                         const uniqueShows = Array.from(uniqueShowsMap.values());
 
-                        // 4. HEADER UI DE CATEGORÍAS TIPO PILLS
-                        window.changeNetflixCategory = function (newCat) {
-                            window.netflixActiveCategory = newCat;
-                            window.netflixGenreFilter = null; // Reset genre filter on category change
-                            const mobileInput = document.getElementById('lib-search-mobile');
-                            const desktopInput = document.getElementById('lib-search-desktop');
-                            if (mobileInput) mobileInput.value = '';
-                            if (desktopInput) desktopInput.value = '';
-                            renderLib();
-                        };
+                    // 5. EXTRAER GÉNEROS DISPONIBLES (antes de los dropdowns)
+                    const allGenres = new Set();
+                    uniqueShows.forEach(show => {
+                        const src = show.sample ? show.sample : show;
+                        const g = (src.genre || '').split(',').map(s => s.trim()).filter(Boolean);
+                        g.forEach(genre => allGenres.add(genre));
+                    });
+                    const genresArray = Array.from(allGenres).sort();
 
-                        const pillsHtml = categoriesArray.map(cat => {
-                            const isActive = cat === window.netflixActiveCategory;
-                            return `<button onclick="changeNetflixCategory('${cat}')" 
-                                class="shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-all duration-200 border
-                                ${isActive 
-                                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.2)]' 
-                                    : 'bg-white/5 text-zinc-400 border-white/10 hover:bg-white/10 hover:text-white hover:border-white/20'
-                                }">${cat}</button>`;
-                        }).join('');
+                    // Inicializar filtro si no existe
+                    if (!window.netflixGenreFilter) window.netflixGenreFilter = null;
 
-                        // Barra de herramientas EN UNA SOLA LÍNEA (sin input inline)
-                        const toolbarHtml = `
-                            <div class="w-full flex items-center gap-2 px-2 md:px-0 mt-4 mb-4 overflow-x-auto no-scrollbar">
-                                <!-- Categorías -->
-                                <div class="flex gap-2 shrink-0">
-                                    ${pillsHtml}
-                                </div>
-                                
-                                <!-- Botones Select/Todos -->
-                                <div class="flex gap-2 shrink-0 ml-auto">
-                                    <button onclick="toggleSelectionMode()" class="px-3 py-1.5 rounded-full text-xs font-bold bg-white/10 text-white/70 hover:bg-white/20 border border-white/10 transition">
-                                        <i class="fa-regular fa-square-check"></i>
-                                    </button>
-                                    <button onclick="selectAllVisible()" class="px-3 py-1.5 rounded-full text-xs font-bold bg-white/10 text-white/70 hover:bg-white/20 border border-white/10 transition">
-                                        <i class="fa-solid fa-check-double"></i>
-                                    </button>
-                                </div>
+                    window.filterByGenre = function(genre) {
+                        window.netflixGenreFilter = (window.netflixGenreFilter === genre) ? null : genre;
+                        renderLib();
+                    };
+
+                    // 4. HEADER UI DE CATEGORÍAS - BOTÓN DROPDOWN
+                    window.hideDropdownByType = function(type, exceptRoot = null) {
+                        const selector = type === 'category' ? '[data-category-root]' : '[data-genre-root]';
+                        const menuSel = type === 'category' ? '[data-category-menu]' : '[data-genre-menu]';
+                        const chevronSel = type === 'category' ? '[data-category-chevron]' : '[data-genre-chevron]';
+                        document.querySelectorAll(selector).forEach(root => {
+                            if (exceptRoot && root === exceptRoot) return;
+                            const menu = root.querySelector(menuSel);
+                            const chev = root.querySelector(chevronSel);
+                            if (menu) menu.classList.add('hidden');
+                            if (chev) chev.style.transform = 'rotate(0deg)';
+                        });
+                    };
+
+                    window.changeNetflixCategory = function(newCat) {
+                        window.netflixActiveCategory = newCat;
+                        window.netflixGenreFilter = null;
+                        const mobileInput = document.getElementById('lib-search-mobile');
+                        const desktopInput = document.getElementById('lib-search-desktop');
+                        if (mobileInput) mobileInput.value = '';
+                        if (desktopInput) desktopInput.value = '';
+                        window.hideDropdownByType('category');
+                        renderLib();
+                    };
+
+                    window.toggleCategoryDropdown = function(event) {
+                        const btn = event?.currentTarget;
+                        const root = btn ? btn.closest('[data-category-root]') : null;
+                        const menu = root ? root.querySelector('[data-category-menu]') : null;
+                        const chev = root ? root.querySelector('[data-category-chevron]') : null;
+                        if (!root || !menu) return;
+                        const isHidden = menu.classList.contains('hidden');
+                        window.hideDropdownByType('category', root);
+                        if (isHidden) {
+                            menu.classList.remove('hidden');
+                            if (chev) chev.style.transform = 'rotate(180deg)';
+                        } else {
+                            menu.classList.add('hidden');
+                            if (chev) chev.style.transform = 'rotate(0deg)';
+                        }
+                    };
+
+                    // Generar menú del dropdown de CATEGORÍAS
+                    const categoryMenuHtml = categoriesArray.map(cat => {
+                        const isActive = cat === window.netflixActiveCategory;
+                        return `<button onclick="changeNetflixCategory('${cat}')"
+                            class="w-full text-left px-4 py-2.5 text-sm font-bold transition-colors
+                            ${isActive
+                                ? 'bg-emerald-500 text-white'
+                                : 'text-zinc-300 hover:bg-white/10 hover:text-white'
+                            }">${cat}</button>`;
+                    }).join('');
+
+                    // Generar menú del dropdown de GÉNEROS
+                    const genreMenuHtml = genresArray.map(g => {
+                        const isActive = window.netflixGenreFilter === g;
+                        return `<button onclick="filterByGenre('${g.replace(/'/g, "\\'")}')"
+                            class="w-full text-left px-4 py-2.5 text-sm font-bold transition-colors
+                            ${isActive
+                                ? 'bg-emerald-500 text-white'
+                                : 'text-zinc-300 hover:bg-white/10 hover:text-white'
+                            }">${g}</button>`;
+                    }).join('');
+
+                    // Funciones para dropdowns
+                    window.toggleGenreDropdown = function(event) {
+                        const btn = event?.currentTarget;
+                        const root = btn ? btn.closest('[data-genre-root]') : null;
+                        const menu = root ? root.querySelector('[data-genre-menu]') : null;
+                        const chev = root ? root.querySelector('[data-genre-chevron]') : null;
+                        if (!root || !menu) return;
+                        const isHidden = menu.classList.contains('hidden');
+                        window.hideDropdownByType('genre', root);
+                        if (isHidden) {
+                            menu.classList.remove('hidden');
+                            if (chev) chev.style.transform = 'rotate(180deg)';
+                        } else {
+                            menu.classList.add('hidden');
+                            if (chev) chev.style.transform = 'rotate(0deg)';
+                        }
+                    };
+
+                    if (!window.__krakenDropdownOutsideBound) {
+                        window.__krakenDropdownOutsideBound = true;
+                        document.addEventListener('click', function(e) {
+                            if (!e.target.closest('[data-category-root]')) window.hideDropdownByType?.('category');
+                            if (!e.target.closest('[data-genre-root]')) window.hideDropdownByType?.('genre');
+                        });
+                    }
+
+                    window.toggleRecommendations = function() {
+                        const section = document.getElementById('recommendations-section');
+                        const btn = document.getElementById('recommendations-btn');
+                        if (section) {
+                            const isHidden = section.classList.contains('hidden');
+                            if (isHidden) {
+                                section.classList.remove('hidden');
+                                if (btn) btn.classList.add('bg-emerald-500/40', 'border-emerald-500/60');
+                                // Scroll a la sección
+                                setTimeout(() => {
+                                    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                }, 100);
+                            } else {
+                                section.classList.add('hidden');
+                                if (btn) btn.classList.remove('bg-emerald-500/40', 'border-emerald-500/60');
+                            }
+                        }
+                    };
+
+                    // Botón dropdown de CATEGORÍAS
+                    const categoryDropdownHtml = `
+                        <div class="relative shrink-0" data-category-root>
+                            <button onclick="toggleCategoryDropdown(event)" 
+                                class="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold 
+                                bg-gradient-to-r from-emerald-500 to-emerald-600 
+                                text-white shadow-lg shadow-emerald-500/30
+                                hover:from-emerald-400 hover:to-emerald-500 
+                                active:scale-95 transition-all duration-200">
+                                <i class="fa-solid fa-layer-group"></i>
+                                <span>${window.netflixActiveCategory || 'Categorías'}</span>
+                                <i class="fa-solid fa-chevron-down text-xs ml-1 transition-transform" data-category-chevron></i>
+                            </button>
+                            <div data-category-menu class="hidden absolute top-full left-0 mt-2 w-56 
+                                bg-[#1a1a1a] rounded-xl border border-white/10 shadow-2xl 
+                                overflow-hidden z-50 max-h-[60vh] overflow-y-auto">
+                                ${categoryMenuHtml}
                             </div>
-                        `;
+                        </div>
+                    `;
 
+                    // Botón dropdown de GÉNEROS (solo si hay géneros)
+                    const genreDropdownHtml = genresArray.length > 0 ? `
+                        <div class="relative shrink-0" data-genre-root>
+                            <button onclick="toggleGenreDropdown(event)" 
+                                class="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold 
+                                bg-gradient-to-r from-cyan-600 to-cyan-700 
+                                text-white shadow-lg shadow-cyan-600/30
+                                hover:from-cyan-500 hover:to-cyan-600 
+                                active:scale-95 transition-all duration-200">
+                                <i class="fa-solid fa-tags"></i>
+                                <span>${window.netflixGenreFilter || 'Géneros'}</span>
+                                <i class="fa-solid fa-chevron-down text-xs ml-1 transition-transform" data-genre-chevron></i>
+                            </button>
+                            <div data-genre-menu class="hidden absolute top-full left-0 mt-2 w-56 
+                                bg-[#1a1a1a] rounded-xl border border-white/10 shadow-2xl 
+                                overflow-hidden z-50 max-h-[60vh] overflow-y-auto">
+                                <button onclick="filterByGenre(null)"
+                                    class="w-full text-left px-4 py-2.5 text-sm font-bold transition-colors
+                                    ${!window.netflixGenreFilter
+                                        ? 'bg-emerald-500 text-white'
+                                        : 'text-zinc-300 hover:bg-white/10 hover:text-white'
+                                    }">Todos</button>
+                                ${genreMenuHtml}
+                            </div>
+                        </div>
+                    ` : '';
+
+                    // Botón RECOMENDACIONES
+                    const recommendationsBtnHtml = `
+                        <div class="relative shrink-0">
+                            <button id="recommendations-btn" onclick="toggleRecommendations()" 
+                                class="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold 
+                                bg-gradient-to-r from-violet-600 to-violet-700 
+                                text-white shadow-lg shadow-violet-600/30
+                                hover:from-violet-500 hover:to-violet-600 
+                                active:scale-95 transition-all duration-200 border border-transparent">
+                                <i class="fa-solid fa-thumbs-up"></i>
+                                <span>Recomendaciones</span>
+                            </button>
+                        </div>
+                    `;
+
+                    // ─── FUNCIÓN MARATÓN ───────────────────────────────────────────
+                    window.shuffleVideoMarathon = function() {
+                        // Recoger todos los videos visibles según la selección actual
+                        let filteredShows = uniqueShows;
+                        if (window.netflixGenreFilter) {
+                            filteredShows = uniqueShows.filter(show => {
+                                const src = show.sample ? show.sample : show;
+                                const genres = (src.genre || '').split(',').map(s => s.trim().toLowerCase());
+                                return genres.includes(window.netflixGenreFilter.toLowerCase());
+                            });
+                        }
+
+                        let videoFiles = [];
+                        filteredShows.forEach(show => {
+                            if (show.type === 'folder') {
+                                // Es una serie: agregar todos sus episodios en orden
+                                const folderPath = (show.path || '').replace(/\\/g, '/').replace(/\/$/, '');
+                                const eps = (libData.files || []).filter(f => {
+                                    if (f.type !== 'video') return false;
+                                    const p = (f.path || '').replace(/\\/g, '/');
+                                    return p.startsWith(folderPath + '/') || p.startsWith(folderPath);
+                                });
+                                // Para series, agregar en orden pero la serie misma va mezclada
+                                videoFiles.push({ _isSeries: true, episodes: eps, show });
+                            } else {
+                                // Es una película: agregar directamente
+                                videoFiles.push({ _isSeries: false, file: show });
+                            }
+                        });
+
+                        if (videoFiles.length === 0) {
+                            showToast('No hay videos para el Maratón', 'error');
+                            return;
+                        }
+
+                        // Fisher-Yates shuffle sobre los shows (no los episodios individuales)
+                        for (let i = videoFiles.length - 1; i > 0; i--) {
+                            const j = Math.floor(Math.random() * (i + 1));
+                            [videoFiles[i], videoFiles[j]] = [videoFiles[j], videoFiles[i]];
+                        }
+
+                        // Tomar máximo 10 shows para el maratón
+                        const marathonShows = videoFiles.slice(0, 10);
+
+                        // Aplanar: series en orden, películas directas
+                        const queue = [];
+                        marathonShows.forEach(item => {
+                            if (item._isSeries) {
+                                // Para series: mete el primer episodio disponible (1 por serie)
+                                const sorted = [...item.episodes].sort((a, b) => (a.path || '').localeCompare(b.path || ''));
+                                if (sorted[0]) queue.push(sorted[0]);
+                            } else {
+                                const f = item.file.sample ? item.file.sample : item.file;
+                                if (f && f.path) queue.push(f);
+                            }
+                        });
+
+                        if (queue.length === 0) {
+                            showToast('No se encontraron archivos de video', 'error');
+                            return;
+                        }
+
+                        const catLabel = window.netflixGenreFilter
+                            ? window.netflixGenreFilter
+                            : (window.netflixActiveCategory || 'Video');
+
+                        playerQueue = queue;
+                        currentTrackIndex = 0;
+                        showToast(`🎲 Maratón de ${catLabel}: ${queue.length} títulos`, 'success');
+                        playVideoMode(playerQueue[0]);
+                    };
+
+                    // Botón Maratón (píldora ámbar integrada al grupo de filtros)
+                    const marathonBtnHtml = `
+                        <div class="relative shrink-0">
+                            <button onclick="shuffleVideoMarathon()"
+                                class="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold
+                                bg-gradient-to-r from-amber-500 to-orange-500
+                                text-white shadow-lg shadow-amber-500/30
+                                hover:from-amber-400 hover:to-orange-400
+                                active:scale-95 transition-all duration-200">
+                                <i class="fa-solid fa-shuffle"></i>
+                                <span>Maratón</span>
+                            </button>
+                        </div>
+                    `;
+
+                    // Barra de herramientas con los 4 botones
+                    const toolbarHtml = `
+                        <div class="w-full flex flex-wrap items-center gap-3 px-2 md:px-0 mt-4 mb-4">
+                            <!-- Botones de filtros -->
+                            <div class="flex flex-wrap items-center gap-2">
+                                ${categoryDropdownHtml}
+                                ${genreDropdownHtml}
+                                ${recommendationsBtnHtml}
+                                ${marathonBtnHtml}
+                            </div>
+
+                            <!-- Botones Select/Todos -->
+                            <div class="flex gap-2 shrink-0 ml-auto">
+                                <button onclick="toggleSelectionMode()" class="px-3 py-2 rounded-full text-xs font-bold bg-white/10 text-white/70 hover:bg-white/20 border border-white/10 transition">
+                                    <i class="fa-regular fa-square-check"></i>
+                                </button>
+                                <button onclick="selectAllVisible()" class="px-3 py-2 rounded-full text-xs font-bold bg-white/10 text-white/70 hover:bg-white/20 border border-white/10 transition">
+                                    <i class="fa-solid fa-check-double"></i>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+
+                    // ── Inyectar pills en el header sticky (video-pills-row) ──────────
+                    const pillsContainer = document.getElementById('video-pills-row');
+                    if (pillsContainer) {
+                        pillsContainer.innerHTML = `
+                            ${categoryDropdownHtml}
+                            ${genreDropdownHtml}
+                            ${recommendationsBtnHtml}
+                            ${marathonBtnHtml}
+                            <div id="video-selection-anchor" class="flex items-center gap-2 ml-auto"></div>
+                        `;
+                        const videoSelectionAnchor = document.getElementById('video-selection-anchor');
+                        if (isVideoMode && videoSelectionAnchor && desktopSelectionControls) {
+                            videoSelectionAnchor.appendChild(desktopSelectionControls);
+                        }
+                    }
+                    // ── Inyectar pills en el header MOBILE ──────────
+                    const pillsContainerMobile = document.getElementById('video-pills-row-mobile');
+                    if (pillsContainerMobile) {
+                        pillsContainerMobile.innerHTML = `
+                            ${categoryDropdownHtml}
+                            ${genreDropdownHtml}
+                            ${marathonBtnHtml}
+                        `;
+                    }
+
+                        // Guardia: si no hay contenido en esta categoría/género, mostrar mensaje
                         if (uniqueShows.length === 0) {
                             container.innerHTML += '<div class="text-zinc-500 text-center py-10 w-full"><i class="fa-solid fa-ghost text-4xl mb-4 block"></i>Vacío. No hay videos en esta categoría.</div>';
                             return;
                         }
-
-                        // Subir categorías/pills arriba del hero en video root
-                        container.innerHTML += toolbarHtml;
 
                         // 5. HERO BANNER (Modular - hero_series.js)
                         const recentShows = [...uniqueShows].sort((a, b) => (b.date || 0) - (a.date || 0)).slice(0, 30);
@@ -7899,50 +8514,9 @@
                                         requestAnimationFrame(() => { richEl.style.transition = 'opacity 0.5s'; richEl.style.opacity = '1'; });
                                     }
                                 }
-                            }).catch(e => console.warn('[HERO] Async upgrade failed:', e));
-                        }
+                        }).catch(e => console.warn('[HERO] Async upgrade failed:', e));
+                    }
 
-                        // 6. EXTRAER GÉNEROS DISPONIBLES PARA FILTROS
-                        const allGenres = new Set();
-                        uniqueShows.forEach(show => {
-                            const src = show.sample ? show.sample : show;
-                            const g = (src.genre || '').split(',').map(s => s.trim()).filter(Boolean);
-                            g.forEach(genre => allGenres.add(genre));
-                        });
-                        const genresArray = Array.from(allGenres).sort();
-
-                        // Inicializar filtro si no existe
-                        if (!window.netflixGenreFilter) window.netflixGenreFilter = null;
-
-                        window.filterByGenre = function(genre) {
-                            window.netflixGenreFilter = (window.netflixGenreFilter === genre) ? null : genre;
-                            renderLib();
-                        };
-
-                        // Solo mostrar chips de género si hay más de 1
-                        if (genresArray.length > 1) {
-                            const genreChipsHtml = genresArray.map(g => {
-                                const isActive = window.netflixGenreFilter === g;
-                                return `<button onclick="filterByGenre('${g.replace(/'/g, "\\'")}')" 
-                                    class="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold transition-all border
-                                    ${isActive 
-                                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' 
-                                        : 'bg-white/5 text-zinc-500 border-white/5 hover:bg-white/10 hover:text-zinc-300'
-                                    }">${g}</button>`;
-                            }).join('');
-
-                            container.innerHTML += `
-                                <div class="w-full flex items-center gap-2 px-2 md:px-0 mb-4 overflow-x-auto no-scrollbar">
-                                    <button onclick="filterByGenre(null)" 
-                                        class="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold transition-all border
-                                        ${!window.netflixGenreFilter 
-                                            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' 
-                                            : 'bg-white/5 text-zinc-500 border-white/5 hover:bg-white/10 hover:text-zinc-300'
-                                        }">Todos</button>
-                                    ${genreChipsHtml}
-                                </div>
-                            `;
-                        }
 
                         // 7. FILTRAR POR BÚSQUEDA Y GÉNERO
                         let showsToDisplay = uniqueShows;
@@ -7983,6 +8557,109 @@
                             </div>
                         `;
 
+                        // 9. SECCIÓN "RECOMENDADAS" - Filas horizontales por género (oculta por defecto)
+                        // Crear filas de contenido similar basado en género
+                        function createRecommendationsRow(title, items, rowId) {
+                            if (items.length < 2) return ''; // Necesita al menos 2 items
+                            const cardsHtml = items.slice(0, 20).map(item => `
+                                <div class="flex-none w-[140px] md:w-[170px] lg:w-[190px] xl:w-[200px]">
+                                    ${createCard(item)}
+                                </div>
+                            `).join('');
+                            
+                            // Funciones de scroll para desktop
+                            const scrollLeft = `scrollRowLeft('${rowId}')`;
+                            const scrollRight = `scrollRowRight('${rowId}')`;
+                            
+                            return `
+                                <div class="mb-8 relative group/row">
+                                    <h3 class="text-sm font-bold text-white mb-3 px-2 md:px-0 flex items-center gap-2">
+                                        <i class="fa-solid fa-film text-emerald-500"></i>
+                                        ${title}
+                                        <span class="text-[10px] text-zinc-500 font-normal">(${items.length})</span>
+                                    </h3>
+                                    <div class="relative">
+                                        <!-- Flecha izquierda (visible en desktop) -->
+                                        <button onclick="${scrollLeft}" 
+                                            class="hidden md:flex absolute left-0 top-1/2 -translate-y-1/2 z-20 w-10 h-20 items-center justify-center
+                                            bg-black/60 hover:bg-black/80 text-white rounded-r-xl opacity-0 group-hover/row:opacity-100 transition-opacity">
+                                            <i class="fa-solid fa-chevron-left text-2xl"></i>
+                                        </button>
+                                        
+                                        <!-- Contenedor scroll -->
+                                        <div id="${rowId}" class="flex gap-3 overflow-x-auto no-scrollbar pb-2 px-2 md:px-0 scroll-smooth"
+                                            style="-webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none;">
+                                            ${cardsHtml}
+                                        </div>
+                                        
+                                        <!-- Flecha derecha (visible en desktop) -->
+                                        <button onclick="${scrollRight}" 
+                                            class="hidden md:flex absolute right-0 top-1/2 -translate-y-1/2 z-20 w-10 h-20 items-center justify-center
+                                            bg-black/60 hover:bg-black/80 text-white rounded-l-xl opacity-0 group-hover/row:opacity-100 transition-opacity">
+                                            <i class="fa-solid fa-chevron-right text-2xl"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            `;
+                        }
+
+                        // Funciones de scroll para las filas
+                        window.scrollRowLeft = function(rowId) {
+                            const row = document.getElementById(rowId);
+                            if (row) {
+                                row.scrollBy({ left: -400, behavior: 'smooth' });
+                            }
+                        };
+
+                        window.scrollRowRight = function(rowId) {
+                            const row = document.getElementById(rowId);
+                            if (row) {
+                                row.scrollBy({ left: 400, behavior: 'smooth' });
+                            }
+                        };
+
+                        // Agrupar shows por género
+                        const genreGroups = {};
+                        uniqueShows.forEach(show => {
+                            const src = show.sample ? show.sample : show;
+                            const genres = (src.genre || '').split(',').map(s => s.trim()).filter(Boolean);
+                            genres.forEach(g => {
+                                if (!genreGroups[g]) genreGroups[g] = [];
+                                genreGroups[g].push(show);
+                            });
+                        });
+
+                        // Ordenar géneros por cantidad de contenido (más popular primero)
+                        const sortedGenres = Object.keys(genreGroups)
+                            .filter(g => genreGroups[g].length >= 3) // Mínimo 3 items
+                            .sort((a, b) => genreGroups[b].length - genreGroups[a].length)
+                            .slice(0, 8); // Máximo 8 géneros
+
+                        let recommendationsHtml = '';
+                        let rowIndex = 0;
+                        sortedGenres.forEach(genre => {
+                            const items = genreGroups[genre];
+                            const shuffled = [...items].sort(() => Math.random() - 0.5);
+                            recommendationsHtml += createRecommendationsRow(genre, shuffled, 'rec-row-' + rowIndex);
+                            rowIndex++;
+                        });
+
+                        // Agregar la sección de recomendaciones (inicialmente oculta)
+                        if (recommendationsHtml) {
+                            container.innerHTML += `
+                                <div id="recommendations-section" class="hidden mt-8 pt-6 border-t border-white/10">
+                                    <div class="px-2 md:px-0 mb-6">
+                                        <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                                            <i class="fa-solid fa-thumbs-up text-emerald-500"></i>
+                                            Recomendadas
+                                        </h2>
+                                        <p class="text-xs text-zinc-500 mt-1">Desliza para explorar por género</p>
+                                    </div>
+                                    ${recommendationsHtml}
+                                </div>
+                            `;
+                        }
+
                         observeLazyImages();
                         return; // Terminar aquí, ya no procesa el Grid viejo!
                     }
@@ -8015,10 +8692,14 @@
                                     if (!existing) {
                                         map.set(showKey, {
                                             type: 'folder',
-                                        name: f.tmdb_title || showTitle.replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim(),
-                                        title: f.tmdb_title || showTitle.replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim(),
+                                            name: f.tmdb_title || showTitle.replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim(),
+                                            title: f.tmdb_title || showTitle.replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim(),
                                             path: showKey + '/',
                                             sample: f,
+                                            folder_type: f.folder_type,
+                                            tmdb_id: f.tmdb_id,
+                                            tmdb_poster: f.tmdb_poster,
+                                            tmdb_rating: f.tmdb_rating,
                                             date: f.date,
                                             rating: f.rating,
                                             _entityScore: (f._searchScore || 0)
@@ -8070,6 +8751,7 @@
                     // 2. BARRA DE NAVEGACIÓN Y BOTÓN "SUBIR"
                     if (currentPath !== "") {
                         const parts = currentPath.split('/').filter(p => p);
+                        const isShowDetailPath = parts.length >= 3;
                         const simpleTitle = parts[parts.length - 1] || "Mis Series y Videos";
 
                         const titleDesktop = document.getElementById('lib-title-desktop');
@@ -8078,7 +8760,7 @@
                         if (titleMobile) titleMobile.innerText = simpleTitle;
 
                         // BOTÓN SUBIR ADAPTATIVO (video siempre usa barra compacta)
-                        if (shouldForceVideoList) {
+                        if (shouldForceVideoList || isShowDetailPath) {
                             // Diseño tipo BARRA (para modo Lista)
                             container.innerHTML += `
                         <div onclick="navigateUp()" class="w-full bg-[#121212] p-3 rounded-xl hover:bg-[#1e1e1e] transition cursor-pointer group flex items-center justify-center border-2 border-dashed border-white/10 hover:border-emerald-500/50 mb-2">
@@ -8273,11 +8955,13 @@
                                 <i class="fa-solid fa-chevron-right text-emerald-600 mr-2"></i>
                             </div>`;
                             } else if (currentLibrary === 'video') {
-                                const folderPoster = `/caratula/${sample.path}`;
+                                // Intentar usar poster de serie descargado
+                                const seriesPosterName = encodeURIComponent(name) + '.jpg';
+                                const folderPoster = `/caratula/${seriesPosterName}`;
                                 container.innerHTML += `
                             <div data-folder="${name}" onclick="navigateTo(this.dataset.folder)" class="bg-[#121212] p-2 rounded-xl hover:bg-[#1e1e1e] transition cursor-pointer group relative shadow-lg border border-white/5 overflow-hidden">
                                 <div class="relative w-full aspect-[2/3] bg-[#0a0a0a] rounded-lg overflow-hidden">
-                                    <img src="${folderPoster}" class="w-full h-full object-cover opacity-75 group-hover:opacity-100 transition group-hover:scale-105" onerror="this.style.display='none'">
+                                    <img src="${folderPoster}" class="w-full h-full object-cover opacity-75 group-hover:opacity-100 transition group-hover:scale-105" onerror="this.onerror=null; this.src='/caratula/${sample.path.split('/').map(p => encodeURIComponent(p)).join('/')}'; this.classList.add('opacity-50');">
                                     <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent"></div>
                                     <div class="absolute inset-0 flex items-center justify-center">
                                         <i class="fa-solid fa-folder-open text-5xl text-white/85 drop-shadow-xl group-hover:text-emerald-300 transition"></i>
@@ -8417,12 +9101,16 @@
                 renderLib();
             }
 function getCoverUrl(f) {
-  // Para videos: priorizar tmdb_poster si existe
+  // Para shows de series: usar tmdb_poster del show directamente
+  if (f.tmdb_poster) {
+    return `/caratula/${encodeURIComponent(f.tmdb_poster)}`;
+  }
+  // Para episodios individuales: usar sample si existe
   const source = f.sample ? f.sample : f;
   if (source.tmdb_poster) {
     return `/caratula/${encodeURIComponent(source.tmdb_poster)}`;
   }
-  // Fallback: usar path del archivo
+  // Fallback: usar path del archivo (genera thumbnail del video)
   const sourcePath = source ? source.path : f.path;
   return `/caratula/${sourcePath.split('/').map(p => encodeURIComponent(p)).join('/')}`;
 }
@@ -8476,10 +9164,21 @@ function createCard(f) {
                 const isMovieFolder = f.folder_type === 'movie';
                 const isSel = selectedFiles.has(f.path) ? 'ring-2 ring-emerald-500 bg-emerald-900/20' : 'bg-[#121212]';
 
+                // TMDB RATING
+                const ratingVal = f.tmdb_rating;
+                let ratingBadge = '';
+                if (ratingVal) {
+                    let rColor = 'bg-emerald-600/80 border-emerald-500/50';
+                    if (['R', 'NC-17', 'C', 'D', '18', '16', '16+', '18+', 'MA15+', 'R18+', 'R15+'].includes(ratingVal)) rColor = 'bg-red-600/80 border-red-500/50';
+                    else if (['PG-13', 'B-15', 'B', 'M', 'TV-MA', 'TV-14'].includes(ratingVal)) rColor = 'bg-orange-500/80 border-orange-500/50';
+                    else if (['PG', 'A'].includes(ratingVal)) rColor = 'bg-blue-500/80 border-blue-500/50';
+                    ratingBadge = `<div class="absolute top-2 left-2 z-20 px-1.5 py-0.5 rounded ${rColor} backdrop-blur text-white text-[10px] font-bold tracking-wider shadow-lg border uppercase">${escapeHtml(ratingVal)}</div>`;
+                }
+
                 // ⭐ INDICADOR DE FAVORITO (Corazón en la esquina)
                 const isFavorite = f.rating === 1;
                 const favBadge = isFavorite ? `
-        <div class="absolute top-2 left-2 z-20 w-6 h-6 bg-black/60 backdrop-blur rounded-full flex items-center justify-center animate-pulse">
+        <div class="absolute top-2 ${ratingVal ? 'left-12' : 'left-2'} z-20 w-6 h-6 bg-black/60 backdrop-blur rounded-full flex items-center justify-center animate-pulse">
             <i class="fa-solid fa-heart text-emerald-400 text-xs drop-shadow-[0_0_6px_rgba(16,185,129,0.9)]"></i>
         </div>` : '';
 
@@ -8584,7 +9283,8 @@ function createCard(f) {
          data-path="${escapeHtml(f.path)}"
          onclick="${clickAction}">
         <div class="relative w-full ${currentLibrary === 'video' ? 'aspect-[2/3]' : 'aspect-square'} bg-[#0a0a0a] rounded-lg overflow-hidden mb-2 shadow-inner flex items-center justify-center">
-            ${favBadge}
+            ${ratingBadge}
+                ${favBadge}
             <img data-src="${coverUrl}"
                  class="lazy-img w-full h-full object-cover transition duration-500 group-hover:scale-105 z-10 relative"
                  onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden'); this.nextElementSibling.classList.add('flex')">
@@ -9248,6 +9948,13 @@ function createEpisodeRow(f, index) {
             }
             function formatTime(s) { if (isNaN(s)) return "0:00"; const m = Math.floor(s / 60); const sec = Math.floor(s % 60); return `${m}:${sec < 10 ? '0' + sec : sec}`; }
             function onTrackEnded() { if (loopMode === 'one') { audioElement.currentTime = 0; audioElement.play(); } else if (playerQueue.length > 0) { playNext(); } }
+            function playMediaItem(item) {
+                if (!item) return;
+                const isVid = item.type === 'video' || (item.path && (item.path.endsWith('.mp4') || item.path.endsWith('.mkv') || item.path.endsWith('.avi') || item.path.endsWith('.webm')));
+                if (isVid) playVideoMode(item);
+                else playTrack(item);
+            }
+
             function playNext() {
                 // 1. Manejo del Shuffle (Aleatorio local)
                 if (isShuffleOn) {
@@ -9259,7 +9966,7 @@ function createEpisodeRow(f, index) {
                         }
                     }
                     currentTrackIndex = newIndex;
-                    playTrack(playerQueue[currentTrackIndex]);
+                    playMediaItem(playerQueue[currentTrackIndex]);
                     return;
                 }
 
@@ -9267,27 +9974,34 @@ function createEpisodeRow(f, index) {
                 if (currentTrackIndex < playerQueue.length - 1) {
                     // Si hay una canción siguiente, la ponemos
                     currentTrackIndex++;
-                    playTrack(playerQueue[currentTrackIndex]);
+                    playMediaItem(playerQueue[currentTrackIndex]);
                 } else {
                     // 3. SE ACABÓ LA LISTA (El momento mágico)
 
                     if (loopMode === 'all') {
                         // Solo si tienes activado "Repetir Todo", volvemos al inicio
                         currentTrackIndex = 0;
-                        playTrack(playerQueue[0]);
+                        playMediaItem(playerQueue[0]);
                     } else {
-                        // SI NO: Activamos la Radio para que la música no pare
-                        console.log("💿 Fin de la lista. Activando Radio...");
-                        showToast("💽 Autoplay: Cargando más música...", "info");
-                        activarModoRadio();
+                        // Verifica si es video para no poner la "Radio mix"
+                        let wasVideo = playerQueue[currentTrackIndex] && (playerQueue[currentTrackIndex].type === 'video' || (playerQueue[currentTrackIndex].path && (playerQueue[currentTrackIndex].path.endsWith('.mp4') || playerQueue[currentTrackIndex].path.endsWith('.mkv') || playerQueue[currentTrackIndex].path.endsWith('.avi'))));
+                        if (wasVideo) {
+                            console.log("🎬 Fin de la temporada/lista de videos.");
+                            cerrarPlayer();
+                        } else {
+                            // SI NO: Activamos la Radio para que la música no pare
+                            console.log("💿 Fin de la lista. Activando Radio...");
+                            showToast("💽 Autoplay: Cargando más música...", "info");
+                            activarModoRadio();
+                        }
                     }
                 }
             }
-            function playPrevious() { if (playerQueue.length === 0) return; if (audioElement.currentTime > 3) { audioElement.currentTime = 0; return; } currentTrackIndex = currentTrackIndex - 1; if (currentTrackIndex < 0) currentTrackIndex = playerQueue.length - 1; playTrack(playerQueue[currentTrackIndex]); }
-            function jumpToTrack(index) { currentTrackIndex = index; playTrack(playerQueue[index]); }
+            function playPrevious() { if (playerQueue.length === 0) return; if (audioElement && audioElement.currentTime > 3) { audioElement.currentTime = 0; return; } currentTrackIndex = currentTrackIndex - 1; if (currentTrackIndex < 0) currentTrackIndex = playerQueue.length - 1; playMediaItem(playerQueue[currentTrackIndex]); }
+            function jumpToTrack(index) { currentTrackIndex = index; playMediaItem(playerQueue[index]); }
             function removeFromQueue(index) { playerQueue.splice(index, 1); if (currentTrackIndex >= index && currentTrackIndex > 0) currentTrackIndex--; updateQueueUI(); }
             function clearQueue() { if (!confirm('¿Limpiar cola?')) return; playerQueue = []; currentTrackIndex = -1; updateQueueUI(); cerrarPlayer(); }
-            function cerrarPlayer() { document.getElementById('player-bar').classList.add('hidden'); document.getElementById('player-bar').classList.remove('flex'); audioElement.pause(); }
+            function cerrarPlayer() { document.getElementById('player-bar').classList.add('hidden'); document.getElementById('player-bar').classList.remove('flex'); if(window.currentArtPlayer){window.currentArtPlayer.pause();} audioElement.pause(); }
 
             function syncPlayerUI() {
                 // ========== 1. SHUFFLE (Móvil + Desktop) ==========
@@ -10329,26 +11043,68 @@ async function rescanLibrary() {
                 const box = document.getElementById('lib-stats');
                 if (!box || !libData) return;
 
-                const totalSongs = libData.files?.length || 0;
-                const totalVideos = libData.total_videos || 0;
+                const allFiles = libData.files || [];
+                const totalSongs = allFiles.filter(f => f.type === 'audio').length;
                 const artistCount = libData.artist_tree ? Object.keys(libData.artist_tree).length : 0;
+                const videoFiles = allFiles.filter(f => f.type === 'video');
+                const totalVideos = videoFiles.length;
 
+                // Desglose películas vs series
+                const movieSet = new Set();
+                const seriesSet = new Set();
+                videoFiles.forEach(f => {
+                    const parts = (f.path || '').replace(/\\/g, '/').split('/');
+                    if (f.folder_type === 'movie' || parts.length <= 3) {
+                        movieSet.add(parts.slice(0, 3).join('/'));
+                    } else {
+                        seriesSet.add(parts.slice(0, 3).join('/'));
+                    }
+                });
                 box.innerHTML = `
-        <div onclick="ver('stats')" class="bg-[#0A0A0A] border border-white/5 rounded-xl p-2 text-center cursor-pointer hover:border-purple-500/50 hover:bg-purple-900/20 transition">
-            <div class="text-purple-400 text-sm font-bold">📊</div>
-            <div class="text-[9px] text-purple-400 uppercase tracking-wider">Stats</div>
+        <!-- CAJA 1: ESTADÍSTICAS Y CANCIONES -->
+        <div class="col-span-1 group relative overflow-hidden bg-[#121212] border border-white/5 rounded-2xl flex divide-x divide-white/5 transition-all duration-300">
+            <div onclick="ver('stats')" class="flex-1 p-3 text-center cursor-pointer hover:bg-amber-500/10 transition group/stats" title="Ver estadísticas detalladas">
+                <i class="fa-solid fa-chart-simple text-amber-500 text-sm mb-1 opacity-60 group-hover/stats:opacity-100 transition"></i>
+                <div class="text-[8px] font-black text-amber-400 uppercase tracking-widest leading-tight">Mis<br>Estadísticas</div>
+            </div>
+            <div class="flex-1 p-3 text-center bg-white/[0.01]">
+                <div class="text-emerald-400 text-base md:text-lg font-black tracking-tight">${totalSongs.toLocaleString()}</div>
+                <div class="text-[8px] font-black text-emerald-500/60 uppercase tracking-wider mt-0.5">Canciones</div>
+            </div>
         </div>
-        <div class="bg-[#0A0A0A] border border-white/5 rounded-xl p-2 text-center">
-            <div class="text-emerald-400 text-sm font-bold">${totalSongs}</div>
-            <div class="text-[9px] text-emerald-400 uppercase tracking-wider">Canciones</div>
+
+        <!-- CAJA 2: ARTISTAS TOTAL -->
+        <div class="group relative overflow-hidden bg-[#121212] border border-white/5 rounded-2xl p-4 transition-all duration-300 hover:border-orange-500/50 hover:bg-orange-500/[0.03]">
+            <div class="absolute top-0 right-0 p-1.5 opacity-10 group-hover:opacity-30 transition-opacity">
+                <i class="fa-solid fa-microphone-lines text-xl text-orange-500"></i>
+            </div>
+            <div class="relative z-10 text-center">
+                <div class="text-orange-400 text-lg md:text-xl font-black tracking-tight">${artistCount.toLocaleString()}</div>
+                <div class="text-[9px] font-black text-orange-500/60 uppercase tracking-widest mt-1">Artistas Total</div>
+            </div>
         </div>
-        <div class="bg-[#0A0A0A] border border-white/5 rounded-xl p-2 text-center">
-            <div class="text-indigo-400 text-sm font-bold">${totalVideos}</div>
-            <div class="text-[9px] text-indigo-400 uppercase tracking-wider">Videos</div>
+
+        <!-- CAJA 3: VIDEO TOTAL -->
+        <div class="group relative overflow-hidden bg-[#121212] border border-white/5 rounded-2xl p-4 transition-all duration-300 hover:border-rose-500/50 hover:bg-rose-500/[0.03]">
+            <div class="absolute top-0 right-0 p-1.5 opacity-10 group-hover:opacity-30 transition-opacity">
+                <i class="fa-solid fa-clapperboard text-xl text-rose-500"></i>
+            </div>
+            <div class="relative z-10 text-center">
+                <div class="text-rose-400 text-lg md:text-xl font-black tracking-tight">${totalVideos.toLocaleString()}</div>
+                <div class="text-[9px] font-black text-rose-400/60 uppercase tracking-widest mt-1">Video Total</div>
+            </div>
         </div>
-        <div class="bg-[#0A0A0A] border border-white/5 rounded-xl p-2 text-center">
-            <div class="text-pink-400 text-sm font-bold">${artistCount}</div>
-            <div class="text-[9px] text-pink-400 uppercase tracking-wider">Artistas</div>
+
+        <!-- CAJA 4: PELÍCULAS Y SERIES -->
+        <div class="col-span-1 group relative overflow-hidden bg-[#121212] border border-white/5 rounded-2xl flex divide-x divide-white/5 transition-all duration-300">
+            <div class="flex-1 p-3 text-center">
+                <div class="text-pink-400 text-base md:text-lg font-black tracking-tight">${movieSet.size.toLocaleString()}</div>
+                <div class="text-[8px] font-black text-pink-400/60 uppercase tracking-widest mt-0.5">Películas</div>
+            </div>
+            <div class="flex-1 p-3 text-center bg-white/[0.01]">
+                <div class="text-fuchsia-400 text-base md:text-lg font-black tracking-tight">${seriesSet.size.toLocaleString()}</div>
+                <div class="text-[8px] font-black text-fuchsia-400/60 uppercase tracking-widest mt-0.5">Series</div>
+            </div>
         </div>
     `;
             }
@@ -11308,7 +12064,8 @@ async function rescanLibrary() {
                             subFolders.set(folderName, {
                                 fullPath: fullFolderPath,
                                 count: 0,
-                                cover: f.path
+                                cover: f.path,
+                                tmdb_rating: f.tmdb_rating
                             });
                         }
                         subFolders.get(folderName).count++;
@@ -11365,6 +12122,13 @@ async function rescanLibrary() {
                                 <div class="absolute inset-0 flex items-center justify-center">
                                     <i class="fa-solid fa-folder text-yellow-600/80 group-hover:text-yellow-500 transition"></i>
                                 </div>
+                                ${folder.tmdb_rating ? (() => {
+                                    let rColor = 'bg-emerald-600/80 border-emerald-500/50';
+                                    if (['R', 'NC-17', 'C', 'D', '18', '16', '16+', '18+', 'MA15+', 'R18+', 'R15+'].includes(folder.tmdb_rating)) rColor = 'bg-red-600/80 border-red-500/50';
+                                    else if (['PG-13', 'B-15', 'B', 'M', 'TV-MA', 'TV-14'].includes(folder.tmdb_rating)) rColor = 'bg-orange-500/80 border-orange-500/50';
+                                    else if (['PG', 'A'].includes(folder.tmdb_rating)) rColor = 'bg-blue-500/80 border-blue-500/50';
+                                    return '<div class="absolute top-0.5 left-0.5 px-1 py-0.5 rounded text-[7px] font-bold text-white border backdrop-blur-md shadow-sm pointer-events-none ' + rColor + '">' + folder.tmdb_rating + '</div>';
+                                })() : ''}
                             </div>
                             <div class="min-w-0">
                                 <div class="font-bold text-gray-200 text-xs truncate" title="${name}">
@@ -12213,12 +12977,44 @@ async function autoCompletarVideos() {
   const pin = getMasterPin("PIN Maestro requerido para ejecutar el Auto-Tagger de Videos:");
   if (!pin) return;
 
+  // Mostrar barra de progreso
+  const progressContainer = document.getElementById('rescan-progress-container');
+  const progressBar = document.getElementById('rescan-progress-bar');
+  const percentText = document.getElementById('rescan-percent-text');
+  const stageText = document.getElementById('rescan-stage-text');
+  const messageText = document.getElementById('rescan-message');
+  if (progressContainer) progressContainer.classList.remove('hidden');
+
   showToast("🔍 Buscando en TMDB...", "info");
 
   const btn = document.getElementById('btn-autotag-video');
   if (btn) btn.disabled = true;
 
+  let pollInterval = null;
+
+  // Polling de progreso
+  async function pollProgress() {
+    try {
+      const res = await fetch('/estado');
+      const data = await res.json();
+      const status = data.rescan_status;
+      
+      if (status && status.active && status.stage === 'auto_tag') {
+        const percent = status.percent || 0;
+        if (progressBar) progressBar.style.width = percent + '%';
+        if (percentText) percentText.textContent = percent + '%';
+        if (stageText) stageText.textContent = 'Auto-Tag TMDB...';
+        if (messageText) messageText.textContent = status.message || '';
+      }
+    } catch (e) {
+      console.error('Error polling progress:', e);
+    }
+  }
+
   try {
+    // Iniciar polling cada 500ms
+    pollInterval = setInterval(pollProgress, 500);
+
     const res = await fetch('/api/auto_tag_library_videos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -12226,8 +13022,14 @@ async function autoCompletarVideos() {
     });
     const data = await res.json();
 
+    // Detener polling
+    if (pollInterval) clearInterval(pollInterval);
+
+    // Consultar progreso final
+    await pollProgress();
+
     if (data.processed !== undefined) {
-      showToast(`✅ Procesados: ${data.processed}, Encontrados: ${data.found}`, "success");
+      showToast(`✅ Procesados: ${data.processed}, Encontrados: ${data.found}, Posters serie: ${data.series_posters || 0}`, "success");
       // Recargar biblioteca para ver los cambios
       setTimeout(() => cargarLib(), 2000);
     } else if (data.error) {
@@ -12238,6 +13040,14 @@ async function autoCompletarVideos() {
     showToast("Error en auto-tag de videos", "error");
     console.error(e);
   } finally {
+    // Detener polling si sigue activo
+    if (pollInterval) clearInterval(pollInterval);
+    
+    // Ocultar barra de progreso después de un momento
+    setTimeout(() => {
+      if (progressContainer) progressContainer.classList.add('hidden');
+    }, 3000);
+    
     if (btn) btn.disabled = false;
   }
 }

@@ -57,6 +57,7 @@ def serve_file(filename):
         response.headers['Content-Range'] = f'bytes {start}-{end}/{size}'
         response.headers['Accept-Ranges'] = 'bytes'
         response.headers['Content-Length'] = str(length)
+        response.headers['Access-Control-Allow-Origin'] = '*'
         return response
         
     except Exception as e:

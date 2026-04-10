@@ -892,6 +892,7 @@ def caratula(filename):
 
     # [FIX TMDB] Servir poster descargado de TMDB u otra metadata
     import os
+    import re
     from flask import send_file
     direct_thumb_path = os.path.join(THUMBNAILS_FOLDER, os.path.basename(decoded))
     if os.path.exists(direct_thumb_path) and os.path.isfile(direct_thumb_path):
@@ -903,6 +904,29 @@ def caratula(filename):
         )
         resp.headers['Cache-Control'] = 'public, max-age=31536000'
         return resp
+
+    # Fallback: intentar con variaciones del nombre (tmdb-ID vs _ID)
+    # Solo aplicar a archivos que parezcan ser posters de series/peliculas
+    basename = os.path.basename(decoded)
+    name_no_ext = os.path.splitext(basename)[0]
+    
+    # Solo buscar TMDB ID si el nombre tiene patrón de TMDB explícito
+    tmdb_match = re.search(r'\(tmdb[-_]?(\d+)\)', name_no_ext)
+    if tmdb_match:
+        tmdb_id = tmdb_match.group(1)
+        # Buscar cualquier archivo que contenga el TMDB ID
+        for f in os.listdir(THUMBNAILS_FOLDER):
+            if tmdb_id in f and f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+                fallback_path = os.path.join(THUMBNAILS_FOLDER, f)
+                if os.path.isfile(fallback_path):
+                    resp = send_file(
+                        fallback_path,
+                        mimetype='image/jpeg',
+                        max_age=31536000,
+                        conditional=True
+                    )
+                    resp.headers['Cache-Control'] = 'public, max-age=31536000'
+                    return resp
 
     try:
         path = validar_path(decoded)
@@ -1278,23 +1302,78 @@ def _analizar_single_url(url, hist):
 BIB_CACHE_BY_OWNER = {}
 BIB_CACHE_TIME = 0
 
+def filtrar_contenido_kid_mode(data):
+    """Filtra el contenido de la biblioteca para modo niños.
+    
+    Oculta contenido con rating PG-13, R, NC-17.
+    Permite: G, PG, sin rating (asume seguro)
+    """
+    ratings_bloqueados = {'PG-13', 'R', 'NC-17', 'TV-14', 'TV-MA', '18', '16', '16+', '18+', 'MA15+', 'M', 'C', 'D', 'MA', 'R18+', 'R15+'}
+    
+    # Filtrar archivos
+    files_filtrados = []
+    for f in data.get('files', []):
+        if f.get('type') != 'video':
+            # Audio siempre permitido
+            files_filtrados.append(f)
+            continue
+            
+        r = f.get('tmdb_rating')
+        rating = str(r).upper().strip() if r else ''
+        
+        # Si no hay rating, asumir seguro
+        if not rating:
+            files_filtrados.append(f)
+            continue
+        
+        # Si el rating NO está en bloqueados, permitir
+        if rating not in ratings_bloqueados:
+            files_filtrados.append(f)
+    
+    data['files'] = files_filtrados
+    
+    # Actualizar totales
+    data['total_files'] = len(files_filtrados)
+    data['total_videos'] = sum(1 for f in files_filtrados if f.get('type') == 'video')
+    
+    return data
+
+
 @api_bp.route('/biblioteca')
 def biblioteca():
     global BIB_CACHE_BY_OWNER, BIB_CACHE_TIME
 
     force = request.args.get('fresh') == '1'
     owner_email = request.args.get('owner', 'public')
+    
+    # Verificar si el usuario está en modo niños
+    user_email = get_user_from_request(request)
+    is_kid_mode = False
+    
+    if user_email:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT is_kid_mode FROM users WHERE email = ?", (user_email,))
+        user_row = c.fetchone()
+        if user_row:
+            is_kid_mode = bool(user_row['is_kid_mode'])
+        conn.close()
 
-    # Si forzamos actualizaciÃ³n, limpiamos solo el cachÃ© de ESTE usuario
+    # Si forzamos actualización, limpiamos solo el caché de ESTE usuario
     if force and owner_email in BIB_CACHE_BY_OWNER:
         del BIB_CACHE_BY_OWNER[owner_email]
 
-    # Si hay cachÃ© vÃ¡lido para este usuario
+    # Si hay caché válido para este usuario
     if owner_email in BIB_CACHE_BY_OWNER:
         data = BIB_CACHE_BY_OWNER[owner_email]
     else:
         # Generar exclusiva para este usuario (Playlists privadas)
         data = generar_biblioteca_viva(owner_email)
+        
+        # Si está en modo niños, filtrar contenido
+        if is_kid_mode:
+            data = filtrar_contenido_kid_mode(data)
+        
         BIB_CACHE_BY_OWNER[owner_email] = data
         BIB_CACHE_TIME = time.time()
 
@@ -1303,6 +1382,9 @@ def biblioteca():
     data['total_files'] = len(all_files)
     data['total_videos'] = sum(1 for f in all_files if f.get('type') == 'video')
     data['total_folders'] = len(data.get('folders', []))
+    
+    # Agregar info de modo niños a la respuesta
+    data['is_kid_mode'] = is_kid_mode
 
     return jsonify(data)
 
@@ -1338,27 +1420,92 @@ def search_similar_artists_radio(artist_name):
 
 @api_bp.route('/similar/<path:filepath>')
 def obtener_similares(filepath):
-    """Endpoint para obtener canciones similares a una especÃ­fica"""
+    """Endpoint para obtener canciones similares a una específica"""
+    import random as _random
+
+    def _calcular_similitud(ref, cand):
+        score = 0
+        if ref.get('artist') and cand.get('artist'):
+            if ref['artist'].lower() == cand['artist'].lower():
+                score += 60
+        if ref.get('album') and cand.get('album'):
+            if ref['album'].lower() == cand['album'].lower():
+                score += 40
+        if ref.get('genre') and cand.get('genre'):
+            if (ref['genre'].lower() == cand['genre'].lower()
+                    and ref['genre'].lower() not in ['otros', 'unknown', '']):
+                score += 20
+        r1 = ref.get('rating', 0) or 0
+        r2 = cand.get('rating', 0) or 0
+        if abs(r1 - r2) <= 1:
+            score += 10
+        return score
+
+    def _generar_similares(referencia, biblioteca, limite=50):
+        candidatas = []
+        ref_path = (referencia.get('path') or '').replace('\\', '/')
+        for c in biblioteca:
+            if (c.get('path') or '').replace('\\', '/') == ref_path:
+                continue
+            candidatas.append({'cancion': c, 'score': _calcular_similitud(referencia, c)})
+        candidatas.sort(key=lambda x: x['score'], reverse=True)
+        resultado = []
+        muy = [c for c in candidatas if c['score'] >= 60]
+        resultado.extend([c['cancion'] for c in muy[:30]])
+        medio = [c for c in candidatas if 20 <= c['score'] < 60]
+        _random.shuffle(medio)
+        resultado.extend([c['cancion'] for c in medio[:10]])
+        poco = [c for c in candidatas if c['score'] < 20]
+        _random.shuffle(poco)
+        resultado.extend([c['cancion'] for c in poco[:10]])
+        if len(resultado) < limite:
+            resto = [c['cancion'] for c in candidatas if c['cancion'] not in resultado]
+            _random.shuffle(resto)
+            resultado.extend(resto[:limite - len(resultado)])
+        return resultado[:limite]
+
     try:
-        filepath_decoded = unquote(filepath)
-        
-        # Cargar biblioteca
+        filepath_decoded = unquote(filepath).replace('\\', '/').lstrip('/')
+        print(f"[Radio] Buscando similares para: {filepath_decoded}")
+
         bib = generar_biblioteca_viva()
         audios = [f for f in bib.get('files', []) if f.get('type') == 'audio']
-        
-        # Encontrar la canciÃ³n de referencia
+
+        print(f"[Radio] Biblioteca cargada: {len(audios)} audios")
+        if audios:
+            print(f"[Radio] Ejemplo path en biblioteca: {audios[0].get('path', 'N/A')}")
+
+        # Búsqueda normalizada
         cancion_ref = None
         for cancion in audios:
-            if cancion.get('path') == filepath_decoded:
+            cancion_path = (cancion.get('path') or '').replace('\\', '/').lstrip('/')
+            if cancion_path == filepath_decoded:
                 cancion_ref = cancion
                 break
-        
+
+        # Fallback por sufijo
         if not cancion_ref:
-            return jsonify({'error': 'CanciÃ³n no encontrada', 'similares': []})
-        
-        # Generar lista de similares
-        similares = generar_radio_inteligente(cancion_ref, audios, limite=50)
-        
+            for cancion in audios:
+                cancion_path = (cancion.get('path') or '').replace('\\', '/').lstrip('/')
+                if cancion_path.endswith(filepath_decoded) or filepath_decoded.endswith(cancion_path):
+                    cancion_ref = cancion
+                    print(f"[Radio] Encontrada por sufijo: {cancion_path}")
+                    break
+
+        if not cancion_ref:
+            print(f"[Radio] No encontrada en biblioteca, devolviendo aleatorio")
+            aleatorio = audios[:]
+            _random.shuffle(aleatorio)
+            return jsonify({
+                'referencia': {'title': 'Desconocido', 'artist': 'Desconocido', 'path': filepath_decoded},
+                'similares': [s.get('path') for s in aleatorio[:50]],
+                'total': len(aleatorio[:50])
+            })
+
+        print(f"[Radio] Referencia encontrada: {cancion_ref.get('title')} - {cancion_ref.get('artist')} | género: {cancion_ref.get('genre')}")
+        similares = _generar_similares(cancion_ref, audios, limite=50)
+        print(f"[Radio] Similares generados: {len(similares)}")
+
         return jsonify({
             'referencia': {
                 'title': cancion_ref.get('title', 'Desconocido'),
@@ -1368,9 +1515,11 @@ def obtener_similares(filepath):
             'similares': [s.get('path') for s in similares],
             'total': len(similares)
         })
-        
+
     except Exception as e:
-        print(f"Error obteniendo similares: {e}")
+        import traceback
+        traceback.print_exc()
+        print(f"[Radio] Error: {e}")
         return jsonify({'error': str(e), 'similares': []})
 
 @api_bp.route('/update_ytdlp', methods=['POST'])
@@ -2203,8 +2352,12 @@ def auto_tag_video_endpoint():
         
         # Descargar poster
         poster_path = result.get('poster_path')
+        tmdb_id = result.get('id')
         if poster_path:
             filename_base = clean_title_for_search(title or path)
+            # Incluir TMDB ID para evitar colisiones entre secuelas
+            if tmdb_id:
+                filename_base = f"{filename_base}_{tmdb_id}"
             poster_filename = download_poster(
                 poster_path, 
                 config.THUMBNAILS_FOLDER,
@@ -2212,17 +2365,17 @@ def auto_tag_video_endpoint():
             )
         else:
             poster_filename = None
-        
+
         # Guardar en base de datos
         from services.database import get_db
         conn = get_db()
         c = conn.cursor()
-        
+
         # Actualizar o insertar metadata
         c.execute('''
-            INSERT OR REPLACE INTO video_metadata 
-            (path, tmdb_title, tmdb_year, tmdb_overview, tmdb_genres, tmdb_poster, tmdb_id, tmdb_type)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO video_metadata
+            (path, tmdb_title, tmdb_year, tmdb_overview, tmdb_genres, tmdb_poster, tmdb_id, tmdb_type, tmdb_rating)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             path,
             title,
@@ -2231,10 +2384,12 @@ def auto_tag_video_endpoint():
             ','.join(genres),
             poster_filename,
             result.get('id'),
-            result.get('media_type')
+            result.get('media_type'),
+            result.get('content_rating')
         ))
         conn.commit()
-        
+        conn.close()
+
         return jsonify({
             'found': True,
             'title': title,
@@ -2252,6 +2407,7 @@ def auto_tag_video_endpoint():
 
 @api_bp.route('/api/auto_tag_library_videos', methods=['POST'])
 def auto_tag_library_videos():
+    import time
     """
     Auto-tag de TODOS los videos de la biblioteca
     Procesa videos sin metadata de TMDB
@@ -2269,7 +2425,10 @@ def auto_tag_library_videos():
             auto_tag_video, 
             detect_video_type, 
             download_poster,
-            clean_title_for_search
+            clean_title_for_search,
+            is_series_episode,
+            extract_series_name_from_path,
+            get_series_folder_name
         )
         
         conn = get_db()
@@ -2309,45 +2468,126 @@ def auto_tag_library_videos():
         
         videos = c.fetchall()
         
+        # Paso 2: Encontrar carpetas de series que NO tienen poster
+        c.execute('''
+            SELECT DISTINCT folder FROM media 
+            WHERE media_type = 'video' AND folder_type = 'series'
+        ''')
+        series_folders = [row[0] for row in c.fetchall()]
+        
+        folders_without_poster = []
+        for folder in series_folders:
+            poster_exists = os.path.exists(os.path.join(config.THUMBNAILS_FOLDER, f"{folder}.jpg"))
+            if not poster_exists:
+                # Obtener UN episodio de esta carpeta para hacer auto-tag
+                c.execute('SELECT rel_path FROM media WHERE folder = ? AND media_type = ? LIMIT 1', (folder, 'video'))
+                ep = c.fetchone()
+                if ep:
+                    folders_without_poster.append(ep[0])
+        
+        # Combinar: videos sin metadata + 1 episodio por carpeta sin poster
+        all_to_process = list(set([v[0] for v in videos] + folders_without_poster))
+        
+        # Re-fetch full data for combined list
+        placeholders = ','.join('?' for _ in all_to_process)
+        c.execute(f'SELECT rel_path, title, folder_type FROM media WHERE rel_path IN ({placeholders})', all_to_process)
+        videos = c.fetchall()
+        
         if not videos:
             return jsonify({'message': 'No hay videos para procesar', 'processed': 0})
         
+        # Inicializar barra de progreso para auto-tag
+        state.RESCAN_STATUS = {
+            "active": True,
+            "stage": "auto_tag",
+            "total": len(videos),
+            "processed": 0,
+            "percent": 0,
+            "message": f"Preparando auto-tag de {len(videos)} videos...",
+            "start_time": time.time()
+        }
+        
         processed = 0
         found = 0
+        posters_downloaded = 0
+        skipped_existing = 0
+        
+        # Track de posters de carpetas ya descargados
+        folder_posters_cache = {}
         
         for video in videos:
             video_path = video[0]  # rel_path
             video_title = video[1] if len(video) > 1 else ''
-            video_type = video[2] if len(video) > 2 else 'movie'  # folder_type de la DB
+            video_folder_type = video[2] if len(video) > 2 else 'movie'  # folder_type de la DB
             try:
-                result = auto_tag_video(video_path, video_type)
-                
+                result = auto_tag_video(video_path, video_folder_type)
+
                 if result:
                     title = result.get('title') or result.get('name')
                     year = (result.get('release_date') or result.get('first_air_date', ''))[:4]
                     overview = result.get('overview', '')
                     genres = [g['name'] for g in result.get('genres', [])]
-                    
+
                     poster_path = result.get('poster_path')
-                    if poster_path:
-                        filename_base = clean_title_for_search(title or video_title or video_path)
-                        poster_filename = download_poster(
-                            poster_path, 
-                            config.THUMBNAILS_FOLDER,
-                            filename_base
-                        )
+                    poster_filename = None
+
+                    # Detectar si es episodio de serie
+                    is_episode = is_series_episode(os.path.basename(video_path))
+
+                    if is_episode:
+                        # Episodio: NO guardar poster en DB
+                        # Solo descargar el poster de la carpeta si no existe
+                        series_name = extract_series_name_from_path(video_path)
+                        folder_name = get_series_folder_name(video_path)
+
+                        if folder_name:
+                            # Nombre del poster de la carpeta
+                            folder_poster_name = f"{folder_name}.jpg"
+                            folder_poster_path = os.path.join(config.THUMBNAILS_FOLDER, folder_poster_name)
+
+                            # Solo descargar si no existe y no está en cache
+                            if folder_name not in folder_posters_cache:
+                                if poster_path and not os.path.exists(folder_poster_path):
+                                    folder_poster_filename = download_poster(
+                                        poster_path,
+                                        config.THUMBNAILS_FOLDER,
+                                        clean_title_for_search(series_name)
+                                    )
+                                    if folder_poster_filename:
+                                        old_path = os.path.join(config.THUMBNAILS_FOLDER, folder_poster_filename)
+                                        if old_path != folder_poster_path:
+                                            os.rename(old_path, folder_poster_path)
+                                        posters_downloaded += 1
+                                        print(f"  Poster de serie descargado: {folder_poster_name}")
+
+                                folder_posters_cache[folder_name] = folder_poster_name
+
+                        # NO asignar poster_filename - ya es None de la línea 2380
+                        # Los episodios mostrarán thumbnail del video
                     else:
-                        poster_filename = None
-                    
+                        # Es película: descargar poster normalmente
+                        if poster_path:
+                            tmdb_id_val = result.get('id')
+                            filename_base = clean_title_for_search(title or video_title or video_path)
+                            # Incluir TMDB ID para evitar colisiones entre secuelas
+                            if tmdb_id_val:
+                                filename_base = f"{filename_base}_{tmdb_id_val}"
+                            poster_filename = download_poster(
+                                poster_path,
+                                config.THUMBNAILS_FOLDER,
+                                filename_base
+                            )
+
                     # Guardar en la tabla media directamente
                     c.execute('''
-                        UPDATE media SET 
+                        UPDATE media SET
                         tmdb_id = ?,
                         tmdb_title = ?,
                         tmdb_year = ?,
                         tmdb_overview = ?,
                         tmdb_genres = ?,
-                        tmdb_poster = ?
+                        tmdb_poster = ?,
+                        tmdb_rating = ?
                         WHERE rel_path = ?
                     ''', (
                         result.get('id'),
@@ -2356,26 +2596,148 @@ def auto_tag_library_videos():
                         overview,
                         ','.join(genres),
                         poster_filename,
+                        result.get('content_rating'),
                         video_path
                     ))
                     conn.commit()
                     found += 1
-                
+
                 processed += 1
-                
+
+                # Actualizar barra de progreso cada 5 videos
+                if processed % 5 == 0 or processed == len(videos):
+                    percent = int((processed / len(videos)) * 100)
+                    state.RESCAN_STATUS["processed"] = processed
+                    state.RESCAN_STATUS["percent"] = percent
+                    state.RESCAN_STATUS["message"] = f"Auto-tag {processed}/{len(videos)} ({percent}%) - {posters_downloaded} posters serie"
+
             except Exception as e:
                 print(f"Error procesando {video_path}: {e}")
                 continue
         
+        # FASE 2: Actualizar Ratings
+        c.execute("SELECT rel_path, tmdb_id, folder_type, tmdb_title FROM media WHERE tmdb_id IS NOT NULL AND tmdb_id > 0 AND (tmdb_rating IS NULL OR tmdb_rating = '') AND media_type = 'video'")
+        rating_videos = c.fetchall()
+        updated_ratings = 0
+        if rating_videos:
+            for i, video in enumerate(rating_videos):
+                try:
+                    import time as _time; _time.sleep(0.05)
+                    if video[2] == 'movie':
+                        from services.video_tagger import get_movie_details; res = get_movie_details(video[1])
+                    else:
+                        from services.video_tagger import get_tv_details; res = get_tv_details(video[1])
+                        
+                    if res and res.get('content_rating'):
+                        c.execute('UPDATE media SET tmdb_rating = ? WHERE rel_path = ?', (res.get('content_rating'), video[0]))
+                        conn.commit()
+                        updated_ratings += 1
+                        
+                    if i % 3 == 0 or i == len(rating_videos):
+                        if len(rating_videos) > 0:
+                            pct = 50 + int((i / len(rating_videos)) * 50)
+                            state.RESCAN_STATUS["percent"] = pct
+                            state.RESCAN_STATUS["message"] = f"Clasificando: {i+1}/{len(rating_videos)} ({pct}%)"
+                except: pass
+
+        elapsed = time.time() - state.RESCAN_STATUS.get("start_time", time.time())
+        state.RESCAN_STATUS["active"] = False
+        state.RESCAN_STATUS["stage"] = "done"
+        state.RESCAN_STATUS["percent"] = 100
+        state.RESCAN_STATUS["message"] = f"Auto-tag completado en {elapsed:.1f}s - {posters_downloaded} posters y {updated_ratings} clasificaciones actualizadas"
+        
         return jsonify({
-            'message': f'Procesados {processed} videos',
-            'found': found,
-            'processed': processed
+            'message': f'Procesados {processed} videos, {posters_downloaded} posters descargados y {updated_ratings} clasificaciones actualizadas',
+            'found': found, 'processed': processed, 'series_posters': posters_downloaded, 'ratings_updated': updated_ratings
         })
         
     except Exception as e:
         print(f"Error en auto_tag_library_videos: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/api/update_video_ratings', methods=['POST'])
+def update_video_ratings():
+    """
+    Actualiza SOLO los ratings/certificaciones de videos que YA tienen metadata.
+    No descarga posters ni actualiza otros campos.
+    """
+    data = request.json or {}
+    pin = data.get('pin')
+    
+    import config
+    if pin != get_master_pin():
+        return jsonify({'error': 'PIN incorrecto'}), 401
+    
+    from services.database import get_db
+    from services.video_tagger import get_movie_details, get_tv_details
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    # Obtener videos que tienen tmdb_id pero pueden no tener rating
+    c.execute('''
+        SELECT rel_path, tmdb_id, folder_type, tmdb_title
+        FROM media
+        WHERE tmdb_id IS NOT NULL AND tmdb_id > 0
+        AND (tmdb_rating IS NULL OR tmdb_rating = '')
+        AND media_type = 'video'
+        LIMIT 200
+    ''')
+    
+    videos = c.fetchall()
+    
+    if not videos:
+        conn.close()
+        return jsonify({'message': 'No hay videos sin rating para actualizar', 'updated': 0}), 200
+    
+    updated = 0
+    errors = []
+    
+    for video in videos:
+        try:
+            video_path = video['rel_path']
+            tmdb_id = video['tmdb_id']
+            folder_type = video['folder_type']
+            
+            # Determinar si es película o serie
+            is_movie = folder_type == 'movie'
+            
+            # Obtener detalles de TMDB
+            if is_movie:
+                result = get_movie_details(tmdb_id)
+            else:
+                result = get_tv_details(tmdb_id)
+            
+            if result:
+                rating = result.get('content_rating')
+                
+                if rating:
+                    # Actualizar solo el rating
+                    c.execute('''
+                        UPDATE media SET tmdb_rating = ? WHERE rel_path = ?
+                    ''', (rating, video_path))
+                    conn.commit()
+                    updated += 1
+                    print(f"✅ Rating actualizado: {video.get('tmdb_title', 'Unknown')} -> {rating}")
+                else:
+                    print(f"⚠️ No hay rating para: {video.get('tmdb_title', 'Unknown')}")
+            else:
+                errors.append(f"No se pudo obtener detalles de TMDB para {tmdb_id}")
+                
+        except Exception as e:
+            errors.append(f"Error procesando {video_path}: {str(e)}")
+            print(f"❌ Error: {e}")
+            continue
+    
+    conn.close()
+    
+    return jsonify({
+        'message': f'Ratings actualizados: {updated} videos',
+        'updated': updated,
+        'total': len(videos),
+        'errors': errors if errors else None
+    })
 
 
 @api_bp.route('/api/check_update', methods=['GET'])
@@ -2465,6 +2827,10 @@ def require_admin(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
         try:
+            req_json = request.get_json(silent=True) or {}
+            master_pin = request.headers.get("X-Master-Pin") or req_json.get("pin")
+            if master_pin and str(master_pin).strip() == str(get_master_pin()).strip():
+                return f(*args, **kwargs)
             user_email = get_user_from_request(request)
             if not user_email:
                 return jsonify({'error': 'No autorizado'}), 401
@@ -2516,13 +2882,18 @@ def admin_list_users():
         c.execute("PRAGMA table_info(users)")
         columns = [row[1] for row in c.fetchall()]
         print('[ADMIN] Columns in users table:', columns)
-        
-        # Query sin id si no existe
+
+        # Construir query dinámicamente
+        base_cols = ['email', 'username', 'avatar_url', 'is_superadmin', 'created_at']
+        if 'is_kid_mode' in columns:
+            base_cols.append('is_kid_mode')
         if 'id' in columns:
-            c.execute("SELECT id, email, username, avatar_url, is_superadmin, created_at FROM users ORDER BY created_at")
-        else:
-            c.execute("SELECT email, username, avatar_url, is_superadmin, created_at FROM users ORDER BY created_at")
-            
+            base_cols.insert(0, 'id')
+        
+        query = f"SELECT {', '.join(base_cols)} FROM users ORDER BY created_at"
+        print(f'[ADMIN] Query: {query}')
+        c.execute(query)
+
         users = []
         for row in c.fetchall():
             user_data = {
@@ -2530,7 +2901,8 @@ def admin_list_users():
                 'username': row['username'] or 'Usuario',
                 'avatar_url': row['avatar_url'],
                 'is_superadmin': bool(row['is_superadmin']),
-                'created_at': row['created_at']
+                'created_at': row['created_at'],
+                'is_kid_mode': bool(row['is_kid_mode']) if 'is_kid_mode' in columns else False
             }
             if 'id' in columns:
                 user_data['id'] = row['id']
@@ -2616,8 +2988,39 @@ def admin_reset_password(email):
     c.execute("UPDATE users SET pin_hash = ? WHERE email = ?", (password_hash, email))
     conn.commit()
     conn.close()
-    
     return jsonify({'ok': True})
+
+
+@api_bp.route('/api/admin/users/<email>/kidmode', methods=['PUT'])
+@require_admin
+def admin_toggle_kid_mode(email):
+    """Activar/desactivar modo niños para un usuario."""
+    data = request.get_json() or {}
+    is_kid_mode = data.get('is_kid_mode', False)
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    # Verificar que el usuario existe
+    c.execute("SELECT email FROM users WHERE email = ?", (email,))
+    if not c.fetchone():
+        conn.close()
+        return jsonify({'error': 'Usuario no encontrado'}), 404
+    
+    # No permitir modo niños para el admin principal
+    c.execute("SELECT is_superadmin FROM users WHERE email = ?", (email,))
+    user = c.fetchone()
+    if user and user['is_superadmin']:
+        conn.close()
+        return jsonify({'error': 'No se puede activar modo niños para el administrador'}), 400
+    
+    # Actualizar modo niños
+    c.execute("UPDATE users SET is_kid_mode = ? WHERE email = ?", (1 if is_kid_mode else 0, email))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'ok': True, 'is_kid_mode': is_kid_mode})
+
 
 @api_bp.route('/api/admin/invite', methods=['POST'])
 @require_admin
@@ -3123,3 +3526,93 @@ def tmdb_extended_details():
     except Exception as e:
         print(f"Error fetching TMDB details: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route('/library/update_video_meta', methods=['POST'])
+def update_video_meta():
+    data = request.json
+    pin = data.get('pin', '')
+    path = data.get('path')
+    is_virtual = data.get('is_virtual', False)
+    
+    if not get_master_pin() or pin != get_master_pin():
+        return jsonify({'error': 'PIN incorrecto'}), 401
+        
+    if not path:
+        return jsonify({'error': 'Falta path'}), 400
+        
+    from services.database import get_db
+    conn = get_db()
+    c = conn.cursor()
+    
+    tmdb_title = data.get('tmdb_title', '')
+    tmdb_rating = data.get('tmdb_rating', '')
+    tmdb_year = data.get('tmdb_year', '')
+    tmdb_genres = data.get('tmdb_genres', '')
+    tmdb_overview = data.get('tmdb_overview', '')
+    
+    try:
+        paths_array = data.get('paths_array', [])
+        
+        if tmdb_rating == 'VACIO':
+            tmdb_rating = None
+
+        if paths_array and len(paths_array) > 0:
+            # Modo BATCH Video
+            for p in paths_array:
+                fields_to_set = []
+                values = []
+                if tmdb_title:
+                    fields_to_set.append("tmdb_title = ?")
+                    values.append(tmdb_title)
+                if tmdb_rating is not None or data.get('tmdb_rating') == 'VACIO':
+                    fields_to_set.append("tmdb_rating = ?")
+                    values.append(tmdb_rating)
+                if tmdb_year:
+                    fields_to_set.append("tmdb_year = ?")
+                    values.append(tmdb_year)
+                if tmdb_genres:
+                    fields_to_set.append("tmdb_genres = ?")
+                    values.append(tmdb_genres)
+                if tmdb_overview:
+                    fields_to_set.append("tmdb_overview = ?")
+                    values.append(tmdb_overview)
+                    
+                if fields_to_set:
+                    values.append(p)
+                    query = f"UPDATE media SET {', '.join(fields_to_set)} WHERE rel_path = ?"
+                    c.execute(query, tuple(values))
+        elif is_virtual:
+            # Actualiza todos los hijos (Single Click on Series)
+            c.execute("""
+                UPDATE media SET 
+                tmdb_title = ?, 
+                tmdb_rating = ?, 
+                tmdb_year = ?, 
+                tmdb_genres = ?, 
+                tmdb_overview = ?
+                WHERE rel_path LIKE ?
+            """, (tmdb_title, tmdb_rating, tmdb_year, tmdb_genres, tmdb_overview, f"{path}/%"))
+        elif path:
+            # Archivo unico
+            c.execute("""
+                UPDATE media SET 
+                tmdb_title = ?, 
+                tmdb_rating = ?, 
+                tmdb_year = ?, 
+                tmdb_genres = ?, 
+                tmdb_overview = ?
+                WHERE rel_path = ?
+            """, (tmdb_title, tmdb_rating, tmdb_year, tmdb_genres, tmdb_overview, path))
+            
+        conn.commit()
+        
+        # Limpiar cache
+        global BIB_CACHE_BY_OWNER
+        BIB_CACHE_BY_OWNER.clear()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()

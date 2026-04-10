@@ -187,7 +187,18 @@ def init_db():
         c.execute("ALTER TABLE playlists ADD COLUMN share_token TEXT")
     except sqlite3.OperationalError:
         pass # Column already exists
+
+    # Modo Niños - columnas para control parental
+    try:
+        c.execute("ALTER TABLE media ADD COLUMN tmdb_rating TEXT DEFAULT NULL")
+    except sqlite3.OperationalError:
+        pass # Column already exists
     
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN is_kid_mode BOOLEAN DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass # Column already exists
+
     # Create video_metadata table if not exists
     try:
         c.execute('''
