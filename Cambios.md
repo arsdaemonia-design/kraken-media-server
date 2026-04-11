@@ -10,7 +10,40 @@ Kraken es un servidor multimedia local con modo online/offline. Permite:
 - Acceso via LAN o Cloudflare tunnel
 
 ## Versión Actual
-- **v4.88** (2026-04-09)
+- **v4.90** (2026-04-10)
+
+---
+
+# Cambios Recientes (v4.90 - 2026-04-10)
+
+## Estabilizacion General y Recuperacion de Estado
+- Consolidacion de cambios de la semana en `master` con respaldo en GitHub.
+- Build validado con `KrakenOffline.spec` y compilacion exitosa del instalador Inno Setup.
+- Limpieza tecnica de artefactos locales (`__pycache__`, `*.pyc`, carpeta `build`) manteniendo `dist` final.
+
+## Reparaciones UI/UX en Header y Video
+- Correccion de duplicado de boton `Select` en vista audio desktop.
+- Reubicacion de `Select/Todos` junto a pills en vista video principal.
+- Fix de dropdowns `Categorias/Generos` en video: se elimino conflicto por IDs duplicados desktop/mobile y se paso a manejo por `data-*` + contexto del evento.
+- Ajuste de espaciado (margin/padding/gap) en mobile y desktop para recuperar densidad visual.
+- En vista detalle de serie:
+  - Se ocultaron pills de filtros globales que no aplicaban en ese contexto.
+  - Se mantuvo `Subir un nivel` funcional en formato barra compacta para evitar bloque visual gigante.
+
+## Reproductor y Cast (Hardening)
+- Fix de colision de nombre `screen` que rompia `exitVideoMode()` por sombreado de variable.
+- Ajuste de llamadas de orientacion con `window.screen.orientation` para evitar errores de scope.
+- Inicializacion de Cast reforzada con flujo de contexto mas robusto y tolerante a disponibilidad parcial.
+- Estado actual: boton/flujo Cast mejorado, pero sigue sujeto a restricciones de red/origen/HTTPS del entorno de despliegue.
+
+## Verificacion Tecnica Realizada
+- `py_compile` exitoso en modulos clave.
+- Pruebas de humo:
+  - `test_imports.py` OK
+  - `test_server.py` OK
+- Build final:
+  - `PyInstaller -y KrakenOffline.spec` OK
+  - Instalador generado: `dist/Kraken_Media_Server_Installer_v4.90.exe`
 
 ---
 
@@ -1082,4 +1115,118 @@ Capas de Seguridad:
 - Version base de release: 4.87
 - Hotfix aplicado: 4.87.1 (fecha 2026-04-02)
 - Estado: Listo para validacion final de UX y Cast en dispositivos reales
+
+---
+
+# Cambios Recientes (v4.91 - 2026-04-11)
+
+## Sesión de Trabajo: HLS Keepalive + Cast Fix + Reconexión
+
+### Resumen
+Implementación de mejoras críticas al sistema de streaming HLS: timeout extendido a 20 minutos, soporte para Chromecast via dominio público, reconexión automática de sesiones expiradas, y keepalive ping durante pausas.
+
+### 🎯 Cambios en Backend
+
+#### `state.py` — Timeout HLS Extendido
+- **Cambio:** `max_inactive_seconds` de 600s → 1200s (20 minutos)
+- **Función:** `cleanup_old_hls_sessions()`
+- **Razón:** Permite pausas largas sin destruir la sesión FFmpeg (evita reconexiones molestas)
+- **Log mejorado:** Mensaje ahora indica ">20 min sin actividad"
+
+#### `config.py` — Dominio Público para Cast
+- **Nueva variable:** `CAST_PUBLIC_URL = os.getenv('CAST_PUBLIC_URL', 'https://kraken.ederzu.com')`
+- **Ubicación:** Líneas 98-100, junto a configuraciones de URL del servidor
+- **Razón:** Chromecast no puede acceder a localhost; necesita URL pública accesible via HTTPS
+
+#### `routes/hls.py` — Endpoint de Reconexión + Cleanup Duplicado
+- **Nuevo endpoint:** `POST /api/hls/reconnect`
+  - Permite crear nueva sesión HLS desde video ya conocido
+  - Recupera `full_video_path` desde token o sesión anterior
+  - Limpia sesión antigua antes de crear nueva
+  - Soporta selección de pista de audio
+  - Retorna nueva URL HLS + token + session_id
+  - Endpoint resiliente: valida token, media_id, existencia de archivo
+- **Función duplicada actualizada:** `cleanup_old_hls_sessions()` al final del archivo también usa 1200s
+- **Respuesta mejorada:** `hls_status` ahora incluye campo `alive: true/false`
+
+#### `routes/api.py` — Endpoint de Configuración Pública
+- **Nuevo endpoint:** `GET /api/config/public`
+- **Respuesta:**
+  ```json
+  {
+    "cast_public_url": "https://kraken.ederzu.com"
+  }
+  ```
+- **Razón:** Frontend necesita leer dominio público para construir URLs de Cast accesibles desde cualquier dispositivo
+
+### 🎨 Cambios en Frontend
+
+#### `templates/index.html` — Cast Fix + Keepalive + Reconexión
+
+##### 1. AutoJoinPolicy Mejorado
+- **Cambio:** `ORIGIN_SCOPED` → `TAB_AND_ORIGIN_SCOPED`
+- **Ubicación:** Inicialización de Cast (`castContext.setOptions()`)
+- **Razón:** Permite que múltiples tabs del mismo origen se unan a la misma sesión Cast
+
+##### 2. Dominio Público para Cast
+- **Carga automática:** `fetch('/api/config/public')` durante `DOMContentLoaded`
+- **Variable global:** `window.__krakenPublicUrl` (sanitizada con `.replace(/\/+$/, '')`)
+- **Uso:** Construcción de URLs de Cast ahora usa `publicOrigin = window.__krakenPublicUrl || window.location.origin`
+- **Resultado:** Chromecast accede a `https://kraken.ederzu.com` en vez de `http://localhost:xxxx`
+
+##### 3. Keepalive Ping para Sesiones HLS
+- **Funciones:** `startHlsKeepalive()` y `stopHlsKeepalive()`
+- **Intervalo:** Cada 60 segundos durante video pausado
+- **Endpoint:** `GET /api/hls/status?sid=XXX`
+- **Lógica:**
+  - Inicia automáticamente en evento `pause`
+  - Se detiene en evento `play`
+  - Si `status.alive === false`, limpia intervalo automáticamente
+- **Resultado:** Mantiene `last_activity` vivo, evita cleanup prematuro por inactividad
+
+##### 4. Reconexión Graceful
+- **Detección de error:** Listener `art.on('error')` filtra errores HLS (network, manifest, timeout, 403, 404)
+- **Overlay de reconexión:** UI elegante con blur backdrop + botón "Reconectar"
+- **Flujo de reconexión:**
+  1. Usuario hace clic en "Reconectar"
+  2. `POST /api/hls/reconnect` con `old_session_id`, `token`, `media_id`, `audio_track`
+  3. Backend crea nueva sesión HLS
+  4. Frontend actualiza URL con `art.switchUrl(newUrl)`
+  5. Overlay se elimina, keepalive se reinicia
+- **Manejo de errores:** Si falla, botón cambia a "Error — cerrar y reabrir" con fondo rojo
+- **Protección contra doble reconexión:** Variable `_reconnecting` evita reconexiones simultáneas
+
+### 📋 Lista de Tareas Completadas
+
+- [x] `state.py` — Cambiar timeout HLS de 600s a 1200s (20 min)
+- [x] `config.py` — Agregar `CAST_PUBLIC_URL`
+- [x] `routes/hls.py` — Endpoint `/api/hls/reconnect` + token en segmentos
+- [x] `routes/api.py` — Endpoint `/api/config/public` para exponer `CAST_PUBLIC_URL`
+- [x] `templates/index.html` — `autoJoinPolicy` + dominio público para Cast + keepalive ping + reconexión
+
+### 🔧 Archivos Modificados
+
+| Archivo | Líneas Afectadas | Tipo de Cambio |
+|---------|------------------|----------------|
+| `state.py` | Línea 40 | Timeout default |
+| `config.py` | Líneas 98-100 | Nueva variable |
+| `routes/hls.py` | Líneas 218-355, 460 | Nuevo endpoint + cleanup |
+| `routes/api.py` | Líneas 3086-3093 | Nuevo endpoint público |
+| `templates/index.html` | Líneas 30, 1525-1534, 6014-6016, 6356-6478 | Cast fix + keepalive + reconexión |
+
+### 🎯 Beneficios para el Usuario
+
+1. **Pausas largas sin reconexión:** 20 minutos de inactividad antes de destruir sesión (vs 10 min anterior)
+2. **Chromecast funcional:** URLs públicas accesibles desde cualquier dispositivo, no solo localhost
+3. **Reconexión automática:** Si sesión expira, overlay elegante permite reconectar con 1 clic
+4. **Sesiones estables:** Keepalive mantiene sesión viva durante pausas largas (pausa para contestar teléfono, etc.)
+
+### ⚠️ Notas Técnicas
+
+- **Token en segmentos HLS:** Los segmentos ahora incluyen token en URL para validación
+- **Cleanup duplicado:** Función `cleanup_old_hls_sessions()` existe en `state.py` y `routes/hls.py`; ambas usan 1200s
+- **Compatibilidad Cast:** Requiere HTTPS en dominio público para funcionar en producción
+- **Keepalive silencioso:** Errores de red durante pausa son silenciados para no spamear consola
+
+---
 
