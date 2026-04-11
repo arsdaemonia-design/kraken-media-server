@@ -27,7 +27,7 @@
                 const castContext = window.cast.framework.CastContext.getInstance();
                 castContext.setOptions({
                     receiverApplicationId: window.chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
-                    autoJoinPolicy: window.chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED
+                    autoJoinPolicy: window.chrome.cast.AutoJoinPolicy.TAB_AND_ORIGIN_SCOPED
                 });
                 window.__krakenCastReady = true;
                 return true;
@@ -1103,6 +1103,55 @@
             }
         }
 
+        /* ═══════ CONTROLES ARTPLAYER MÁS GRANDES EN TABLET / MÓVIL ═══════ */
+        /* Usando las CSS custom properties nativas de ArtPlayer */
+        @media (max-width: 1024px) {
+            #artplayer-container .art-video-player {
+                --art-control-height: 56px;
+                --art-control-icon-size: 44px;
+                --art-control-icon-scale: 1.3;
+                --art-padding: 12px;
+            }
+            /* Botones en cine-controls (header y barra inferior) */
+            .cine-controls button, .cine-controls [role="button"],
+            .cine-header button, .cine-header [role="button"] {
+                font-size: 24px !important;
+                min-height: 48px;
+                min-width: 48px;
+                padding: 12px !important;
+            }
+            /* Volumen slider más fácil de tocar */
+            #artplayer-container .art-volume-panel {
+                min-width: 50px;
+            }
+        }
+
+        /* En móvil pequeño, controles aún más accesibles */
+        @media (max-width: 480px) {
+            #artplayer-container .art-video-player {
+                --art-control-height: 52px;
+                --art-control-icon-size: 40px;
+                --art-control-icon-scale: 1.4;
+                --art-padding: 10px;
+            }
+            .cine-controls button, .cine-controls [role="button"],
+            .cine-header button, .cine-header [role="button"] {
+                font-size: 28px !important;
+                min-height: 52px;
+                min-width: 52px;
+                padding: 14px !important;
+            }
+        }
+
+        /* En fullscreen, controles más grandes pero no exagerados */
+        @media (max-width: 1024px) {
+            #artplayer-container .art-video-player.art-fullscreen {
+                --art-control-height: 64px;
+                --art-control-icon-size: 50px;
+                --art-progress-height: 8px;
+            }
+        }
+
         #artplayer-container .art-controls-center {
             display: flex !important;
             justify-content: center;
@@ -1521,6 +1570,18 @@
             
             window.addEventListener('DOMContentLoaded', async () => {
                 console.log('[AUTH] DOMContentLoaded fired');
+
+                // Cargar config pública (dominio para Cast, etc.)
+                try {
+                    const pubCfg = await originalFetch('/api/config/public');
+                    if (pubCfg.ok) {
+                        const cfg = await pubCfg.json();
+                        if (cfg.cast_public_url) {
+                            window.__krakenPublicUrl = cfg.cast_public_url.replace(/\/+$/, '');
+                        }
+                    }
+                } catch(e) { console.warn('[CONFIG] No se pudo cargar config pública:', e); }
+
                 const screen = document.getElementById('kraken-auth-screen');
                 console.log('[AUTH] Auth screen element:', screen);
                 const token = localStorage.getItem(AUTH_KEY);
@@ -1696,17 +1757,17 @@
             const name = document.getElementById('auth-reg-name').value.trim();
             const password = document.getElementById('auth-reg-password').value;
             const inviteCode = window._registerWithInvite || '';
-            
+
             if (!name) {
                 const err = document.getElementById('auth-reg-error');
                 err.textContent = 'Escribe tu nombre';
                 err.style.display = 'block';
                 return;
             }
-            
-            if (!password || password.length < 4) {
+
+            if (!password || password.length < 8) {
                 const err = document.getElementById('auth-reg-error');
-                err.textContent = 'Contraseña mínimo 4 caracteres';
+                err.textContent = 'La contraseña debe tener al menos 8 caracteres';
                 err.style.display = 'block';
                 return;
             }
@@ -1795,7 +1856,7 @@
             <div id="auth-password-entry" style="display:none;" class="text-center">
                 <div id="auth-password-avatar" class="w-20 h-20 rounded-full bg-gray-700 mx-auto mb-4 flex items-center justify-center text-3xl text-white overflow-hidden"></div>
                 <h2 id="auth-password-name" class="text-xl text-white mb-4"></h2>
-                <input id="auth-password-input" type="password" placeholder="Contraseña" 
+                <input id="auth-password-input" type="password" placeholder="Contraseña (mín. 8)"
                     class="w-full max-w-xs text-center bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 mx-auto block mb-4">
                 <div id="auth-password-error" class="text-red-400 text-sm mb-3" style="display:none;"></div>
                 <div class="flex justify-center gap-3">
@@ -1809,7 +1870,7 @@
                 <h2 id="auth-register-title" class="text-xl text-white mb-6 font-medium">Crear Administrador</h2>
                 <input id="auth-reg-name" type="text" placeholder="Tu nombre" maxlength="30"
                     class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 mb-3">
-                <input id="auth-reg-password" type="password" placeholder="Contraseña (mín. 4 caracteres)" maxlength="30"
+                <input id="auth-reg-password" type="password" placeholder="Contraseña (mín. 8 caracteres)" minlength="8" maxlength="30"
                     class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 mb-3">
                 <div id="auth-reg-error" class="text-red-400 text-sm mb-3" style="display:none;"></div>
                 <button onclick="submitRegister()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-xl transition font-bold text-lg mb-3">
@@ -3697,7 +3758,7 @@
                                 <label class="block text-xs font-bold text-emerald-400 uppercase tracking-widest mb-2 ml-1">
                                     <i class="fa-solid fa-lock mr-1"></i> Contraseña
                                 </label>
-                                <input type="password" id="setup-password" placeholder="Mínimo 4 caracteres" minlength="4"
+                                <input type="password" id="setup-password" placeholder="Mínimo 8 caracteres" minlength="8"
                                        class="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition">
                             </div>
                             
@@ -3828,7 +3889,7 @@
                                         <div class="mb-4 flex gap-3">
                                             <input type="text" id="new-user-name" placeholder="Nombre de usuario" 
                                                    class="flex-1 bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition">
-                                            <input type="password" id="new-user-password" placeholder="Contraseña" minlength="4"
+                                            <input type="password" id="new-user-password" placeholder="Mín. 8 caracteres" minlength="8"
                                                    class="w-40 bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition">
                                             <button onclick="adminCreateUser()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-xl font-bold">
                                                 <i class="fa-solid fa-plus"></i> Crear
@@ -3958,9 +4019,14 @@
             function adminCreateUser() {
                 const name = document.getElementById('new-user-name').value.trim();
                 const password = document.getElementById('new-user-password').value;
-                
+
                 if (!name || !password) {
                     showToast('Completa todos los campos', 'error');
+                    return;
+                }
+
+                if (password.length < 8) {
+                    showToast('La contraseña debe tener al menos 8 caracteres', 'error');
                     return;
                 }
                 
@@ -5999,9 +6065,13 @@ function adminDeleteUser(email) {
 
                             let art = null;
                             const artSettings = [audioSettingBase, subtitleSettingBase];
+                            // Usar dominio público para Cast (el Chromecast no accede a localhost)
+                            const publicOrigin = window.__krakenPublicUrl || window.location.origin;
+                            const baseUrl = data.url.startsWith('/') ? (publicOrigin + data.url) : data.url;
+                            const castUrl = data.token ? baseUrl + (baseUrl.includes('?') ? '&' : '?') + `token=${data.token}` : baseUrl;
                             let artConfig = {
                                 container: container,
-                                url: data.url.startsWith('/') ? (window.location.origin + data.url) : data.url,
+                                url: castUrl,
                                 title: file.title || '',
                                 theme: '#10b981',
                                 setting: true,
@@ -6012,6 +6082,7 @@ function adminDeleteUser(email) {
                                 playbackRate: true,
                                 screenshot: false,
                                 airplay: true,
+                                autoHide: window.innerWidth >= 1024 ? 4000 : 0, // En móvil: sin autoHide (usamos touch toggle)
                                 plugins: castSupported ? [
                                     artplayerPluginChromecast({
                                         mimeType: data.direct_play ? 'video/mp4' : 'application/x-mpegURL',
@@ -6140,6 +6211,43 @@ function adminDeleteUser(email) {
                             }
 
                             art = new Artplayer(artConfig);
+
+                            // ═══════ TOUCH TOGGLE para controles en móvil ═══════
+                            // En móvil, ArtPlayer no detecta hover, así que necesitamos un listener de touch
+                            // para mostrar/ocultar los controles nativos al tocar la pantalla
+                            if (window.innerWidth < 1024 && art.template && art.template.$container) {
+                                let _artControlsTimeout = null;
+                                const ART_CONTROLS_DURATION = 3000; // 3 segundos en móvil
+
+                                // Toggle al tocar el contenedor
+                                art.template.$container.addEventListener('touchend', (e) => {
+                                    // Ignorar toques en botones/controles (dejar que funcionen normal)
+                                    if (e.target.closest('.art-control, .art-control-volume, .art-setting, button, input, select')) return;
+                                    
+                                    const isShowing = art.template.$container.closest('.art-video-player')?.classList.contains('art-control-show');
+                                    if (isShowing) {
+                                        // Ocultar controles
+                                        art.template.$container.closest('.art-video-player')?.classList.remove('art-control-show', 'art-hover');
+                                        if (_artControlsTimeout) clearTimeout(_artControlsTimeout);
+                                    } else {
+                                        // Mostrar controles con timeout
+                                        art.template.$container.closest('.art-video-player')?.classList.add('art-control-show', 'art-hover');
+                                        if (_artControlsTimeout) clearTimeout(_artControlsTimeout);
+                                        _artControlsTimeout = setTimeout(() => {
+                                            art.template.$container.closest('.art-video-player')?.classList.remove('art-control-show', 'art-hover');
+                                        }, ART_CONTROLS_DURATION);
+                                    }
+                                }, { passive: true });
+
+                                // Mouse fallback para desktop con ventana pequeña
+                                art.template.$container.addEventListener('mousemove', () => {
+                                    art.template.$container.closest('.art-video-player')?.classList.add('art-control-show', 'art-hover');
+                                    if (_artControlsTimeout) clearTimeout(_artControlsTimeout);
+                                    _artControlsTimeout = setTimeout(() => {
+                                        art.template.$container.closest('.art-video-player')?.classList.remove('art-control-show', 'art-hover');
+                                    }, ART_CONTROLS_DURATION);
+                                }, { passive: true });
+                            }
 
                             const controlsCenter = art.template && art.template.$player
                                 ? art.template.$player.querySelector('.art-controls-center')
@@ -6337,6 +6445,130 @@ function adminDeleteUser(email) {
                             // Auto-avanzar al terminar
                             art.on('ended', () => { stopProgressTracking(); playNext(); });
 
+                            // ═══════ KEEPALIVE PING para sesión HLS (evita cleanup por inactividad) ═══════
+                            let _hlsKeepaliveInterval = null;
+                            const _currentHlsSessionId = data.session_id;
+                            const _currentMediaId = file.id || null;
+                            const _currentToken = data.token || null;
+
+                            function startHlsKeepalive() {
+                                if (_hlsKeepaliveInterval) return;
+                                _hlsKeepaliveInterval = setInterval(async () => {
+                                    if (!_currentHlsSessionId) return;
+                                    try {
+                                        const res = await fetch(`/api/hls/status?sid=${_currentHlsSessionId}`);
+                                        const status = await res.json();
+                                        if (!status.alive) {
+                                            // Sesión murió — limpiar keepalive
+                                            stopHlsKeepalive();
+                                            console.warn('[HLS] Sesión expirada, keepalive detenido');
+                                        }
+                                    } catch(e) { /* silenciar errores de red durante pausa */ }
+                                }, 60000); // Cada 60 segundos
+                            }
+
+                            function stopHlsKeepalive() {
+                                if (_hlsKeepaliveInterval) {
+                                    clearInterval(_hlsKeepaliveInterval);
+                                    _hlsKeepaliveInterval = null;
+                                }
+                            }
+
+                            // Iniciar keepalive solo cuando está pausado
+                            art.on('pause', () => { startHlsKeepalive(); });
+                            art.on('play', () => { stopHlsKeepalive(); });
+                            // También iniciar si empieza directamente en play
+                            startHlsKeepalive(); // Si está pausado ya, el ping mantendrá viva la sesión
+
+                            // ═══════ RECONEXIÓN HLS cuando el stream se cae ═══════
+                            let _reconnecting = false;
+                            art.on('error', async (error) => {
+                                const errorMsg = (error && error.message) || String(error || '');
+                                const isHlsError = errorMsg.toLowerCase().includes('network') ||
+                                                   errorMsg.toLowerCase().includes('manifest') ||
+                                                   errorMsg.toLowerCase().includes('timeout') ||
+                                                   errorMsg.toLowerCase().includes('403') ||
+                                                   errorMsg.toLowerCase().includes('404');
+
+                                if (!isHlsError || _reconnecting) return;
+                                _reconnecting = true;
+                                console.warn('[HLS] Error detectado, intentando reconexión...', errorMsg);
+
+                                // Mostrar overlay de reconexión
+                                const existingOverlay = document.getElementById('hls-reconnect-overlay');
+                                if (existingOverlay) existingOverlay.remove();
+
+                                const overlay = document.createElement('div');
+                                overlay.id = 'hls-reconnect-overlay';
+                                overlay.style.cssText = `
+                                    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                                    z-index: 99999; background: rgba(0,0,0,0.9); backdrop-filter: blur(16px);
+                                    border: 1px solid rgba(16,185,129,0.5); border-radius: 16px;
+                                    padding: 24px 32px; text-align: center; min-width: 280px;
+                                    box-shadow: 0 12px 48px rgba(0,0,0,0.7);
+                                `;
+                                overlay.innerHTML = `
+                                    <div style="color: white; margin-bottom: 16px;">
+                                        <div style="font-size: 32px; margin-bottom: 8px;">📡</div>
+                                        <div style="font-size: 16px; font-weight: 700; margin-bottom: 4px;">Conexión perdida</div>
+                                        <div style="font-size: 12px; color: #a1a1aa;">La sesión HLS expiró por inactividad</div>
+                                    </div>
+                                    <button id="hls-reconnect-btn" style="
+                                        background: linear-gradient(135deg, #10b981, #059669);
+                                        color: white; border: none; border-radius: 8px;
+                                        padding: 10px 24px; font-size: 14px; font-weight: 600;
+                                        cursor: pointer; width: 100%;
+                                    ">Reconectar</button>
+                                `;
+                                art.template.$container.appendChild(overlay);
+
+                                document.getElementById('hls-reconnect-btn').addEventListener('click', async () => {
+                                    const btn = document.getElementById('hls-reconnect-btn');
+                                    btn.textContent = 'Reconectando...';
+                                    btn.disabled = true;
+
+                                    try {
+                                        const res = await fetch('/api/hls/reconnect', {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({
+                                                old_session_id: _currentHlsSessionId,
+                                                token: _currentToken,
+                                                media_id: _currentMediaId,
+                                                audio_track: data.selected_audio_track || null
+                                            })
+                                        });
+
+                                        const newData = await res.json();
+                                        if (!res.ok) throw new Error(newData.error || 'Reconexión fallida');
+
+                                        console.log('[HLS] Reconexión exitosa, nueva sesión:', newData.session_id);
+
+                                        // Actualizar URL del reproductor
+                                        const newUrl = newData.url.startsWith('/')
+                                            ? (window.location.origin + newData.url)
+                                            : newData.url;
+                                        art.switchUrl(newUrl);
+
+                                        if (newData.token) {
+                                            // Actualizar token si cambió
+                                        }
+
+                                        overlay.remove();
+                                        _reconnecting = false;
+
+                                        // Reiniciar keepalive con nueva sesión
+                                        stopHlsKeepalive();
+                                        // El nuevo session_id no se almacena aquí, pero el keepalive
+                                        // ya no es crítico porque el usuario acaba de reconectar
+                                    } catch(err) {
+                                        console.error('[HLS] Reconexión fallida:', err);
+                                        btn.textContent = 'Error — cerrar y reabrir';
+                                        btn.style.background = '#ef4444';
+                                    }
+                                });
+                            });
+
                             // Safety net: timeupdate backup para HLS streams que no disparan ended
                             let _endedTriggered = false;
 
@@ -6476,6 +6708,7 @@ function adminDeleteUser(email) {
 
                             // Cleanup al cerrar
                             window.cleanupVideo = () => {
+                                stopHlsKeepalive();
                                 stopProgressTracking();
                                 if (window.currentArtPlayer) {
                                     fetch(`/api/hls/stop?sid=${data.session_id}`, { method: 'POST' }).catch(() => {});
@@ -6907,6 +7140,56 @@ function adminDeleteUser(email) {
                     }, 300);
                 }
             }
+
+            // ═══════ TOGGLE CONTROLES DEL CINE (touch + mouse) ═══════
+            let _cineControlsTimeout = null;
+            const CINE_CONTROLS_DURATION = 4000; // 4 segundos
+
+            function showCineControls() {
+                const container = document.getElementById('cine-container');
+                if (!container) return;
+                container.classList.add('controls-visible');
+                if (_cineControlsTimeout) clearTimeout(_cineControlsTimeout);
+                _cineControlsTimeout = setTimeout(() => {
+                    container.classList.remove('controls-visible');
+                }, CINE_CONTROLS_DURATION);
+            }
+
+            // Inicializar los listeners cuando el video se abre
+            function initCineControlsToggle() {
+                const container = document.getElementById('cine-container');
+                if (!container) return;
+                // Evitar doble inicialización
+                if (container.dataset.controlsInit === '1') return;
+                container.dataset.controlsInit = '1';
+
+                // Touch: tap muestra/oculta controles
+                let _lastTap = 0;
+                container.addEventListener('touchend', (e) => {
+                    if (e.target.closest('button, [role="button"], .art-control, select, input')) return;
+                    const now = Date.now();
+                    if (now - _lastTap < 300) return;
+                    _lastTap = now;
+                    const isVisible = container.classList.contains('controls-visible');
+                    if (isVisible) {
+                        container.classList.remove('controls-visible');
+                        if (_cineControlsTimeout) clearTimeout(_cineControlsTimeout);
+                    } else {
+                        showCineControls();
+                    }
+                }, { passive: true });
+
+                // Mouse: move muestra controles
+                let _lastMove = 0;
+                container.addEventListener('mousemove', () => {
+                    const now = Date.now();
+                    if (now - _lastMove < 500) return;
+                    _lastMove = now;
+                    showCineControls();
+                }, { passive: true });
+            }
+            // Llamar inmediatamente para registrar los listeners
+            initCineControlsToggle();
 
             function exitVideoMode() {
                 // Cleanup HLS session si existe

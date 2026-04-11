@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, send_file, render_template_string, Response, send_from_directory
 import os, time, json, shutil, subprocess, sys, threading, urllib.parse, re, copy
 import io
+import logging
 from collections import deque
 from functools import wraps
 import requests
@@ -19,7 +20,10 @@ from state import *
 import utils
 from utils import *
 from services.lastfm import *
-from services.auth import get_user_from_request, create_token, hash_password, verify_password, generate_invite_code, verify_token
+from services.auth import (
+    get_user_from_request, create_token, hash_password, verify_password,
+    generate_invite_code, verify_token, validate_password_strength, MIN_PASSWORD_LENGTH
+)
 from services.metadata import *
 from services.library import *
 from services.media_analyzer import *
@@ -28,6 +32,22 @@ from services.database import get_db
 import traceback
 
 api_bp = Blueprint("api", __name__)
+
+# ═══ Security Audit Logger ═══
+SECURITY_LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
+os.makedirs(SECURITY_LOG_DIR, exist_ok=True)
+SECURITY_LOG_FILE = os.path.join(SECURITY_LOG_DIR, 'security.log')
+
+security_logger = logging.getLogger('kraken_security')
+security_logger.setLevel(logging.INFO)
+if not security_logger.handlers:
+    _fh = logging.FileHandler(SECURITY_LOG_FILE, encoding='utf-8')
+    _fh.setFormatter(logging.Formatter('%(asctime)s | %(levelname)-8s | %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+    security_logger.addHandler(_fh)
+    # También log a consola
+    _ch = logging.StreamHandler()
+    _ch.setFormatter(logging.Formatter('%(asctime)s [SECURITY] %(message)s', datefmt='%H:%M:%S'))
+    security_logger.addHandler(_ch)
 
 # ============= RUNTIME CONFIG HELPERS =============
 if sys.platform == 'win32':
@@ -2223,8 +2243,9 @@ def setup_firsttime():
     
     if not username:
         return jsonify({'error': 'Nombre de usuario requerido'}), 400
-    if not password or len(password) < 4:
-        return jsonify({'error': 'Contraseña mínimo 4 caracteres'}), 400
+    valid, error_msg = validate_password_strength(password)
+    if not valid:
+        return jsonify({'error': error_msg}), 400
     if not pin or len(pin) < 4:
         return jsonify({'error': 'PIN mínimo 4 dígitos'}), 400
     
@@ -2823,13 +2844,21 @@ def require_master_pin(f):
     return wrapper
 
 def require_admin(f):
-    """Decorator que requiere usuario admin autenticado."""
+    """Decorator que requiere usuario admin autenticado o master PIN (auditado)."""
     @wraps(f)
     def wrapper(*args, **kwargs):
         try:
             req_json = request.get_json(silent=True) or {}
             master_pin = request.headers.get("X-Master-Pin") or req_json.get("pin")
             if master_pin and str(master_pin).strip() == str(get_master_pin()).strip():
+                # PIN bypass — auditar siempre
+                user_email = get_user_from_request(request) or 'no_user'
+                client_ip = _get_client_ip()
+                endpoint = f.__name__
+                security_logger.warning(
+                    f'PIN ADMIN BYPASS: email={user_email} IP={client_ip} '
+                    f'endpoint={endpoint} path={request.path} method={request.method}'
+                )
                 return f(*args, **kwargs)
             user_email = get_user_from_request(request)
             if not user_email:
@@ -2921,11 +2950,12 @@ def admin_create_user():
     data = request.get_json() or {}
     username = data.get('username', '').strip()
     password = data.get('password', '')
-    
+
     if not username:
         return jsonify({'error': 'Nombre requerido'}), 400
-    if not password or len(password) < 4:
-        return jsonify({'error': 'Contraseña mínimo 4 caracteres'}), 400
+    valid, error_msg = validate_password_strength(password)
+    if not valid:
+        return jsonify({'error': error_msg}), 400
     
     conn = get_db()
     c = conn.cursor()
@@ -2946,7 +2976,8 @@ def admin_create_user():
     """, (email, username, None, 0, password_hash, time.time()))
     conn.commit()
     conn.close()
-    
+
+    security_logger.info(f'USER CREATED: email={email} username={username}')
     return jsonify({'ok': True, 'email': email})
 
 @api_bp.route('/api/admin/users/<email>', methods=['DELETE'])
@@ -2969,7 +3000,8 @@ def admin_delete_user(email):
     c.execute("DELETE FROM users WHERE email = ?", (email,))
     conn.commit()
     conn.close()
-    
+
+    security_logger.info(f'USER DELETED: email={email}')
     return jsonify({'ok': True})
 
 @api_bp.route('/api/admin/users/<email>/password', methods=['PUT'])
@@ -2978,9 +3010,10 @@ def admin_reset_password(email):
     """Resetear contraseña de usuario."""
     data = request.get_json() or {}
     new_password = data.get('password', '')
-    
-    if not new_password or len(new_password) < 4:
-        return jsonify({'error': 'Contraseña mínimo 4 caracteres'}), 400
+
+    valid, error_msg = validate_password_strength(new_password)
+    if not valid:
+        return jsonify({'error': error_msg}), 400
     
     conn = get_db()
     c = conn.cursor()
@@ -2988,6 +3021,7 @@ def admin_reset_password(email):
     c.execute("UPDATE users SET pin_hash = ? WHERE email = ?", (password_hash, email))
     conn.commit()
     conn.close()
+    security_logger.info(f'PASSWORD RESET: email={email}')
     return jsonify({'ok': True})
 
 
@@ -3083,6 +3117,15 @@ def validate_invite_code():
     
     return jsonify(response)
 
+@api_bp.route('/api/config/public', methods=['GET'])
+def public_config():
+    """Configuración pública expuesta al frontend (sin datos sensibles).
+    Incluye el dominio público para Cast y otras settings no sensibles.
+    """
+    return jsonify({
+        'cast_public_url': config.CAST_PUBLIC_URL,
+    })
+
 @api_bp.route('/api/admin/config', methods=['GET'])
 def admin_get_config():
     """Obtener configuración actual (sin datos sensibles)."""
@@ -3146,16 +3189,17 @@ def auth_login():
         if not verify_password(password, stored):
             attempts = _record_failed_attempt(client_ip)
             remaining = MAX_LOGIN_ATTEMPTS - attempts
+            security_logger.warning(f'LOGIN FALLIDO: email={email} IP={client_ip} intentos={attempts}')
             return jsonify({
                 "error": "Contraseña incorrecta",
                 "remaining_attempts": max(0, remaining)
             }), 401
-        
+
         # Login successful - clear failed attempts
         _clear_failed_attempts(client_ip)
-        
+
         token = create_token(user['email'], user['username'] or '', bool(user['is_superadmin']))
-        print(f'[AUTH] Login exitoso: {email} desde {client_ip}')
+        security_logger.info(f'LOGIN EXITOSO: email={email} IP={client_ip} username={user["username"]}')
         return jsonify({
             'token': token,
             'email': user['email'],
@@ -3175,11 +3219,12 @@ def auth_register():
     username = data.get('username', '').strip()
     password = data.get('password', '')
     invite_code = data.get('invite_code', '').strip().upper()
-    
+
     if not username:
         return jsonify({"error": "Nombre requerido"}), 400
-    if not password or len(password) < 4:
-        return jsonify({"error": "Contraseña mínimo 4 caracteres"}), 400
+    valid, error_msg = validate_password_strength(password)
+    if not valid:
+        return jsonify({"error": error_msg}), 400
     
     conn = get_db()
     c = conn.cursor()
@@ -3270,12 +3315,13 @@ def auth_set_password():
     user_email = get_user_from_request(request)
     if not user_email:
         return jsonify({"error": "No autorizado"}), 401
-    
+
     data = request.get_json() or {}
     new_password = data.get('password', '')
-    
-    if not new_password or len(new_password) < 4:
-        return jsonify({"error": "Contraseña mínimo 4 caracteres"}), 400
+
+    valid, error_msg = validate_password_strength(new_password)
+    if not valid:
+        return jsonify({"error": error_msg}), 400
     
     conn = get_db()
     password_hash = hash_password(new_password)
@@ -3311,25 +3357,46 @@ def auth_verify():
 
 @api_bp.route('/api/auth/logout', methods=['POST'])
 def auth_logout():
-    """Logout - invalidar token."""
-    return jsonify({"ok": True})
+    """Logout - invalidar token (blacklist por JTI)."""
+    try:
+        auth = request.headers.get('Authorization', '')
+        user_email = get_user_from_request(request) or 'unknown'
+        client_ip = _get_client_ip()
+
+        if auth.startswith('Bearer '):
+            token = auth[7:]
+            # Extraer JTI del token para blacklist
+            payload = verify_token(token)  # Antes de blacklist, para obtener jti
+            if payload and 'jti' in payload:
+                jti = payload['jti']
+                state.blacklist_token_jti(jti)
+                security_logger.info(f'LOGOUT: email={user_email} IP={client_ip} jti={jti[:8]}...')
+            else:
+                security_logger.info(f'LOGOUT (sin token válido): email={user_email} IP={client_ip}')
+        else:
+            security_logger.info(f'LOGOUT (sin Bearer): email={user_email} IP={client_ip}')
+
+        return jsonify({"ok": True, "message": "Sesión cerrada correctamente"})
+    except Exception as e:
+        security_logger.error(f'LOGOUT ERROR: {e}')
+        return jsonify({"ok": True})  # Siempre retornar ok para no revelar errores
 
 @api_bp.route('/api/stream/token', methods=['POST'])
 def generate_stream_token():
     data = request.get_json() or {}
     media_id = data.get('id')
+    session_id = data.get('session_id')  # Opcional: asociar sesión al token
     
-    if not media_id:
-        return jsonify({"error": "Missing id parameter"}), 400
-        
     import uuid
     import time
     
     token = str(uuid.uuid4())
-    state.STREAM_TOKENS[token] = {
+    token_data = {
         'id': media_id,
-        'expires': time.time() + (4 * 3600)  # Expira en 4 horas
+        'expires': time.time() + (4 * 3600),  # Expira en 4 horas
+        'sessions': [session_id] if session_id else []
     }
+    state.STREAM_TOKENS[token] = token_data
     
     return jsonify({'token': token, 'id': media_id})
 

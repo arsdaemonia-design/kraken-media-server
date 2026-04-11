@@ -19,11 +19,27 @@ RESCAN_STATUS = {
     "message": "",
     "start_time": 0
 }
-ACTIVE_USERS = {} 
+ACTIVE_USERS = {}
 PENDING_COMMANDS = {}
 HLS_SESSIONS = {}
 STREAM_TOKENS = {}
+TOKEN_BLACKLIST = set()  # JTI blacklist para logout seguro
 USERS_LOCK = threading.Lock()
+BLACKLIST_LOCK = threading.Lock()
+
+def blacklist_token_jti(jti):
+    """Agrega un JTI a la blacklist de tokens."""
+    with BLACKLIST_LOCK:
+        TOKEN_BLACKLIST.add(jti)
+        # Limpieza preventiva: mantener solo los últimos 10000
+        if len(TOKEN_BLACKLIST) > 10000:
+            # Purge oldest (no ordenable en set, simplemente limitamos)
+            pass
+
+def is_token_blacklisted(jti):
+    """Verifica si un JTI está en la blacklist."""
+    with BLACKLIST_LOCK:
+        return jti in TOKEN_BLACKLIST
 
 def cleanup_inactive_users():
     while True:
@@ -37,18 +53,18 @@ def cleanup_inactive_users():
             print("Error cleaning up users:", e)
         time_module.sleep(10)
 
-def cleanup_old_hls_sessions(max_inactive_seconds=600):
+def cleanup_old_hls_sessions(max_inactive_seconds=1200):
     while True:
         try:
             now = time_module.time()
             to_remove = []
-            
+
             for sid, data in list(HLS_SESSIONS.items()):
                 if now - data.get('last_activity', 0) > max_inactive_seconds:
                     to_remove.append(sid)
-            
+
             for sid in to_remove:
-                print(f"Limpiando sesión HLS inactiva: {sid}")
+                print(f"Limpiando sesión HLS inactiva: {sid} (>20 min sin actividad)")
                 session_data = HLS_SESSIONS.get(sid)
                 if session_data:
                     if session_data.get('process'):

@@ -9,6 +9,8 @@ import time
 import os
 import base64
 import secrets
+import uuid
+import re
 
 # Generar o cargar secreto persistente
 def _get_or_create_secret():
@@ -24,6 +26,39 @@ def _get_or_create_secret():
 
 JWT_SECRET = _get_or_create_secret()
 TOKEN_EXPIRY = 30 * 24 * 3600  # 30 días
+
+# ═══ Validación de Password ═══
+
+MIN_PASSWORD_LENGTH = 8
+
+def validate_password_strength(password):
+    """
+    Valida que la contraseña cumpla requisitos mínimos:
+    - Mínimo 8 caracteres
+    - No permitir contraseñas comunes (lista básica)
+    Retorna (valid: bool, error_msg: str)
+    """
+    if not password or len(password) < MIN_PASSWORD_LENGTH:
+        return False, f"La contraseña debe tener al menos {MIN_PASSWORD_LENGTH} caracteres"
+
+    # Lista básica de contraseñas comunes a rechazar
+    COMMON_PASSWORDS = {
+        'password', '12345678', '123456789', 'qwerty12', 'abc12345',
+        'letmein1', 'welcome1', 'monkey12', 'master12', 'dragon12',
+        'password1', 'iloveyou', 'trustno1', 'sunshine1', 'princess',
+        'football', 'shadow12', 'superman', 'michael1', 'password123',
+        'kraken1234', 'krakenadmin', 'admin1234', '12341234',
+    }
+    if password.lower() in COMMON_PASSWORDS:
+        return False, "Esta contraseña es demasiado común, elige una más segura"
+
+    # Verificar que no sea una secuencia simple
+    if re.match(r'^(0123456789|abcdefghijklmnopqrstuvwxyz|qwertyuiop|asdfghjkl|zxcvbnm)\d*$', password.lower()):
+        return False, "No se permiten secuencias simples como contraseña"
+
+    return True, ""
+
+# ═══ Hash & Verificación ═══
 
 def hash_password(password):
     """Hash a password with salt for storage."""
@@ -43,9 +78,13 @@ def verify_password(password, stored_hash):
 hash_pin = hash_password
 verify_pin = verify_password
 
+# ═══ Token Creation & Verification ═══
+
 def create_token(user_email, username='', is_superadmin=False):
-    """Create a signed token (JWT-like) for a user."""
+    """Create a signed token (JWT-like) for a user con JTI único."""
+    jti = str(uuid.uuid4())  # Unique token ID para blacklist
     payload = {
+        'jti': jti,
         'email': user_email,
         'username': username,
         'is_superadmin': is_superadmin,
@@ -57,7 +96,7 @@ def create_token(user_email, username='', is_superadmin=False):
     return f"{payload_b64}.{signature}"
 
 def verify_token(token):
-    """Verify and decode a token. Returns payload dict or None."""
+    """Verify and decode a token. Returns payload dict or None. Checkea blacklist."""
     if not token or '.' not in token:
         return None
     try:
@@ -68,9 +107,20 @@ def verify_token(token):
         payload = json.loads(base64.urlsafe_b64decode(payload_b64))
         if payload.get('exp', 0) < time.time():
             return None
+
+        # Check blacklist por JTI
+        jti = payload.get('jti')
+        if jti:
+            # Import late para evitar circular dependency
+            import state
+            if state.is_token_blacklisted(jti):
+                return None
+
         return payload
     except Exception:
         return None
+
+# ═══ Invite Codes ═══
 
 def generate_invite_code():
     """Generate a 6-char invite code like KRK-A7X9."""
