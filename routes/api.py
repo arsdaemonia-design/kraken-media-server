@@ -34,7 +34,8 @@ import traceback
 api_bp = Blueprint("api", __name__)
 
 # ═══ Security Audit Logger ═══
-SECURITY_LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
+# Los logs se guardan en AppData (donde vive runtime_config.json en producción)
+SECURITY_LOG_DIR = os.path.join(_app_data_dir, 'logs')
 os.makedirs(SECURITY_LOG_DIR, exist_ok=True)
 SECURITY_LOG_FILE = os.path.join(SECURITY_LOG_DIR, 'security.log')
 
