@@ -108,18 +108,19 @@ def play_hls():
             conn = sqlite3.connect(os.path.join(config.DOWNLOAD_FOLDER, 'kraken.db'))
             conn.row_factory = sqlite3.Row
             c = conn.cursor()
-            c.execute("SELECT rel_path FROM media WHERE id = ?", (media_id,))
+            c.execute("SELECT rel_path, duration_sec FROM media WHERE id = ?", (media_id,))
             row = c.fetchone()
             conn.close()
             if not row:
                 return jsonify({"error": f"ID {media_id} no encontrado en DB"}), 404
             video_path = row['rel_path']
+            video_duration = row['duration_sec'] or 0
         except Exception as e:
             return jsonify({"error": f"DB error: {str(e)}"}), 500
 
     # --- Fallback legacy: por file path ---
     elif video_path:
-        pass  # Se usa video_path tal cual
+        video_duration = 0  # Legacy no consulta DB, duración desconocida
     else:
         return jsonify({"error": "Missing id+token or file parameter"}), 400
 
@@ -130,14 +131,26 @@ def play_hls():
 
     if not os.path.exists(full_video_path):
         return jsonify({"error": f"File not found: {full_video_path}"}), 404
-    
+
+    # Cambiar audio: detener sesión anterior si existe
     if session_id in state.HLS_SESSIONS:
-        stop_hls_session(session_id)
-    
+        existing = state.HLS_SESSIONS[session_id]
+        if existing.get('process'):
+            try:
+                existing['process'].terminate()
+                existing['process'].wait(timeout=5)
+            except Exception as e:
+                print(f"[HLS] Terminando proceso anterior: {e}")
+        # NO borrar session_dir inmediatamente - FFmpeg nuevo sobrescribirá
+
     session_dir = os.path.join(config.HLS_TEMP_DIR, session_id)
-    
+
+    # Limpiar solo si existe, para fresh start
     if os.path.exists(session_dir):
-        shutil.rmtree(session_dir)
+        try:
+            shutil.rmtree(session_dir)
+        except Exception:
+            pass
     os.makedirs(session_dir, exist_ok=True)
     
     print(f"[HLS] Iniciando transcodificación: {full_video_path}")
@@ -164,6 +177,7 @@ def play_hls():
         return jsonify({
             "url": f"/descargas/{video_path}",
             "direct_play": True,
+            "duration": video_duration,
             "audio_tracks": audio_tracks,
             "selected_audio_track": selected_audio_track,
             "session_id": session_id,
@@ -173,21 +187,20 @@ def play_hls():
         
     if process is None:
         return jsonify({"error": hls_error or "Failed to start transcoding"}), 500
-        
+
     # Esperar hasta que FFmpeg genere el archivo m3u8 (máximo 15 segundos)
     playlist_path = os.path.join(session_dir, "playlist.m3u8")
     import time
     for _ in range(30):
         if os.path.exists(playlist_path):
             break
-        # Verificar si el proceso murió inesperadamente
         if process.poll() is not None:
             stdout, stderr = process.communicate()
             error_msg = stderr.decode() if stderr else "Unknown error"
             print(f"[HLS] FFmpeg murió durante generación inicial:\n{error_msg}")
             return jsonify({"error": f"FFmpeg error: {error_msg}"}), 500
         time.sleep(0.5)
-        
+
     if not os.path.exists(playlist_path):
         process.terminate()
         return jsonify({"error": "Timeout esperando generación HLS"}), 500
@@ -205,6 +218,7 @@ def play_hls():
     
     response_data = {
         "url": f"/hls/{session_id}/playlist.m3u8",
+        "duration": video_duration,
         "audio_tracks": audio_tracks,
         "selected_audio_track": selected_audio_track,
         "session_id": session_id,

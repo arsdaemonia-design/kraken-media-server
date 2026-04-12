@@ -8,6 +8,7 @@ import config
 import state
 import utils
 from services.metadata import obtener_metadata_completa
+from services.media_analyzer import extract_video_metadata
 
 from services.database import get_db, init_db as init_db
 
@@ -133,7 +134,7 @@ def escanear_archivos_fisicos():
     conn = get_db()
     c = conn.cursor()
     
-    c.execute("SELECT rel_path, size_bytes, date_added, genre FROM media")
+    c.execute("SELECT rel_path, size_bytes, date_added, genre, video_resolution, audio_codec FROM media")
     existing_rows = {row['rel_path']: row for row in c.fetchall()}
     existing_genres = {
         rel_path: row['genre']
@@ -191,23 +192,35 @@ def escanear_archivos_fisicos():
             try:
                 stat = os.stat(path)
                 existing = existing_rows.get(rel_path)
-                
+
+                # Helper seguro para sqlite3.Row: retorna None si columna no existe
+                def _safe_get(row, key, default=None):
+                    try:
+                        return row[key]
+                    except (KeyError, IndexError):
+                        return default
+
                 # Delta skip: si tamaño y mtime no cambiaron, no reprocesar
-                # EXCEPCIÓN: Si es video y folder_type es NULL, actualizar aunque no cambió
+                # EXCEPCIÓN: Si es video y le faltan columnas de metadata, re-procesar completo
                 if existing:
-                    same_size = int(existing['size_bytes'] or 0) == int(stat.st_size)
-                    previous_mtime = float(existing['date_added'] or 0)
+                    same_size = int(_safe_get(existing, 'size_bytes', 0) or 0) == int(stat.st_size)
+                    previous_mtime = float(_safe_get(existing, 'date_added', 0) or 0)
                     same_mtime = abs(previous_mtime - float(stat.st_mtime)) < 0.0001
                     if same_size and same_mtime:
-                        # Verificar si necesita folder_type
                         ext_lower = ext.lower()
-                        if ext_lower in ['mp4', 'webm', 'mkv'] and not existing.get('folder_type'):
-                            # Video sin folder_type: actualizar solo ese campo
-                            folder_type = detect_folder_type(rel_path)
-                            c.execute("UPDATE media SET folder_type = ? WHERE rel_path = ?", (folder_type, rel_path))
-                            batch_count += 1
-                        unchanged_count += 1
-                        continue
+                        if ext_lower in ['mp4', 'webm', 'mkv']:
+                            # v4.92: Re-escanear si faltan columnas de metadata técnica
+                            if not _safe_get(existing, 'video_resolution'):
+                                # Necesita metadata nueva → NO hacer skip, caer al procesamiento
+                                pass
+                            else:
+                                # Ya tiene metadata completa → saltar
+                                unchanged_count += 1
+                                continue
+                        else:
+                            # No es video → saltar
+                            unchanged_count += 1
+                            continue
                 
                 meta = obtener_metadata_completa(path, f)
                 
@@ -217,11 +230,17 @@ def escanear_archivos_fisicos():
                         meta['genre'] = existing_genres[rel_path]
                 
                 tipo_archivo = 'video' if ext in ['mp4', 'webm', 'mkv'] else 'audio'
-                
+
                 # Extraer TMDB ID de la ruta y detectar tipo
                 tmdb_id = extract_tmdb_id_from_path(rel_path)
                 folder_type = detect_folder_type(rel_path) if tipo_archivo == 'video' else None
-                
+
+                # ═══ Extraer metadata técnica de video (v4.92) ═══
+                # Solo para videos nuevos o modificados
+                video_meta = None
+                if tipo_archivo == 'video':
+                    video_meta = extract_video_metadata(path)
+
                 # Limpiar título - quitar TMDB ID, deixar solo o nome limpo
                 raw_title = meta['title'] or f
                 # Primero quitar (tmdb-123) ou [tmdb-123] ou {tmdb-123}
@@ -235,13 +254,40 @@ def escanear_archivos_fisicos():
                 
                 # Detect language from folder name
                 lang = detect_language_from_folder(folder_name)
-                
+
+                # Preparar valores de metadata de video (v4.92)
+                if video_meta:
+                    vm_resolution = video_meta.get('video_resolution')
+                    vm_codec = video_meta.get('video_codec')
+                    vm_audio_codec = video_meta.get('audio_codec')
+                    vm_audio_channels = video_meta.get('audio_channels', 0)
+                    vm_audio_tracks = video_meta.get('audio_tracks')
+                    vm_subtitle_tracks = video_meta.get('subtitle_tracks')
+                    vm_bit_rate = video_meta.get('bit_rate', 0)
+                    vm_aspect_ratio = video_meta.get('aspect_ratio')
+                    vm_frame_rate = video_meta.get('frame_rate', 0.0)
+                    vm_file_format = video_meta.get('file_format')
+                else:
+                    vm_resolution = None
+                    vm_codec = None
+                    vm_audio_codec = None
+                    vm_audio_channels = 0
+                    vm_audio_tracks = None
+                    vm_subtitle_tracks = None
+                    vm_bit_rate = 0
+                    vm_aspect_ratio = None
+                    vm_frame_rate = 0.0
+                    vm_file_format = None
+
                 c.execute('''
                 INSERT INTO media (
                     rel_path, filename, folder, full_folder, media_type,
                     title, artist, album, genre, duration_sec, size_bytes, date_added, language,
-                    tmdb_id, folder_type
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    tmdb_id, folder_type,
+                    video_resolution, video_codec, audio_codec, audio_channels,
+                    audio_tracks, subtitle_tracks, bit_rate, aspect_ratio,
+                    frame_rate, file_format
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(rel_path) DO UPDATE SET
                 filename=excluded.filename, folder=excluded.folder,
                 full_folder=excluded.full_folder, media_type=excluded.media_type,
@@ -249,12 +295,21 @@ def escanear_archivos_fisicos():
                 album=excluded.album, genre=excluded.genre,
                 duration_sec=excluded.duration_sec, size_bytes=excluded.size_bytes,
                 language=excluded.language,
-                tmdb_id=excluded.tmdb_id, folder_type=excluded.folder_type
+                tmdb_id=excluded.tmdb_id, folder_type=excluded.folder_type,
+                video_resolution=excluded.video_resolution, video_codec=excluded.video_codec,
+                audio_codec=excluded.audio_codec, audio_channels=excluded.audio_channels,
+                audio_tracks=excluded.audio_tracks, subtitle_tracks=excluded.subtitle_tracks,
+                bit_rate=excluded.bit_rate, aspect_ratio=excluded.aspect_ratio,
+                frame_rate=excluded.frame_rate, file_format=excluded.file_format
                 ''', (
                     rel_path, f, serie_name, folder_name, tipo_archivo,
                     final_title, meta['artist'], meta['album'], meta['genre'],
-                    meta['duration'], stat.st_size, stat.st_mtime, lang,
-                    tmdb_id, folder_type
+                    video_meta.get('duration_sec', 0) if video_meta else meta['duration'],
+                    stat.st_size, stat.st_mtime, lang,
+                    tmdb_id, folder_type,
+                    vm_resolution, vm_codec, vm_audio_codec, vm_audio_channels,
+                    vm_audio_tracks, vm_subtitle_tracks, vm_bit_rate, vm_aspect_ratio,
+                    vm_frame_rate, vm_file_format
                 ))
                 upserted_count += 1
                 batch_count += 1

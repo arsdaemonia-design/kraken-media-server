@@ -5587,7 +5587,26 @@ function adminDeleteUser(email) {
             // --- LOGICA DE VIDEO ---
             function playNow(path) {
                 if (selectionMode) { selectRow(path); return; }
-                const file = libData.files.find(f => f.path === path); if (!file) return;
+                
+                // Buscar archivo en libData
+                let file = libData.files.find(f => f.path === path);
+                
+                // Fallback: si no encuentra exacto, buscar por prefijo (para entidades de búsqueda)
+                if (!file && path && path.endsWith('/')) {
+                    file = libData.files.find(f => f.path && f.path.startsWith(path) && f.type === 'video');
+                }
+                // Fallback: buscar por sample (entidades de búsqueda con sample)
+                if (!file) {
+                    const allFiles = libData.files;
+                    for (let i = 0; i < allFiles.length; i++) {
+                        if (allFiles[i].sample && allFiles[i].sample.path === path) {
+                            file = allFiles[i];
+                            break;
+                        }
+                    }
+                }
+                
+                if (!file) return;
 
                 // Si es video, creamos la cola de la carpeta completa
                 if (file.type === 'video') {
@@ -5599,7 +5618,7 @@ function adminDeleteUser(email) {
                     // Ordenar por nombre (para que cap 1 siga de cap 2)
                     folderTracks.sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' }));
 
-                    const startIndex = folderTracks.findIndex(f => f.path === path);
+                    const startIndex = folderTracks.findIndex(f => f.path === file.path);
 
                     if (startIndex !== -1) {
                         playerQueue = folderTracks;
@@ -5911,7 +5930,7 @@ function adminDeleteUser(email) {
                     .then(r => r.json())
                     .then(data => {
                         console.log("HLS API response:", data);
-                        
+
                         if (data.error) {
                             showToast("Error HLS: " + data.error, "error");
                             if (loader) {
@@ -6082,7 +6101,8 @@ function adminDeleteUser(email) {
                                 playbackRate: true,
                                 screenshot: false,
                                 airplay: true,
-                                autoHide: window.innerWidth >= 1024 ? 4000 : 0, // En móvil: sin autoHide (usamos touch toggle)
+                                autoHide: window.innerWidth >= 1024 ? 4000 : 0,
+                                duration: data.duration || 0,
                                 plugins: castSupported ? [
                                     artplayerPluginChromecast({
                                         mimeType: data.direct_play ? 'video/mp4' : 'application/x-mpegURL',
@@ -6160,11 +6180,15 @@ function adminDeleteUser(email) {
                                         const hls = new Hls({
                                             startPosition: 0,
                                             liveSyncDurationCount: 3,
-                                            liveMaxLatencyDurationCount: 5
+                                            liveMaxLatencyDurationCount: 5,
+                                            maxBufferLength: 30,
+                                            maxMaxBufferLength: 60,
+                                            backBufferLength: 30,
                                         });
                                         hls.loadSource(url);
                                         hls.attachMedia(video);
                                         art.hls = hls;
+
                                         if (typeof Hls.Events !== 'undefined') {
                                             hls.on(Hls.Events.MANIFEST_PARSED, () => {
                                                 setTimeout(() => {
@@ -6728,6 +6752,7 @@ function adminDeleteUser(email) {
 
             // Fallback directo sin HLS
             function showFallbackPlayer(screen, videoPath, file) {
+                const screenEl = screen || document.getElementById('artplayer-container');
                 if (screenEl) {
                     screenEl.innerHTML = `
                         <video id="main-video"
@@ -7430,7 +7455,7 @@ function adminDeleteUser(email) {
                 if (!videoEl) return;
                 let newTime = videoEl.currentTime + seconds;
                 if (newTime < 0) newTime = 0;
-                if (newTime > videoEl.duration) newTime = videoEl.duration;
+                if (videoEl.duration && newTime > videoEl.duration) newTime = videoEl.duration;
                 videoEl.currentTime = newTime;
 
                 // Mostrar controles

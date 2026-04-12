@@ -241,7 +241,7 @@ class HLSTranscoder:
         try:
             kwargs = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
-            time.sleep(1)
+            time.sleep(2)
             if process.poll() is not None:
                 stdout, stderr = process.communicate()
                 print(f"[HLS] FFmpeg murió inmediatamente:")

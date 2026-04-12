@@ -995,24 +995,28 @@ def caratula(filename):
         try:
             thumb_path = os.path.join(THUMBNAILS_FOLDER, base + '.jpg')
             os.makedirs(THUMBNAILS_FOLDER, exist_ok=True)
-            
-            # 1. Intentar generar thumbnail a los 3 minutos (para evitar intros visuales)
+
+            # 1. Método inteligente: analiza 100 frames y elige el más nítido
+            # Salta 1 minuto para evitar intros negras/títulos
             cmd_ffmpeg = [
-                'ffmpeg', '-y', '-ss', '00:03:00',
+                'ffmpeg', '-y',
+                '-ss', '00:01:00',
                 '-i', str(path),
-                '-vframes', '1',
+                '-vf', 'thumbnail=100,scale=1280:720',
+                '-frames:v', '1',
                 '-q:v', '2',
                 thumb_path
             ]
             kwargs = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
-            subprocess.run(cmd_ffmpeg, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15, **kwargs)
-            
-            # 2. Si fallÃ³ (ej. el video dura menos de 3 minutos), intentar a los 5 segundos
+            subprocess.run(cmd_ffmpeg, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, **kwargs)
+
+            # 2. Fallback: si falló (video < 1min o error), usar frame a los 5 segundos
             if not os.path.exists(thumb_path) or os.path.getsize(thumb_path) == 0:
                 cmd_ffmpeg_fallback = [
-                    'ffmpeg', '-y', '-ss', '00:00:05',
+                    'ffmpeg', '-y',
                     '-i', str(path),
-                    '-vframes', '1',
+                    '-vf', 'thumbnail=50,scale=1280:720',
+                    '-frames:v', '1',
                     '-q:v', '2',
                     thumb_path
                 ]

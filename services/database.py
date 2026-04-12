@@ -193,11 +193,34 @@ def init_db():
         c.execute("ALTER TABLE media ADD COLUMN tmdb_rating TEXT DEFAULT NULL")
     except sqlite3.OperationalError:
         pass # Column already exists
-    
+
     try:
         c.execute("ALTER TABLE users ADD COLUMN is_kid_mode BOOLEAN DEFAULT 0")
     except sqlite3.OperationalError:
         pass # Column already exists
+
+    # ═══ Video Technical Metadata Columns (v4.92) ═══
+    # Estas columnas almacenan info técnica extraída por ffprobe durante el escaneo.
+    # Beneficio: NO necesita hacer ffprobe en cada reproducción, la info ya está en DB.
+    video_columns = [
+        ("video_resolution", "TEXT DEFAULT NULL"),     # 480p, 720p, 1080p, 4K, etc.
+        ("video_codec", "TEXT DEFAULT NULL"),           # h264, hevc, av1, vp9, etc.
+        ("audio_codec", "TEXT DEFAULT NULL"),           # aac, ac3, dts, flac, opus, etc.
+        ("audio_channels", "INTEGER DEFAULT 0"),        # 2 (stereo), 6 (5.1), 8 (7.1)
+        ("audio_tracks", "TEXT DEFAULT NULL"),          # JSON: [{"language":"es","title":"Español"},...]
+        ("subtitle_tracks", "TEXT DEFAULT NULL"),       # JSON: [{"language":"en","title":"English"},...]
+        ("bit_rate", "INTEGER DEFAULT 0"),              # Bitrate total del archivo en kbps
+        ("aspect_ratio", "TEXT DEFAULT NULL"),          # 16:9, 2.35:1, 4:3, etc.
+        ("frame_rate", "REAL DEFAULT 0.0"),             # 24, 29.97, 30, 60, etc.
+        ("file_format", "TEXT DEFAULT NULL"),           # mp4, mkv, webm, etc.
+    ]
+
+    for col_name, col_type in video_columns:
+        try:
+            c.execute(f"ALTER TABLE media ADD COLUMN {col_name} {col_type}")
+            print(f"  ✓ Added column: {col_name}")
+        except sqlite3.OperationalError:
+            pass # Column already exists
 
     # Create video_metadata table if not exists
     try:
@@ -254,6 +277,7 @@ def init_db():
 def _create_performance_indexes(cursor):
     """Create indexes to speed up common queries."""
     indexes = [
+        # Existing indexes
         ("idx_media_type", "media(media_type)"),
         ("idx_media_folder", "media(folder)"),
         ("idx_media_genre", "media(genre)"),
@@ -263,6 +287,13 @@ def _create_performance_indexes(cursor):
         ("idx_playlist_items_media", "playlist_items(media_path)"),
         ("idx_history_user", "play_history(user_email)"),
         ("idx_history_played", "play_history(played_at)"),
+        # NEW indexes (v4.92) - Búsqueda y stats optimizadas
+        ("idx_media_title", "media(title)"),             # Búsqueda por título (search bar)
+        ("idx_media_artist", "media(artist)"),           # Filtro por artista
+        ("idx_media_rel_path", "media(rel_path)"),       # Lookups directos (UNIQUE ya indexa, pero explícito)
+        ("idx_media_play_count", "media(play_count)"),   # Top played, stats, más reproducidas
+        ("idx_media_media_type_title", "media(media_type, title)"),  # Composite: búsqueda filtrada por tipo
+        ("idx_media_genre_type", "media(genre, media_type)"),        # Composite: filtro género + tipo (música vs video)
     ]
     
     for idx_name, idx_def in indexes:

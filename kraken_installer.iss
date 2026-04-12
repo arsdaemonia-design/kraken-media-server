@@ -1,8 +1,8 @@
 [Setup]
 AppId={{9ED45F45-C9A8-417A-8A46-24CB842A2F11}
 AppName=Kraken Media Server
-AppVerName=Kraken Media Server 4.90
-AppVersion=4.90
+AppVerName=Kraken Media Server 4.91
+AppVersion=4.91
 AppPublisher=Kraken Systems
 AppComments=Servidor multimedia local con modo online/offline
 AppPublisherURL=https://github.com/arsdaemonia-design/kraken-media-server
@@ -13,7 +13,7 @@ DefaultDirName={localappdata}\Kraken Media Server
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
 OutputDir=dist
-OutputBaseFilename=Kraken_Media_Server_Installer_v4.90
+OutputBaseFilename=Kraken_Media_Server_Installer_v4.91
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
