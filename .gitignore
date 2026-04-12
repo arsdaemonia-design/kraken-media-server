@@ -31,4 +31,6 @@ kraken_media.db
 library.db
 dist/
 *.bak
+*.rar
+*.zip
 

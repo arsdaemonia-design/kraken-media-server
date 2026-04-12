@@ -99,6 +99,9 @@ def play_hls():
         if _time.time() > token_data.get('expires', 0):
             del state.STREAM_TOKENS[token]
             return jsonify({"error": "Token expirado"}), 403
+        if 'sessions' not in token_data:
+            token_data['sessions'] = []
+        token_data['sessions'].append(session_id)
 
         # Buscar ruta real en la DB
         try:
@@ -200,32 +203,174 @@ def play_hls():
     if subtitle_url:
         print(f"[HLS] Subtítulo detectado: {subtitle_url}")
     
-    return jsonify({
+    response_data = {
         "url": f"/hls/{session_id}/playlist.m3u8",
         "audio_tracks": audio_tracks,
         "selected_audio_track": selected_audio_track,
         "session_id": session_id,
         "subtitle_url": subtitle_url,
         "subtitle_tracks": external_subs
+    }
+    if token:
+        response_data["token"] = token
+    return jsonify(response_data)
+
+@hls_bp.route('/api/hls/reconnect', methods=['POST'])
+def reconnect_hls():
+    """Reconectar una sesión HLS expirada o caída.
+    El frontend envía el session_id antiguo y/o token + media_id para recuperar el video.
+    """
+    import sqlite3
+    import time as _time
+    import uuid as _uuid
+
+    data = request.get_json(silent=True) or {}
+    old_session_id = data.get('old_session_id')
+    token = data.get('token')
+    media_id = data.get('media_id')
+    audio_track = data.get('audio_track')
+    new_session_id = data.get('new_session_id') or str(_uuid.uuid4())
+
+    # --- Recuperar video_path del token o de la sesión antigua ---
+    video_path = None
+    full_video_path = None
+
+    if old_session_id and old_session_id in state.HLS_SESSIONS:
+        old_session = state.HLS_SESSIONS[old_session_id]
+        full_video_path = old_session.get('current_video')
+        if full_video_path:
+            video_path = os.path.relpath(full_video_path, config.DOWNLOAD_FOLDER).replace('\\', '/')
+
+    if not full_video_path and token:
+        token_data = state.STREAM_TOKENS.get(token)
+        if not token_data or _time.time() > token_data.get('expires', 0):
+            return jsonify({"error": "Token inválido o expirado"}), 403
+        if media_id and str(token_data.get('id')) != str(media_id):
+            return jsonify({"error": "Token no corresponde al media solicitado"}), 403
+
+        # Buscar ruta en DB
+        try:
+            conn = sqlite3.connect(os.path.join(config.DOWNLOAD_FOLDER, 'kraken.db'))
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            c.execute("SELECT rel_path FROM media WHERE id = ?", (media_id,))
+            row = c.fetchone()
+            conn.close()
+            if row:
+                video_path = row['rel_path'].lstrip('/\\')
+                full_video_path = os.path.join(config.DOWNLOAD_FOLDER, video_path)
+        except Exception as e:
+            return jsonify({"error": f"DB error: {str(e)}"}), 500
+
+    if not full_video_path or not os.path.exists(full_video_path):
+        return jsonify({"error": "Video no encontrado o eliminado"}), 404
+
+    # --- Limpiar sesión anterior si aún existe ---
+    if old_session_id and old_session_id in state.HLS_SESSIONS:
+        print(f"[HLS Reconnect] Limpiando sesión antigua: {old_session_id}")
+        stop_hls_session(old_session_id)
+
+    # --- Crear nueva sesión HLS ---
+    session_dir = os.path.join(config.HLS_TEMP_DIR, new_session_id)
+    if os.path.exists(session_dir):
+        shutil.rmtree(session_dir)
+    os.makedirs(session_dir, exist_ok=True)
+
+    print(f"[HLS Reconnect] Reconectando: {full_video_path}")
+
+    selected_audio_track = None
+    if audio_track is not None:
+        try:
+            selected_audio_track = int(audio_track)
+        except (TypeError, ValueError):
+            selected_audio_track = None
+
+    process, audio_tracks, selected_audio_track, hls_error = hls_transcoder.start_hls_session(
+        full_video_path,
+        session_dir,
+        selected_audio_index=selected_audio_track
+    )
+
+    if process == "DIRECT":
+        external_subs = _find_external_subtitles(full_video_path)
+        subtitle_url = external_subs[0]["url"] if external_subs else None
+        return jsonify({
+            "url": f"/descargas/{video_path}",
+            "direct_play": True,
+            "audio_tracks": audio_tracks,
+            "selected_audio_track": selected_audio_track,
+            "session_id": new_session_id,
+            "subtitle_url": subtitle_url,
+            "subtitle_tracks": external_subs,
+            "reconnected": True
+        })
+
+    if process is None:
+        return jsonify({"error": hls_error or "Failed to start transcoding"}), 500
+
+    # Esperar playlist
+    playlist_path = os.path.join(session_dir, "playlist.m3u8")
+    import time
+    for _ in range(30):
+        if os.path.exists(playlist_path):
+            break
+        if process.poll() is not None:
+            stdout, stderr = process.communicate()
+            error_msg = stderr.decode() if stderr else "Unknown error"
+            print(f"[HLS Reconnect] FFmpeg murió durante generación:\n{error_msg}")
+            return jsonify({"error": f"FFmpeg error: {error_msg}"}), 500
+        time.sleep(0.5)
+
+    if not os.path.exists(playlist_path):
+        process.terminate()
+        return jsonify({"error": "Timeout esperando generación HLS"}), 500
+
+    if 'sessions' not in token_data:
+        token_data['sessions'] = []
+    token_data['sessions'].append(new_session_id)
+
+    external_subs = _find_external_subtitles(full_video_path)
+    subtitle_url = external_subs[0]["url"] if external_subs else None
+
+    state.HLS_SESSIONS[new_session_id] = {
+        "path": session_dir,
+        "process": process,
+        "last_activity": state.time_module.time(),
+        "audio_tracks": audio_tracks,
+        "current_video": full_video_path
+    }
+
+    print(f"[HLS Reconnect] Sesión nueva lista: {new_session_id}")
+
+    return jsonify({
+        "url": f"/hls/{new_session_id}/playlist.m3u8",
+        "audio_tracks": audio_tracks,
+        "selected_audio_track": selected_audio_track,
+        "session_id": new_session_id,
+        "subtitle_url": subtitle_url,
+        "subtitle_tracks": external_subs,
+        "reconnected": True,
+        "token": token
     })
+
 
 @hls_bp.route('/api/hls/status')
 def hls_status():
     session_id = request.args.get('sid')
     if not session_id or session_id not in state.HLS_SESSIONS:
-        return jsonify({"ready": False, "segments": 0})
-    
+        return jsonify({"ready": False, "segments": 0, "alive": False})
+
     session = state.HLS_SESSIONS[session_id]
     session_dir = session.get('path', '')
-    
+
     if not os.path.exists(session_dir):
-        return jsonify({"ready": False, "segments": 0})
-    
+        return jsonify({"ready": False, "segments": 0, "alive": False})
+
     ts_files = [f for f in os.listdir(session_dir) if f.endswith('.ts')]
     segment_count = len(ts_files)
     ready = segment_count >= 2  # ~12 segundos (2 segmentos x 6s)
-    
-    return jsonify({"ready": ready, "segments": segment_count})
+
+    return jsonify({"ready": ready, "segments": segment_count, "alive": True})
 
 
 @hls_bp.route('/api/hls/stop', methods=['POST'])
@@ -261,47 +406,72 @@ def stop_hls_session(session_id):
 
 @hls_bp.route('/hls/<session_id>/<path:filename>')
 def serve_hls_segment(session_id, filename):
-    if session_id not in state.HLS_SESSIONS:
-        return "Session not found", 404
+    import time as _time
     
-    session = state.HLS_SESSIONS[session_id]
-    session['last_activity'] = state.time_module.time()
+    cast_token = request.args.get('token')
+    
+    if session_id not in state.HLS_SESSIONS:
+        if not cast_token:
+            return "Session not found", 404
+        token_data = state.STREAM_TOKENS.get(cast_token)
+        if not token_data or _time.time() > token_data.get('expires', 0):
+            return "Token inválido o expirado", 403
+        if session_id not in token_data.get('sessions', []):
+            return "Token no válido para esta sesión", 403
+    
+    session = state.HLS_SESSIONS.get(session_id)
+    if session:
+        session['last_activity'] = state.time_module.time()
     
     if filename == 'playlist.m3u8':
-        file_path = os.path.join(session['path'], "playlist.m3u8")
+        file_path = os.path.join(session['path'], "playlist.m3u8") if session else None
+        if not file_path or not os.path.exists(file_path):
+            return "File not found", 404
     else:
-        file_path = os.path.join(session['path'], filename)
-    
-    if not os.path.exists(file_path):
-        return "File not found", 404
+        file_path = os.path.join(session['path'], filename) if session else None
+        if not file_path or not os.path.exists(file_path):
+            return "File not found", 404
     
     if filename.endswith('.m3u8'):
         mimetype = 'application/vnd.apple.mpegurl'
+        response = send_file(file_path, mimetype=mimetype)
+        if cast_token:
+            content = open(file_path, 'r', encoding='utf-8').read()
+            lines = content.strip().split('\n')
+            rewritten = []
+            for line in lines:
+                stripped = line.strip()
+                if stripped and not stripped.startswith('#'):
+                    separator = '&' if '?' in stripped else '?'
+                    line = f"{stripped}{separator}token={cast_token}"
+                rewritten.append(line)
+            response.data = '\n'.join(rewritten).encode('utf-8')
     elif filename.endswith('.ts'):
         mimetype = 'video/MP2T'
+        response = send_file(file_path, mimetype=mimetype)
     else:
         mimetype = 'application/octet-stream'
+        response = send_file(file_path, mimetype=mimetype)
     
-    response = send_file(file_path, mimetype=mimetype)
     response.headers['Access-Control-Allow-Origin'] = '*'
     return response
 
 
-def cleanup_old_hls_sessions(max_inactive_seconds=600):
+def cleanup_old_hls_sessions(max_inactive_seconds=1200):
     while True:
         try:
             now = state.time_module.time()
             to_remove = []
-            
+
             for sid, data in list(state.HLS_SESSIONS.items()):
                 if now - data.get('last_activity', 0) > max_inactive_seconds:
                     to_remove.append(sid)
-            
+
             for sid in to_remove:
-                print(f"Limpiando sesión HLS inactiva: {sid}")
+                print(f"Limpiando sesión HLS inactiva: {sid} (>20 min sin actividad)")
                 stop_hls_session(sid)
-                
+
         except Exception as e:
             print(f"Error en cleanup de HLS: {e}")
-        
+
         state.time_module.sleep(60)

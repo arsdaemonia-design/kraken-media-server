@@ -10,7 +10,162 @@ Kraken es un servidor multimedia local con modo online/offline. Permite:
 - Acceso via LAN o Cloudflare tunnel
 
 ## Versión Actual
-- **v4.90** (2026-04-10)
+- **v4.91** (2026-04-11)
+
+---
+
+# Cambios Recientes (v4.91 - 2026-04-11)
+
+## 🔐 Auth Security Hardening
+
+### Password Validation (Mínimo 8 caracteres)
+- **Archivo:** `services/auth.py`
+- **Función:** `validate_password_strength(password)`
+- **Validaciones:**
+  - Mínimo 8 caracteres (antes 4)
+  - Bloqueo de contraseñas comunes (password123, qwerty12, krakenadmin, etc.)
+  - Detección de secuencias simples (0123456789, qwerty, asdfghjkl)
+- **Aplicado en endpoints:**
+  - `/api/auth/login` - Login
+  - `/api/auth/register` - Registro
+  - `/api/auth/set_password` - Cambio de contraseña
+  - `/api/admin/users` (POST) - Crear usuario
+  - `/api/admin/users/<email>/password` (PUT) - Reset password
+  - `/api/setup/firsttime` - Setup inicial
+
+### Rate Limiting (Anti-Fuerza Bruta)
+- **Archivo:** `routes/api.py`
+- **Constantes:**
+  - `MAX_LOGIN_ATTEMPTS = 5` - Intentos máximos antes de bloqueo
+  - `LOCKOUT_DURATION = 300` - 5 minutos de bloqueo
+- **Funciones:**
+  - `_record_failed_attempt(ip)` - Registra intento fallido
+  - `_clear_failed_attempts(ip)` - Limpia en login exitoso
+  - `_check_rate_limit(ip)` - Verifica si IP está bloqueada
+- **Comportamiento:**
+  - 5 intentos fallidos → bloqueo de 5 minutos
+  - Respuesta 429 con `retry_after` en segundos
+  - Logs de seguridad con IP y email
+
+### Token Blacklist (Logout Seguro)
+- **Archivos:** `state.py`, `services/auth.py`, `routes/api.py`
+- **Implementación:**
+  - Cada token JWT ahora tiene `jti` (unique ID via uuid4)
+  - Logout agrega JTI a `TOKEN_BLACKLIST` en memoria
+  - `verify_token()` checkea blacklist antes de aceptar token
+  - Thread-safe con `BLACKLIST_LOCK`
+- **Limpieza:** Límite de 10,000 JTIs en memoria (purge preventivo)
+- **Flujo completo:**
+  ```
+  Login → create_token(jti=uuid4) → verify_token(jti) → Logout → blacklist(jti) → verify_token(jti) = None
+  ```
+
+### Security Audit Logs
+- **Archivo:** `routes/api.py`
+- **Ubicación:** `%APPDATA%\Kraken Media Server\logs\security.log`
+- **Formato:** `2026-04-11 18:30:00 | INFO | LOGIN EXITOSO: email=X IP=Y username=Z`
+- **Eventos registrados:**
+  - `LOGIN EXITOSO` - Login con email, IP, username
+  - `LOGIN FALLIDO` - Login fallido con email, IP, intentos
+  - `LOGOUT` - Logout con email, IP, JTI (primeros 8 chars)
+  - `USER CREATED` - Creación de usuario con email, username
+  - `USER DELETED` - Eliminación de usuario con email
+  - `PASSWORD RESET` - Reset de contraseña con email
+  - `PIN ADMIN BYPASS` - Uso de master PIN en admin con email, IP, endpoint
+- **Logger dual:** Archivo + consola (prefijo `[SECURITY]`)
+
+### Fix AppData Path
+- **Bug:** `NameError: name '_app_data_dir' is not defined`
+- **Causa:** Variable usada en línea 38 antes de definirse en línea 53
+- **Solución:** Movido bloque `RUNTIME CONFIG HELPERS` antes del `Security Audit Logger`
+- **Commit:** `2d1d1b7`
+
+---
+
+## 🎬 HLS Streaming Improvements
+
+### Reconnection Endpoint
+- **Archivo:** `routes/hls.py`
+- **Endpoint:** `POST /api/hls/reconnect`
+- **Funcionalidad:**
+  - Recupera sesión HLS expirada usando `old_session_id` o `token + media_id`
+  - Busca `full_video_path` de sesión anterior o DB
+  - Crea nueva sesión HLS manteniendo posición
+  - Limpia sesión antigua automáticamente
+  - Soporta selección de audio track
+- **Request:**
+  ```json
+  {
+    "old_session_id": "session-abc",
+    "token": "stream-token-xyz",
+    "media_id": 123,
+    "audio_track": 1,
+    "new_session_id": "session-def"
+  }
+  ```
+- **Response:** Mismo formato que `/api/hls/play` con `"reconnected": true`
+
+### Token Authentication para Chromecast
+- **Archivos:** `routes/hls.py`, `state.py`
+- **Cambios:**
+  - Tokens ahora trackean `sessions: []` (lista de session IDs asociadas)
+  - `/api/hls/<session_id>/<filename>` acepta `?token=XXX` para Chromecast
+  - Playlist rewrite: segmentos `.ts` incluyen token automáticamente
+  - Validación de token + session matching antes de servir archivos
+- **Flujo Chromecast:**
+  ```
+  Frontend → /api/stream/token → token → Cast → /hls/session/seg.ts?token=xxx → Validado → Play
+  ```
+
+### HLS Timeout Increase
+- **Archivo:** `state.py`, `routes/hls.py`
+- **Cambio:** `max_inactive_seconds` de 600s (10 min) → 1200s (20 min)
+- **Motivo:** Dar más tiempo para pausas largas sin destruir sesión FFmpeg
+
+### Status Endpoint Enhancement
+- **Endpoint:** `GET /api/hls/status?sid=XXX`
+- **Nuevo campo:** `"alive": true/false` (indica si sesión existe y está activa)
+- **Response completo:** `{"ready": bool, "segments": int, "alive": bool}`
+
+---
+
+## 🌐 Cast / Public URL
+
+### CAST_PUBLIC_URL Config
+- **Archivo:** `config.py`
+- **Variable:** `CAST_PUBLIC_URL = os.getenv('CAST_PUBLIC_URL', 'https://kraken.ederzu.com')`
+- **Uso:** Chromecast necesita URL pública accesible (no localhost)
+- **Endpoint:** `GET /api/config/public` expone esta URL al frontend
+
+### Chromecast Plugin Fix
+- **Archivo:** `assets/artplayer-plugin-chromecast.js`
+- **Cambio:** Check `window.__krakenCastReady` antes de inicializar Cast API
+- **Motivo:** Prevenir errores de doble inicialización
+
+---
+
+## 📊 Files Modified
+
+| Archivo | Cambios | Líneas |
+|---------|---------|--------|
+| `routes/api.py` | Security logger, rate limiting, password validation, audit logging, PIN bypass, public config endpoint | +200 |
+| `services/auth.py` | JTI tokens, password strength validation, uuid/re imports | +70 |
+| `state.py` | Token blacklist functions, thread-safe locks | +30 |
+| `routes/hls.py` | Reconnection endpoint, token auth en segmentos, session tracking | +180 |
+| `config.py` | CAST_PUBLIC_URL variable | +4 |
+| `assets/artplayer-plugin-chromecast.js` | Cast init fix | +2 |
+| `templates/index.html` | Auth UI improvements (sesión anterior) | +300 |
+
+---
+
+## 🧪 Testing Notes
+
+- **Password validation:** Rechaza contraseñas <8 chars, comunes, secuencias
+- **Rate limiting:** 5 intentos → 5 min lockout por IP
+- **Token blacklist:** Logout invalida token permanentemente
+- **Security logs:** `%APPDATA%\Kraken Media Server\logs\security.log`
+- **HLS reconnect:** Recupera sesión tras expiración sin perder posición
+- **Chromecast:** Funciona con token en segmentos HLS
 
 ---
 

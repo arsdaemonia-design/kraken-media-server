@@ -33,6 +33,12 @@ import traceback
 
 api_bp = Blueprint("api", __name__)
 
+# ============= RUNTIME CONFIG HELPERS =============
+if sys.platform == 'win32':
+    _app_data_dir = os.path.join(os.getenv('APPDATA'), 'Kraken Media Server')
+else:
+    _app_data_dir = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support', 'Kraken Media Server')
+
 # ═══ Security Audit Logger ═══
 # Los logs se guardan en AppData (donde vive runtime_config.json en producción)
 SECURITY_LOG_DIR = os.path.join(_app_data_dir, 'logs')
@@ -49,12 +55,6 @@ if not security_logger.handlers:
     _ch = logging.StreamHandler()
     _ch.setFormatter(logging.Formatter('%(asctime)s [SECURITY] %(message)s', datefmt='%H:%M:%S'))
     security_logger.addHandler(_ch)
-
-# ============= RUNTIME CONFIG HELPERS =============
-if sys.platform == 'win32':
-    _app_data_dir = os.path.join(os.getenv('APPDATA'), 'Kraken Media Server')
-else:
-    _app_data_dir = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support', 'Kraken Media Server')
 
 _RUNTIME_CONFIG_FILE = os.path.join(_app_data_dir, 'runtime_config.json')
 _DEFAULT_RUNTIME = {'media_path': r'F:\Kraken Media Server\descargas', 'pin': '3041'}

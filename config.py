@@ -95,6 +95,10 @@ MASTER_PIN = os.getenv('MASTER_PIN', '3045')
 SUPERADMIN_EMAIL = os.getenv('SUPERADMIN_EMAIL', 'arsdaemonia@gmail.com')
 LASTFM_API_KEY = os.getenv('LASTFM_API_KEY', 'dfc4823f36b21278278f577357d8e7e7')
 
+# Cast / Public URL — usado para que Chromecast acceda a los streams via HTTPS
+# El Chromecast no puede acceder a localhost, necesita una URL pública
+CAST_PUBLIC_URL = os.getenv('CAST_PUBLIC_URL', 'https://kraken.ederzu.com')
+
 # Timeout Configs
 LASTFM_TIMEOUT = 3
 FFPROBE_TIMEOUT = 10
