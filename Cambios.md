@@ -10,7 +10,46 @@ Kraken es un servidor multimedia local con modo online/offline. Permite:
 - Acceso via LAN o Cloudflare tunnel
 
 ## Versión Actual
-- **v4.91** (2026-04-11)
+- **v4.92** (2026-04-17)
+
+---
+
+# Cambios Recientes (v4.92 - 2026-04-17)
+
+## 🎬 Fix HLS - Auto-play con Buffer y Blindaje Next Episode
+
+### Problema
+- Con HLS, el video cargaba segmentos incrementalmente
+- El safety net `currentTime >= duration - 0.5` disparaba "Siguiente episodio" al inicio
+- Porque con live streaming, `duration` representa el "live edge" (~3-30s desde el inicio)
+- El overlay de "Siguiente episodio" aparecía muy temprano (30s antes del "fin ficticio")
+
+### Solución Implementada
+
+**1. Buffer Wait antes de Play (templates/index.html)**
+- **Cambio:** Handler `m3u8` en `artConfig.customType`
+- **Comportamiento nuevo:**
+  - `autoStart: false` - HLS no empieza hasta tener buffer suficiente
+  - Espera 30 segundos de buffer local antes de iniciar reproduccion
+  - Timeout de 90s si no alcanza el buffer (forza inicio)
+- **Beneficio:** `art.duration` se estabiliza antes de reproducir, evitando falsos positivos
+
+**2. Remoción de liveSyncDurationCount**
+- **Archivo:** `templates/index.html` línea ~6176
+- **Antes:** `liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 5` (configuración para live streams)
+- **Después:** Eliminados (no aplican para VOD-like HLS)
+
+**3. Safety Net con Guard de Tiempo**
+- **Archivo:** `templates/index.html` línea ~6717
+- **Cambio:** Agregado `(Date.now() - _watchStartedAt) >= 30000` como condición extra
+- **Efecto:** El safety net no dispara si pasaron menos de 30s de reproduccion
+
+**4. Buffer Poller sin art.play()**
+- **Archivo:** `templates/index.html` línea ~6456
+- **Cambio:** El poller solo oculta el loader, no llama `art.play()` (lo controla el m3u8 handler)
+
+### Archivos Modificados
+- `templates/index.html` - m3u8 customType handler, safety net, buffer poller
 
 ---
 
@@ -1382,6 +1421,31 @@ Implementación de mejoras críticas al sistema de streaming HLS: timeout extend
 - **Cleanup duplicado:** Función `cleanup_old_hls_sessions()` existe en `state.py` y `routes/hls.py`; ambas usan 1200s
 - **Compatibilidad Cast:** Requiere HTTPS en dominio público para funcionar en producción
 - **Keepalive silencioso:** Errores de red durante pausa son silenciados para no spamear consola
+
+---
+
+# Plan para v4.93 (2026-04-18)
+
+## 🖼️ Gestión de Imágenes de Perfil de Usuarios
+
+### Descripción
+Agregar funcionalidad para que el administrador pueda asignar/cambiar imágenes de perfil de usuarios desde el panel de configuración.
+
+### Funcionalidades a Implementar
+1. **Subida de imagen de perfil** - Endpoint para uploading imágenes de usuario
+2. **Panel de edición de usuarios** - Ya existe `/config`, agregar campo de imagen
+3. **Editar perfil de usuario** - Ya existe modal de editar perfil, mejorar soporte de imagen
+4. **Visualización de estado** - Mostrar si el usuario está activo o no
+
+### Archivos Probables a Modificar
+- `routes/api.py` - Nuevo endpoint `/api/admin/users/<email>/avatar`
+- `templates/index.html` - Actualizar modal de editar usuario
+- `services/auth.py` - Agregar campo avatar al modelo de usuario
+
+### Notas
+- La funcionalidad de imágenes de perfil ya existe parcialmente
+- El panel de usuarios ya permite cambiar contraseñas y marcar como niño
+- Solo falta conectar la subida de imágenes con el panel de admin
 
 ---
 

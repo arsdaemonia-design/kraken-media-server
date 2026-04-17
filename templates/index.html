@@ -6173,62 +6173,80 @@ function adminDeleteUser(email) {
                                 };
                             }
                             
-                            artConfig.customType = {
-                                m3u8: function (video, url, art) {
-                                    if (Hls.isSupported()) {
-                                        if (art.hls) art.hls.destroy();
-                                        const hls = new Hls({
-                                            startPosition: 0,
-                                            liveSyncDurationCount: 3,
-                                            liveMaxLatencyDurationCount: 5,
-                                            maxBufferLength: 30,
-                                            maxMaxBufferLength: 60,
-                                            backBufferLength: 30,
-                                        });
-                                        hls.loadSource(url);
-                                        hls.attachMedia(video);
-                                        art.hls = hls;
+artConfig.customType = {
+    m3u8: function (video, url, art) {
+        if (Hls.isSupported()) {
+            if (art.hls) art.hls.destroy();
+            let hlsStarted = false;
+            const MIN_BUFFER_SECONDS = 30; // Esperar 30s de buffer antes de reproducir
 
-                                        if (typeof Hls.Events !== 'undefined') {
-                                            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                                                setTimeout(() => {
-                                                    if (window.currentArtPlayer && window.currentArtPlayer.refreshAudioTracks) {
-                                                        window.currentArtPlayer.refreshAudioTracks();
-                                                    }
-                                                }, 0);
-                                            });
-                                            hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => {
-                                                if (window.currentArtPlayer && window.currentArtPlayer.refreshAudioTracks) {
-                                                    window.currentArtPlayer.refreshAudioTracks();
-                                                }
-                                            });
-                                            hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, () => {
-                                                if (window.currentArtPlayer && window.currentArtPlayer.refreshAudioTracks) {
-                                                    window.currentArtPlayer.refreshAudioTracks();
-                                                }
-                                            });
-                                            // FIX: Detectar fin de stream HLS para auto-avanzar
-                                            hls.on(Hls.Events.BUFFER_EOS, () => {
-                                                console.log('[HLS] BUFFER_EOS detectado — fin del stream');
-                                                setTimeout(() => {
-                                                    if (window.currentArtPlayer) {
-                                                        const art = window.currentArtPlayer;
-                                                        if (art.duration > 0 && art.currentTime >= art.duration - 2) {
-                                                            stopProgressTracking();
-                                                            playNext();
-                                                        }
-                                                    }
-                                                }, 1500);
-                                            });
-                                        }
-                                        art.on('destroy', () => hls.destroy());
-                                    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                                        video.src = url;
-                                    } else {
-                                        art.notice.show = 'No soporta reproducción HLS nativa en este navegador';
-                                    }
-                                }
-                            };
+            const hls = new Hls({
+                autoStart: false,
+                startPosition: 0,
+                liveSyncDurationCount: 3,
+                liveMaxLatencyDurationCount: 5,
+                maxBufferLength: 30,
+                maxMaxBufferLength: 120,
+                backBufferLength: 30,
+            });
+
+hls.loadSource(url);
+        hls.attachMedia(video);
+        art.hls = hls;
+
+        console.log('[HLS] Esperando buffer minimo antes de reproducir...');
+        const bufferCheck = setInterval(() => {
+            if (hlsStarted) return;
+            if (video.buffered.length > 0) {
+                const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+                console.log(`[HLS] Buffer actual: ${bufferedEnd.toFixed(0)}s de ${MIN_BUFFER_SECONDS}s`);
+                if (bufferedEnd >= MIN_BUFFER_SECONDS) {
+                    hlsStarted = true;
+                    clearInterval(bufferCheck);
+                    console.log(`[HLS] Buffer listo, iniciando reproduccion`);
+                    hls.startLoad();
+                    art.play().catch(e => console.warn('[HLS] play() rechazo:', e.message));
+                }
+            }
+        }, 1000);
+
+        setTimeout(() => {
+            clearInterval(bufferCheck);
+            if (!hlsStarted) {
+                console.log('[HLS] Timeout, forzando inicio');
+                hlsStarted = true;
+                hls.startLoad();
+                art.play().catch(e => console.warn('[HLS] play() rechazo:', e.message));
+            }
+        }, 90000);
+
+            if (typeof Hls.Events !== 'undefined') {
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    setTimeout(() => {
+                        if (window.currentArtPlayer && window.currentArtPlayer.refreshAudioTracks) {
+                            window.currentArtPlayer.refreshAudioTracks();
+                        }
+                    }, 0);
+                });
+                hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => {
+                    if (window.currentArtPlayer && window.currentArtPlayer.refreshAudioTracks) {
+                        window.currentArtPlayer.refreshAudioTracks();
+                    }
+                });
+                hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, () => {
+                    if (window.currentArtPlayer && window.currentArtPlayer.refreshAudioTracks) {
+                        window.currentArtPlayer.refreshAudioTracks();
+                    }
+                });
+            }
+            art.on('destroy', () => { clearInterval(bufferCheck); hls.destroy(); });
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = url;
+        } else {
+            art.notice.show = 'No soporta reproducción HLS nativa en este navegador';
+        }
+    }
+};
 
                             if (data.direct_play) {
                                 console.log("[DirectPlay] Reproduciendo formato nativo sin HLS");
@@ -6437,31 +6455,28 @@ function adminDeleteUser(email) {
                                 art.notice.show = `Volumen: ${Math.round(newVol * 100)}%`;
                             }, { passive: false });
 
-                            // Pantalla de carga inteligente (solo para HLS, no direct play)
-                            if (!data.direct_play) {
-                                // Polling de segmentos HLS - auto-play al llegar a ~30s
-                                const sid = data.session_id;
-                                let bufferPoller = setInterval(() => {
-                                    fetch(`/api/hls/status?sid=${sid}`)
-                                        .then(r => r.json())
-                                        .then(s => {
-                                            // Actualizar texto del loader si aún no se ocultó
-                                            const pct = document.getElementById('video-load-percent');
-                                            const seg = s.segments || 0;
-                                            if (pct && loader && !loader.classList.contains('hidden')) {
-                                                pct.innerText = `${Math.min(100, seg * 20)}%`;
-                                            }
-                                            if (s.ready) {
-                                                clearInterval(bufferPoller);
-                                                hiddenLoader();
-                                                art.play();
-                                            }
-                                        })
-                                        .catch(() => clearInterval(bufferPoller));
-                                }, 1000);
-                                // Safety: ocultar loader tras 30s sin importar qué
-                                setTimeout(() => { clearInterval(bufferPoller); hiddenLoader(); art.play(); }, 30000);
-                            } else {
+// Pantalla de carga inteligente (solo para HLS, no direct play)
+if (!data.direct_play) {
+    // Polling de segmentos HLS - solo ocultar loader, playback lo controla el m3u8 handler
+    const sid = data.session_id;
+    let bufferPoller = setInterval(() => {
+        fetch(`/api/hls/status?sid=${sid}`)
+        .then(r => r.json())
+        .then(s => {
+            // Actualizar texto del loader
+            const pct = document.getElementById('video-load-percent');
+            const seg = s.segments || 0;
+            if (pct && loader && !loader.classList.contains('hidden')) {
+                pct.innerText = `${Math.min(100, seg * 20)}%`;
+            }
+            if (s.ready) {
+                clearInterval(bufferPoller);
+                hiddenLoader();
+            }
+        })
+        .catch(() => clearInterval(bufferPoller));
+    }, 1000);
+} else {
                                 // Direct play: ocultar loader al estar listo
                                 art.on('ready', hiddenLoader);
                             }
@@ -6593,13 +6608,14 @@ function adminDeleteUser(email) {
                                 });
                             });
 
-                            // Safety net: timeupdate backup para HLS streams que no disparan ended
-                            let _endedTriggered = false;
+// Safety net: timeupdate backup para HLS streams que no disparan ended
+let _endedTriggered = false;
+let _watchStartedAt = Date.now(); // Timestamp de inicio de reproduccion
 
-                            // ═══════ OVERLAY "SIGUIENTE EPISODIO" ESTILO NETFLIX ═══════
-                            let _nextEpShown = false;
-                            let _nextEpCountdown = null;
-                            const NEXT_EP_SECONDS = 30; // Mostrar 30s antes del final
+// ═══════ OVERLAY "SIGUIENTE EPISODIO" ESTILO NETFLIX ═══════
+let _nextEpShown = false;
+let _nextEpCountdown = null;
+const NEXT_EP_SECONDS = 15; // Mostrar 15s antes del final
 
                             function showNextEpisodeOverlay() {
                                 if (_nextEpShown) return;
@@ -6713,8 +6729,9 @@ function adminDeleteUser(email) {
                                     showNextEpisodeOverlay();
                                 }
 
-                                // Safety net: auto-avance si el video llega al final sin disparar ended
-                                if (art.duration > 0 && art.currentTime >= art.duration - 0.5) {
+// Safety net: auto-avance si el video llega al final sin disparar ended
+// Solo disparar si pasaron al menos 30s de reproduccion (evita falsos positivos al inicio con HLS)
+if (art.duration > 0 && art.currentTime >= art.duration - 0.5 && (Date.now() - _watchStartedAt) >= 30000) {
                                     _endedTriggered = true;
                                     removeNextEpOverlay();
                                     console.log('[ArtPlayer] timeupdate safety -> near end, triggering playNext');
