@@ -62,7 +62,7 @@
             if (!(window.chrome && window.chrome.cast)) {
                 const script = document.createElement('script');
                 script.src = options.sdk || 'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1';
-                script.onload = function () {};
+                script.onload = function () { };
                 script.onerror = reject;
                 document.body.appendChild(script);
             }
@@ -76,6 +76,30 @@
         let castState = null;
         let syncingSeek = false;
         let binded = false;
+        let localAudioSnapshot = null;
+
+        function muteLocalPlayback(art) {
+            const video = art && art.video;
+            if (!video) return;
+            if (!localAudioSnapshot) {
+                localAudioSnapshot = {
+                    muted: !!video.muted,
+                    volume: Number(video.volume),
+                };
+            }
+            video.muted = true;
+            if (Number.isFinite(video.volume)) video.volume = 0;
+        }
+
+        function restoreLocalPlayback(art) {
+            const video = art && art.video;
+            if (!video || !localAudioSnapshot) return;
+            video.muted = !!localAudioSnapshot.muted;
+            if (Number.isFinite(localAudioSnapshot.volume)) {
+                video.volume = localAudioSnapshot.volume;
+            }
+            localAudioSnapshot = null;
+        }
 
         function getCurrentMediaSession(castContext) {
             const current = castSession || (castContext ? castContext.getCurrentSession() : null);
@@ -93,6 +117,8 @@
             }
 
             return session.loadMedia(request).then(() => {
+                // Evita doble audio (TV + dispositivo local) al iniciar Cast.
+                muteLocalPlayback(art);
                 art.notice.show = 'Casting started';
                 if (opts.onCastStart) opts.onCastStart();
             });
@@ -108,19 +134,21 @@
             const safe = (fn) => {
                 try {
                     fn();
-                } catch (_) {}
+                } catch (_) { }
             };
 
             video.addEventListener('pause', () => {
+                if (document.visibilityState === 'hidden') return;
                 const m = getCurrentMediaSession(castContext);
                 if (!m || syncingSeek) return;
-                safe(() => m.pause(null, () => {}, () => {}));
+                safe(() => m.pause(null, () => { }, () => { }));
             });
 
             video.addEventListener('play', () => {
+                if (document.visibilityState === 'hidden') return;
                 const m = getCurrentMediaSession(castContext);
                 if (!m || syncingSeek) return;
-                safe(() => m.play(null, () => {}, () => {}));
+                safe(() => m.play(null, () => { }, () => { }));
             });
 
             video.addEventListener('seeking', () => {
@@ -156,15 +184,18 @@
 
                                 const S = window.cast.framework.SessionState;
                                 if (event.sessionState === S.NO_SESSION) {
+                                    restoreLocalPlayback(art);
                                     updateCastIcon('disconnected');
                                     if (opts.onStateChange) opts.onStateChange('disconnected');
                                 } else if (event.sessionState === S.SESSION_STARTING) {
                                     updateCastIcon('connecting');
                                     if (opts.onStateChange) opts.onStateChange('connecting');
                                 } else if (event.sessionState === S.SESSION_STARTED || event.sessionState === S.SESSION_RESUMED) {
+                                    muteLocalPlayback(art);
                                     updateCastIcon('connected');
                                     if (opts.onStateChange) opts.onStateChange('connected');
                                 } else if (event.sessionState === S.SESSION_ENDING) {
+                                    restoreLocalPlayback(art);
                                     updateCastIcon('disconnecting');
                                     if (opts.onStateChange) opts.onStateChange('disconnecting');
                                 }
