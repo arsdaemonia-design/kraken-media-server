@@ -3995,6 +3995,9 @@
                                             </button>
                                         </div>
                                         <div class="flex gap-2 ml-2">
+                                            <button onclick="adminOpenEditUserModal('${u.email}', '${encodeURIComponent(u.username || '')}', '${encodeURIComponent(u.avatar_url || '')}')" class="text-cyan-400 hover:text-cyan-300 text-sm" title="Editar usuario">
+                                                <i class="fa-solid fa-user-pen"></i>
+                                            </button>
                                             <button onclick="adminResetPassword('${u.email}')" class="text-zinc-400 hover:text-white text-sm">
                                                 <i class="fa-solid fa-key"></i>
                                             </button>
@@ -4123,6 +4126,144 @@ function adminDeleteUser(email) {
                 });
             }
             
+            async function adminOpenEditUserModal(email, encodedName, encodedAvatar) {
+                if (document.getElementById('kraken-admin-edit-user-modal')) return;
+
+                const currentName = decodeURIComponent(encodedName || '');
+                const currentAvatar = decodeURIComponent(encodedAvatar || '');
+                const safeName = String(currentName || '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+                const safeEmail = String(email || '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;');
+                const encodedEmail = encodeURIComponent(email || '');
+
+                let avatars = [];
+                try {
+                    const res = await fetch('/api/avatars');
+                    const d = await res.json();
+                    avatars = d.avatars || [];
+                } catch (_) {}
+
+                const grid = avatars.map((url) => {
+                    const checked = currentAvatar && currentAvatar === url ? 'checked' : '';
+                    return `
+                        <label class="cursor-pointer">
+                            <input type="radio" name="admin_avatar_edit" value="${url}" class="peer hidden" ${checked}>
+                            <img src="${url}" class="w-14 h-14 rounded-full border-3 border-transparent peer-checked:border-emerald-500 peer-checked:scale-110 transition-transform bg-zinc-800 object-cover">
+                        </label>
+                    `;
+                }).join('');
+
+                const modal = document.createElement('div');
+                modal.id = 'kraken-admin-edit-user-modal';
+                modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm z-[99999] flex items-center justify-center p-4';
+                modal.innerHTML = `
+                    <div class="bg-[#121212] border border-white/10 rounded-2xl w-full max-w-md p-5 shadow-2xl">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-bold text-white">
+                                <i class="fa-solid fa-user-gear text-emerald-500 mr-2"></i>Editar Usuario
+                            </h3>
+                            <button onclick="document.getElementById('kraken-admin-edit-user-modal').remove()" class="text-zinc-500 hover:text-white transition">
+                                <i class="fa-solid fa-xmark text-lg"></i>
+                            </button>
+                        </div>
+                        <div class="text-xs text-zinc-400 mb-4 font-mono">${safeEmail}</div>
+                        <div class="mb-4">
+                            <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2 ml-1">Nombre</label>
+                            <input type="text" id="admin-edit-user-name" value="${safeName}" placeholder="Nombre del usuario"
+                                class="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition">
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2 ml-1">Nueva Contraseña (Opcional)</label>
+                            <input type="password" id="admin-edit-user-password" placeholder="Mínimo 8 caracteres"
+                                class="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition">
+                        </div>
+                        <div class="mb-5">
+                            <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2 ml-1">Avatar</label>
+                            <div class="grid grid-cols-5 gap-3 justify-items-center bg-black/30 p-4 rounded-xl border border-white/5 max-h-64 overflow-y-auto custom-scroll">
+                                ${grid || '<div class="col-span-5 text-xs text-zinc-500 text-center py-4">Sin avatares disponibles</div>'}
+                            </div>
+                        </div>
+                        <button onclick="adminSaveUserEdit(decodeURIComponent('${encodedEmail}'))" class="w-full bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-bold py-3 rounded-xl shadow-lg transition-all hover:scale-[1.02] flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-check"></i> Guardar Cambios
+                        </button>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+
+                if (!currentAvatar && avatars.length > 0) {
+                    const first = document.querySelector('input[name="admin_avatar_edit"]');
+                    if (first) first.checked = true;
+                }
+            }
+
+            async function adminSaveUserEdit(email) {
+                const nameInput = document.getElementById('admin-edit-user-name');
+                const passInput = document.getElementById('admin-edit-user-password');
+                const avatarInput = document.querySelector('input[name="admin_avatar_edit"]:checked');
+
+                const username = (nameInput?.value || '').trim();
+                const password = (passInput?.value || '').trim();
+                const avatar = avatarInput ? avatarInput.value : '';
+
+                if (!username) {
+                    showToast('El nombre no puede estar vacío', 'error');
+                    return;
+                }
+                if (password && password.length < 8) {
+                    showToast('Contraseña mínimo 8 caracteres', 'error');
+                    return;
+                }
+
+                try {
+                    const token = window.krakenAuth?.getToken() || '';
+                    const headers = {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + token
+                    };
+
+                    const profileRes = await fetch('/api/admin/users/' + encodeURIComponent(email) + '/profile', {
+                        method: 'PUT',
+                        headers,
+                        body: JSON.stringify({
+                            username: username,
+                            avatar_url: avatar
+                        })
+                    });
+                    const profileData = await profileRes.json();
+                    if (!profileData.ok) {
+                        showToast(profileData.error || 'Error actualizando perfil', 'error');
+                        return;
+                    }
+
+                    if (password) {
+                        const passRes = await fetch('/api/admin/users/' + encodeURIComponent(email) + '/password', {
+                            method: 'PUT',
+                            headers,
+                            body: JSON.stringify({ password })
+                        });
+                        const passData = await passRes.json();
+                        if (!passData.ok) {
+                            showToast(passData.error || 'Perfil guardado, pero falló la contraseña', 'warning');
+                        }
+                    }
+
+                    const modal = document.getElementById('kraken-admin-edit-user-modal');
+                    if (modal) modal.remove();
+                    showToast('Usuario actualizado', 'success');
+                    loadAdminUsers();
+                } catch (e) {
+                    console.error(e);
+                    showToast('Error de conexión', 'error');
+                }
+            }
+
             function adminGenerateInvite() {
                 const duration = parseInt(document.getElementById('invite-duration')?.value || '0');
                 fetch('/api/admin/invite', {
@@ -6085,12 +6226,13 @@ function adminDeleteUser(email) {
                             let art = null;
                             const artSettings = [audioSettingBase, subtitleSettingBase];
                             // Usar dominio público para Cast (el Chromecast no accede a localhost)
+                            const playbackUrl = data.url.startsWith('/') ? (window.location.origin + data.url) : data.url;
                             const publicOrigin = window.__krakenPublicUrl || window.location.origin;
-                            const baseUrl = data.url.startsWith('/') ? (publicOrigin + data.url) : data.url;
-                            const castUrl = data.token ? baseUrl + (baseUrl.includes('?') ? '&' : '?') + `token=${data.token}` : baseUrl;
+                            const castBaseUrl = data.url.startsWith('/') ? (publicOrigin + data.url) : data.url;
+                            const castUrl = data.token ? castBaseUrl + (castBaseUrl.includes('?') ? '&' : '?') + `token=${data.token}` : castBaseUrl;
                             let artConfig = {
                                 container: container,
-                                url: castUrl,
+                                url: playbackUrl,
                                 title: file.title || '',
                                 theme: '#10b981',
                                 setting: true,
@@ -6105,6 +6247,7 @@ function adminDeleteUser(email) {
                                 duration: data.duration || 0,
                                 plugins: castSupported ? [
                                     artplayerPluginChromecast({
+                                        url: castUrl,
                                         mimeType: data.direct_play ? 'video/mp4' : 'application/x-mpegURL',
                                         receiverApplicationId: 'CC1AD845'
                                     }),

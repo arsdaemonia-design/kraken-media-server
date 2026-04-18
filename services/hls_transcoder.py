@@ -161,7 +161,7 @@ class HLSTranscoder:
             print(f"Error analizando {input_file}: {e}")
             return None
 
-    def start_hls_session(self, input_file, output_dir, selected_audio_index=None):
+    def start_hls_session(self, input_file, output_dir, selected_audio_index=None, hls_mode="stream"):
         """Prepara e inicia el proceso FFmpeg para HLS."""
         print(f"[HLS] Input file: {input_file}")
         print(f"[HLS] Output dir: {output_dir}")
@@ -227,14 +227,26 @@ class HLSTranscoder:
         # SIEMPRE convertir audio a AAC estéreo para máxima compatibilidad (evita fallos con AC3/5.1)
         cmd += ["-c:a", "aac", "-ac", "2", "-b:a", "192k"]
 
-        cmd += [
+        hls_mode = (hls_mode or "stream").strip().lower()
+        hls_args = [
             "-f", "hls",
             "-hls_time", "6",
             "-hls_list_size", "0",
-            "-hls_flags", "append_list",
+        ]
+        if hls_mode == "vod":
+            hls_args += [
+                "-hls_playlist_type", "vod",
+                "-hls_flags", "independent_segments",
+            ]
+        else:
+            hls_args += [
+                "-hls_flags", "append_list",
+            ]
+        hls_args += [
             "-hls_segment_filename", os.path.join(output_dir, "seg_%03d.ts"),
             playlist_path
         ]
+        cmd += hls_args
 
         print(f"[HLS] Command: {' '.join(cmd)}")
         

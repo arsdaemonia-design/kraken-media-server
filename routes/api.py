@@ -3030,6 +3030,48 @@ def admin_reset_password(email):
     return jsonify({'ok': True})
 
 
+@api_bp.route('/api/admin/users/<email>/profile', methods=['PUT'])
+@require_admin
+def admin_update_user_profile(email):
+    """Actualizar perfil de usuario (nombre/avatar) desde panel admin."""
+    data = request.get_json() or {}
+    username = (data.get('username') or '').strip()
+    avatar_url = (data.get('avatar_url') or '').strip()
+
+    if not username and not avatar_url:
+        return jsonify({'error': 'Nada para actualizar'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+
+    c.execute("SELECT email, is_superadmin FROM users WHERE email = ?", (email,))
+    target = c.fetchone()
+    if not target:
+        conn.close()
+        return jsonify({'error': 'Usuario no encontrado'}), 404
+
+    fields = []
+    values = []
+    if username:
+        fields.append("username = ?")
+        values.append(username)
+    if avatar_url:
+        fields.append("avatar_url = ?")
+        values.append(avatar_url)
+
+    values.append(email)
+    query = f"UPDATE users SET {', '.join(fields)} WHERE email = ?"
+    c.execute(query, tuple(values))
+    conn.commit()
+    conn.close()
+
+    security_logger.info(
+        f'USER PROFILE UPDATED BY ADMIN: email={email} '
+        f'updated_username={bool(username)} updated_avatar={bool(avatar_url)}'
+    )
+    return jsonify({'ok': True})
+
+
 @api_bp.route('/api/admin/users/<email>/kidmode', methods=['PUT'])
 @require_admin
 def admin_toggle_kid_mode(email):

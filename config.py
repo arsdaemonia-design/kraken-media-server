@@ -80,6 +80,11 @@ else:
     HLS_TEMP_DIR = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support', 'Kraken Media Server', 'temp_streams')
 os.makedirs(HLS_TEMP_DIR, exist_ok=True)
 
+# HLS mode:
+# - stream: arranque rapido (playlist incremental)
+# - vod: espera a playlist final completa (seek/duracion estables)
+HLS_MODE = os.getenv('HLS_MODE', 'stream').strip().lower()
+
 # FFmpeg/FFprobe Paths
 if getattr(sys, 'frozen', False):
     # Running as PyInstaller bundle

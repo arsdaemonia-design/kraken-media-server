@@ -1,4 +1,4 @@
-from flask import Blueprint, request, send_file, jsonify
+﻿from flask import Blueprint, request, send_file, jsonify, Response
 import os
 import re
 import shutil
@@ -12,6 +12,59 @@ hls_transcoder = HLSTranscoder(
     ffmpeg_path=config.FFMPEG_PATH,
     ffprobe_path=config.FFPROBE_PATH
 )
+
+def _wait_hls_ready(process, session_dir, video_duration=0, hls_mode='stream', log_prefix='[HLS]'):
+    """Espera a que HLS quede utilizable segun modo."""
+    import time as _time
+
+    playlist_path = os.path.join(session_dir, "playlist.m3u8")
+    mode = (hls_mode or 'stream').strip().lower()
+
+    if mode == 'vod':
+        # En modo VOD esperamos final completo de FFmpeg (timeline/seek estables).
+        base_timeout = int(video_duration * 1.5) + 120 if video_duration else 1800
+        timeout_seconds = max(300, min(14400, base_timeout))
+        start = _time.time()
+
+        while (_time.time() - start) < timeout_seconds:
+            if process.poll() is not None:
+                code = process.returncode
+                if code == 0:
+                    break
+                stdout, stderr = process.communicate()
+                error_msg = stderr.decode() if stderr else "Unknown error"
+                print(f"{log_prefix} FFmpeg fallo en VOD (exit {code}):\n{error_msg}")
+                return False, f"FFmpeg error: {error_msg}"
+            _time.sleep(1)
+
+        if process.poll() is None:
+            try:
+                process.terminate()
+            except Exception:
+                pass
+            return False, "Timeout esperando generacion HLS VOD completa"
+
+        if not os.path.exists(playlist_path):
+            return False, "No se genero playlist.m3u8 en modo VOD"
+        ts_files = [f for f in os.listdir(session_dir) if f.endswith('.ts')]
+        if len(ts_files) < 1:
+            return False, "No se generaron segmentos .ts en modo VOD"
+        return True, None
+
+    # STREAM mode (actual): arranque rapido con playlist + 1 segmento.
+    for _ in range(50):
+        if os.path.exists(playlist_path):
+            ts_files = [f for f in os.listdir(session_dir) if f.endswith('.ts')]
+            if len(ts_files) >= 1:
+                return True, None
+        if process.poll() is not None:
+            stdout, stderr = process.communicate()
+            error_msg = stderr.decode() if stderr else "Unknown error"
+            print(f"{log_prefix} FFmpeg murio durante generacion inicial:\n{error_msg}")
+            return False, f"FFmpeg error: {error_msg}"
+        _time.sleep(0.5)
+
+    return False, "Timeout esperando generacion HLS (playlist/segmentos)"
 
 def _infer_subtitle_language(video_base, subtitle_name):
     name_no_ext = os.path.splitext(subtitle_name)[0]
@@ -85,6 +138,7 @@ def play_hls():
     video_path = request.args.get('file')  # Fallback legacy
     session_id = request.args.get('sid')
     audio_track_raw = request.args.get('audio_track')
+    hls_mode = (config.HLS_MODE or 'stream').strip().lower()
 
     if not session_id:
         return jsonify({"error": "Missing session_id"}), 400
@@ -93,7 +147,7 @@ def play_hls():
     if media_id and token:
         token_data = state.STREAM_TOKENS.get(token)
         if not token_data:
-            return jsonify({"error": "Token inválido o expirado"}), 403
+            return jsonify({"error": "Token invÃ¡lido o expirado"}), 403
         if str(token_data.get('id')) != str(media_id):
             return jsonify({"error": "Token no corresponde al media solicitado"}), 403
         if _time.time() > token_data.get('expires', 0):
@@ -120,7 +174,7 @@ def play_hls():
 
     # --- Fallback legacy: por file path ---
     elif video_path:
-        video_duration = 0  # Legacy no consulta DB, duración desconocida
+        video_duration = 0  # Legacy no consulta DB, duraciÃ³n desconocida
     else:
         return jsonify({"error": "Missing id+token or file parameter"}), 400
 
@@ -132,7 +186,7 @@ def play_hls():
     if not os.path.exists(full_video_path):
         return jsonify({"error": f"File not found: {full_video_path}"}), 404
 
-    # Cambiar audio: detener sesión anterior si existe
+    # Cambiar audio: detener sesiÃ³n anterior si existe
     if session_id in state.HLS_SESSIONS:
         existing = state.HLS_SESSIONS[session_id]
         if existing.get('process'):
@@ -141,7 +195,7 @@ def play_hls():
                 existing['process'].wait(timeout=5)
             except Exception as e:
                 print(f"[HLS] Terminando proceso anterior: {e}")
-        # NO borrar session_dir inmediatamente - FFmpeg nuevo sobrescribirá
+        # NO borrar session_dir inmediatamente - FFmpeg nuevo sobrescribirÃ¡
 
     session_dir = os.path.join(config.HLS_TEMP_DIR, session_id)
 
@@ -153,7 +207,7 @@ def play_hls():
             pass
     os.makedirs(session_dir, exist_ok=True)
     
-    print(f"[HLS] Iniciando transcodificación: {full_video_path}")
+    print(f"[HLS] Iniciando transcodificaciÃ³n: {full_video_path}")
     print(f"[HLS] Directorio de salida: {session_dir}")
     print(f"[HLS] FFMPEG_PATH: {config.FFMPEG_PATH}")
     
@@ -167,7 +221,8 @@ def play_hls():
     process, audio_tracks, selected_audio_track, hls_error = hls_transcoder.start_hls_session(
         full_video_path,
         session_dir,
-        selected_audio_index=selected_audio_track
+        selected_audio_index=selected_audio_track,
+        hls_mode=hls_mode
     )
     external_subs = _find_external_subtitles(full_video_path)
     subtitle_url = external_subs[0]["url"] if external_subs else None
@@ -188,22 +243,20 @@ def play_hls():
     if process is None:
         return jsonify({"error": hls_error or "Failed to start transcoding"}), 500
 
-    # Esperar hasta que FFmpeg genere el archivo m3u8 (máximo 15 segundos)
-    playlist_path = os.path.join(session_dir, "playlist.m3u8")
-    import time
-    for _ in range(30):
-        if os.path.exists(playlist_path):
-            break
-        if process.poll() is not None:
-            stdout, stderr = process.communicate()
-            error_msg = stderr.decode() if stderr else "Unknown error"
-            print(f"[HLS] FFmpeg murió durante generación inicial:\n{error_msg}")
-            return jsonify({"error": f"FFmpeg error: {error_msg}"}), 500
-        time.sleep(0.5)
-
-    if not os.path.exists(playlist_path):
-        process.terminate()
-        return jsonify({"error": "Timeout esperando generación HLS"}), 500
+    ready, ready_error = _wait_hls_ready(
+        process=process,
+        session_dir=session_dir,
+        video_duration=video_duration,
+        hls_mode=hls_mode,
+        log_prefix='[HLS]'
+    )
+    if not ready:
+        try:
+            if process.poll() is None:
+                process.terminate()
+        except Exception:
+            pass
+        return jsonify({"error": ready_error or "Timeout esperando generacion HLS"}), 500
     
     state.HLS_SESSIONS[session_id] = {
         "path": session_dir,
@@ -214,7 +267,7 @@ def play_hls():
     }
     
     if subtitle_url:
-        print(f"[HLS] Subtítulo detectado: {subtitle_url}")
+        print(f"[HLS] SubtÃ­tulo detectado: {subtitle_url}")
     
     response_data = {
         "url": f"/hls/{session_id}/playlist.m3u8",
@@ -231,8 +284,8 @@ def play_hls():
 
 @hls_bp.route('/api/hls/reconnect', methods=['POST'])
 def reconnect_hls():
-    """Reconectar una sesión HLS expirada o caída.
-    El frontend envía el session_id antiguo y/o token + media_id para recuperar el video.
+    """Reconectar una sesiÃ³n HLS expirada o caÃ­da.
+    El frontend envÃ­a el session_id antiguo y/o token + media_id para recuperar el video.
     """
     import sqlite3
     import time as _time
@@ -244,11 +297,13 @@ def reconnect_hls():
     media_id = data.get('media_id')
     audio_track = data.get('audio_track')
     new_session_id = data.get('new_session_id') or str(_uuid.uuid4())
+    hls_mode = (config.HLS_MODE or 'stream').strip().lower()
 
-    # --- Recuperar video_path del token o de la sesión antigua ---
+    # --- Recuperar video_path del token o de la sesiÃ³n antigua ---
     video_path = None
     full_video_path = None
 
+    token_data = None
     if old_session_id and old_session_id in state.HLS_SESSIONS:
         old_session = state.HLS_SESSIONS[old_session_id]
         full_video_path = old_session.get('current_video')
@@ -258,7 +313,7 @@ def reconnect_hls():
     if not full_video_path and token:
         token_data = state.STREAM_TOKENS.get(token)
         if not token_data or _time.time() > token_data.get('expires', 0):
-            return jsonify({"error": "Token inválido o expirado"}), 403
+            return jsonify({"error": "Token invÃ¡lido o expirado"}), 403
         if media_id and str(token_data.get('id')) != str(media_id):
             return jsonify({"error": "Token no corresponde al media solicitado"}), 403
 
@@ -279,12 +334,12 @@ def reconnect_hls():
     if not full_video_path or not os.path.exists(full_video_path):
         return jsonify({"error": "Video no encontrado o eliminado"}), 404
 
-    # --- Limpiar sesión anterior si aún existe ---
+    # --- Limpiar sesiÃ³n anterior si aÃºn existe ---
     if old_session_id and old_session_id in state.HLS_SESSIONS:
-        print(f"[HLS Reconnect] Limpiando sesión antigua: {old_session_id}")
+        print(f"[HLS Reconnect] Limpiando sesiÃ³n antigua: {old_session_id}")
         stop_hls_session(old_session_id)
 
-    # --- Crear nueva sesión HLS ---
+    # --- Crear nueva sesiÃ³n HLS ---
     session_dir = os.path.join(config.HLS_TEMP_DIR, new_session_id)
     if os.path.exists(session_dir):
         shutil.rmtree(session_dir)
@@ -302,7 +357,8 @@ def reconnect_hls():
     process, audio_tracks, selected_audio_track, hls_error = hls_transcoder.start_hls_session(
         full_video_path,
         session_dir,
-        selected_audio_index=selected_audio_track
+        selected_audio_index=selected_audio_track,
+        hls_mode=hls_mode
     )
 
     if process == "DIRECT":
@@ -322,26 +378,25 @@ def reconnect_hls():
     if process is None:
         return jsonify({"error": hls_error or "Failed to start transcoding"}), 500
 
-    # Esperar playlist
-    playlist_path = os.path.join(session_dir, "playlist.m3u8")
-    import time
-    for _ in range(30):
-        if os.path.exists(playlist_path):
-            break
-        if process.poll() is not None:
-            stdout, stderr = process.communicate()
-            error_msg = stderr.decode() if stderr else "Unknown error"
-            print(f"[HLS Reconnect] FFmpeg murió durante generación:\n{error_msg}")
-            return jsonify({"error": f"FFmpeg error: {error_msg}"}), 500
-        time.sleep(0.5)
+    ready, ready_error = _wait_hls_ready(
+        process=process,
+        session_dir=session_dir,
+        video_duration=0,
+        hls_mode=hls_mode,
+        log_prefix='[HLS Reconnect]'
+    )
+    if not ready:
+        try:
+            if process.poll() is None:
+                process.terminate()
+        except Exception:
+            pass
+        return jsonify({"error": ready_error or "Timeout esperando generacion HLS"}), 500
 
-    if not os.path.exists(playlist_path):
-        process.terminate()
-        return jsonify({"error": "Timeout esperando generación HLS"}), 500
-
-    if 'sessions' not in token_data:
-        token_data['sessions'] = []
-    token_data['sessions'].append(new_session_id)
+    if token_data is not None:
+        if 'sessions' not in token_data:
+            token_data['sessions'] = []
+        token_data['sessions'].append(new_session_id)
 
     external_subs = _find_external_subtitles(full_video_path)
     subtitle_url = external_subs[0]["url"] if external_subs else None
@@ -354,7 +409,7 @@ def reconnect_hls():
         "current_video": full_video_path
     }
 
-    print(f"[HLS Reconnect] Sesión nueva lista: {new_session_id}")
+    print(f"[HLS Reconnect] SesiÃ³n nueva lista: {new_session_id}")
 
     return jsonify({
         "url": f"/hls/{new_session_id}/playlist.m3u8",
@@ -429,9 +484,9 @@ def serve_hls_segment(session_id, filename):
             return "Session not found", 404
         token_data = state.STREAM_TOKENS.get(cast_token)
         if not token_data or _time.time() > token_data.get('expires', 0):
-            return "Token inválido o expirado", 403
+            return "Token invÃ¡lido o expirado", 403
         if session_id not in token_data.get('sessions', []):
-            return "Token no válido para esta sesión", 403
+            return "Token no vÃ¡lido para esta sesiÃ³n", 403
     
     session = state.HLS_SESSIONS.get(session_id)
     if session:
@@ -448,9 +503,9 @@ def serve_hls_segment(session_id, filename):
     
     if filename.endswith('.m3u8'):
         mimetype = 'application/vnd.apple.mpegurl'
-        response = send_file(file_path, mimetype=mimetype)
         if cast_token:
-            content = open(file_path, 'r', encoding='utf-8').read()
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
             lines = content.strip().split('\n')
             rewritten = []
             for line in lines:
@@ -459,7 +514,9 @@ def serve_hls_segment(session_id, filename):
                     separator = '&' if '?' in stripped else '?'
                     line = f"{stripped}{separator}token={cast_token}"
                 rewritten.append(line)
-            response.data = '\n'.join(rewritten).encode('utf-8')
+            response = Response('\n'.join(rewritten), mimetype=mimetype)
+        else:
+            response = send_file(file_path, mimetype=mimetype)
     elif filename.endswith('.ts'):
         mimetype = 'video/MP2T'
         response = send_file(file_path, mimetype=mimetype)
@@ -482,7 +539,7 @@ def cleanup_old_hls_sessions(max_inactive_seconds=1200):
                     to_remove.append(sid)
 
             for sid in to_remove:
-                print(f"Limpiando sesión HLS inactiva: {sid} (>20 min sin actividad)")
+                print(f"Limpiando sesiÃ³n HLS inactiva: {sid} (>20 min sin actividad)")
                 stop_hls_session(sid)
 
         except Exception as e:
