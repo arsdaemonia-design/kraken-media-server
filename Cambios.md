@@ -14,6 +14,50 @@ Kraken es un servidor multimedia local con modo online/offline. Permite:
 
 ---
 
+# Hotfix Tecnico (2026-04-18) - Chromecast + HLS Estabilidad
+
+## 1) Chromecast: causa real del error `loadMedia` (session null)
+
+### Sintoma
+- En consola:
+  `artplayer-plugin-chromecast.js ... TypeError: Cannot read properties of null (reading 'loadMedia')`
+
+### Causa raiz
+- El plugin intentaba ejecutar `session.loadMedia(...)` cuando la sesion de Cast aun no estaba disponible o regresaba `null` tras `requestSession()`.
+- Ademas, el player local estaba usando URL de Cast (dominio publico) en lugar de URL local para reproduccion normal.
+
+### Fix aplicado
+- **Plugin de Cast endurecido** (`assets/artplayer-plugin-chromecast.js`):
+  - Validacion defensiva antes de `loadMedia`.
+  - Si `requestSession()` no entrega sesion valida, intenta `getCurrentSession()`.
+  - Si sigue nulo, lanza error controlado (`"Cast session is null"`).
+- **Separacion de URLs en frontend** (`templates/index.html`):
+  - `playbackUrl` para reproduccion local (ArtPlayer en navegador).
+  - `castUrl` para Chromecast (dominio publico + token).
+  - El plugin Cast recibe explicitamente `url: castUrl`.
+
+## 2) HLS: fixes de robustez aplicados
+
+- `routes/hls.py`:
+  - Correccion de caso donde `token_data` podia quedar indefinido en reconexion.
+  - Reescritura de playlist `.m3u8` con `Response(...)` dedicado.
+  - Espera de arranque mas robusta: no solo playlist, tambien al menos 1 segmento `.ts`.
+  - Mensaje de timeout mas descriptivo: `playlist/segmentos`.
+
+## 3) Estado VOD (importante)
+
+- Se confirma que VOD sigue sensible cuando se fuerza comportamiento "full timeline" desde inicio.
+- Tu enfoque actual (chunks, inicio de stream/autoplay y salto de siguiente episodio a 15s) es valido para seguir iterando sin romper playback.
+- Pendiente tecnico principal: consolidar una ruta VOD que no choque con flujo live-like de HLS en sesiones largas.
+
+## 4) Archivos impactados en este hotfix
+
+- `assets/artplayer-plugin-chromecast.js`
+- `templates/index.html`
+- `routes/hls.py`
+
+---
+
 # Cambios Recientes (v4.92 - 2026-04-17)
 
 ## 🎬 Fix HLS - Auto-play con Buffer y Blindaje Next Episode
@@ -1421,31 +1465,6 @@ Implementación de mejoras críticas al sistema de streaming HLS: timeout extend
 - **Cleanup duplicado:** Función `cleanup_old_hls_sessions()` existe en `state.py` y `routes/hls.py`; ambas usan 1200s
 - **Compatibilidad Cast:** Requiere HTTPS en dominio público para funcionar en producción
 - **Keepalive silencioso:** Errores de red durante pausa son silenciados para no spamear consola
-
----
-
-# Plan para v4.93 (2026-04-18)
-
-## 🖼️ Gestión de Imágenes de Perfil de Usuarios
-
-### Descripción
-Agregar funcionalidad para que el administrador pueda asignar/cambiar imágenes de perfil de usuarios desde el panel de configuración.
-
-### Funcionalidades a Implementar
-1. **Subida de imagen de perfil** - Endpoint para uploading imágenes de usuario
-2. **Panel de edición de usuarios** - Ya existe `/config`, agregar campo de imagen
-3. **Editar perfil de usuario** - Ya existe modal de editar perfil, mejorar soporte de imagen
-4. **Visualización de estado** - Mostrar si el usuario está activo o no
-
-### Archivos Probables a Modificar
-- `routes/api.py` - Nuevo endpoint `/api/admin/users/<email>/avatar`
-- `templates/index.html` - Actualizar modal de editar usuario
-- `services/auth.py` - Agregar campo avatar al modelo de usuario
-
-### Notas
-- La funcionalidad de imágenes de perfil ya existe parcialmente
-- El panel de usuarios ya permite cambiar contraseñas y marcar como niño
-- Solo falta conectar la subida de imágenes con el panel de admin
 
 ---
 

@@ -216,16 +216,40 @@ class HLSTranscoder:
         else:
             cmd += ["-map", "0:a?"]
 
-        if force_hls_for_audio:
-            # When forcing HLS just to switch audio track, re-encode video for maximum mux compatibility
+        needs_video_reencode = force_hls_for_audio or analysis.get('video_needs_transcode', True)
+        if needs_video_reencode:
+            # Re-encode video when required and force a stable GOP for better HLS seek/segment boundaries.
             cmd += encoder_settings
-        elif analysis.get('video_needs_transcode', True):
-            cmd += encoder_settings
+            cmd += ["-g", "48", "-force_key_frames", "expr:gte(t,n_forced*2)"]
+            if video_encoder == "libx264":
+                cmd += ["-sc_threshold", "0"]
         else:
             cmd += ["-c:v", "copy"]
 
-        # SIEMPRE convertir audio a AAC estéreo para máxima compatibilidad (evita fallos con AC3/5.1)
-        cmd += ["-c:a", "aac", "-ac", "2", "-b:a", "192k"]
+        # Audio estable para HLS: AAC-LC + resample async.
+        # Si la pista fuente es multicanal, hacemos downmix explícito para evitar mezcla extraña.
+        selected_channels = 2
+        if audio_tracks and 0 <= normalized_audio_index < len(audio_tracks):
+            try:
+                selected_channels = int(audio_tracks[normalized_audio_index].get("channels") or 2)
+            except (TypeError, ValueError):
+                selected_channels = 2
+
+        audio_filter = "aresample=async=1:first_pts=0"
+        audio_bitrate = "192k"
+        if selected_channels > 2:
+            # Downmix surround -> stereo con más presencia del canal central (diálogos).
+            audio_filter += ",pan=stereo|c0=FL+0.707*FC+0.707*SL+0.5*LFE|c1=FR+0.707*FC+0.707*SR+0.5*LFE"
+            audio_bitrate = "256k"
+
+        cmd += [
+            "-c:a", "aac",
+            "-profile:a", "aac_low",
+            "-ac", "2",
+            "-ar", "48000",
+            "-b:a", audio_bitrate,
+            "-af", audio_filter
+        ]
 
         hls_mode = (hls_mode or "stream").strip().lower()
         hls_args = [

@@ -3315,10 +3315,11 @@
                 }
             }
 
-            function observeLazyImages() {
+            function observeLazyImages(scope) {
                 if (!imageObserver) return;
 
-                document.querySelectorAll('.lazy-img').forEach(img => {
+                const root = scope && typeof scope.querySelectorAll === 'function' ? scope : document;
+                root.querySelectorAll('.lazy-img').forEach(img => {
                     // ✅ Solo observar si NO tiene src y NO está ya siendo observada
                     if (img.dataset.src && !img.src && !img.classList.contains('loaded')) {
                         imageObserver.observe(img);
@@ -8259,6 +8260,23 @@ if (art.duration > 0 && art.currentTime >= art.duration - 0.5 && (Date.now() - _
                     renderFolderView(currentExplorerPath || '');
                     return;
                 }
+
+                const normalizedCurrentPath = ((typeof currentPath === 'string' ? currentPath : '') || '').replace(/\\/g, '/');
+                const previousRenderedPath = (window.__krakenLastRenderedPath || '').replace(/\\/g, '/');
+                const previousRenderedLibrary = window.__krakenLastRenderedLibrary || '';
+                const currentDepth = normalizedCurrentPath.split('/').filter(Boolean).length;
+                const enteringVideoDetailView =
+                    currentLibrary === 'video' &&
+                    currentDepth >= 3 &&
+                    (previousRenderedLibrary !== 'video' || previousRenderedPath !== normalizedCurrentPath);
+
+                if (enteringVideoDetailView) {
+                    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+                }
+
+                window.__krakenLastRenderedPath = normalizedCurrentPath;
+                window.__krakenLastRenderedLibrary = currentLibrary || '';
+
                 renderActiveFilters();
                 const container = document.getElementById('lib-container');
                 container.innerHTML = "";
@@ -8626,6 +8644,7 @@ if (art.duration > 0 && art.currentTime >= art.duration - 0.5 && (Date.now() - _
 
                     window.filterByGenre = function(genre) {
                         window.netflixGenreFilter = (window.netflixGenreFilter === genre) ? null : genre;
+                        window.netflixGridRenderLimit = 84;
                         renderLib();
                     };
 
@@ -8646,6 +8665,7 @@ if (art.duration > 0 && art.currentTime >= art.duration - 0.5 && (Date.now() - _
                     window.changeNetflixCategory = function(newCat) {
                         window.netflixActiveCategory = newCat;
                         window.netflixGenreFilter = null;
+                        window.netflixGridRenderLimit = 84;
                         const mobileInput = document.getElementById('lib-search-mobile');
                         const desktopInput = document.getElementById('lib-search-desktop');
                         if (mobileInput) mobileInput.value = '';
@@ -9011,19 +9031,43 @@ if (art.duration > 0 && art.currentTime >= art.duration - 0.5 && (Date.now() - _
                             });
                         }
 
-                        // 8. GRID PLANO CON TODOS LOS SHOWS
+                        // 8. GRID PLANO CON TODOS LOS SHOWS (render por lotes para evitar congelamientos)
                         showsToDisplay.sort((a, b) => ((a.name || a.title) || '').localeCompare((b.name || b.title) || '', undefined, { sensitivity: 'base' }));
 
-                        let allCardsHtml = '';
-                        showsToDisplay.forEach(item => {
-                            allCardsHtml += `<div class="w-full h-full">${createCard(item)}</div>`;
-                        });
+                        const NETFLIX_GRID_BATCH = 84;
+                        const currentGridLimit = Math.max(
+                            NETFLIX_GRID_BATCH,
+                            Number(window.netflixGridRenderLimit || NETFLIX_GRID_BATCH)
+                        );
+                        const visibleShows = showsToDisplay.slice(0, currentGridLimit);
+
+                        window.loadMoreNetflixGrid = function(step = NETFLIX_GRID_BATCH) {
+                            const safeStep = Number(step) > 0 ? Number(step) : NETFLIX_GRID_BATCH;
+                            const prev = Math.max(NETFLIX_GRID_BATCH, Number(window.netflixGridRenderLimit || NETFLIX_GRID_BATCH));
+                            window.netflixGridRenderLimit = prev + safeStep;
+                            renderLib();
+                        };
+
+                        const allCardsHtml = visibleShows
+                            .map(item => `<div class="w-full h-full">${createCard(item)}</div>`)
+                            .join('');
 
                         container.innerHTML += `
                             <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3 md:gap-4 px-1 md:px-0 pb-4">
                                 ${allCardsHtml}
                             </div>
                         `;
+                        if (showsToDisplay.length > currentGridLimit) {
+                            const pending = showsToDisplay.length - currentGridLimit;
+                            container.innerHTML += `
+                                <div class="w-full flex justify-center mt-2 mb-6">
+                                    <button onclick="loadMoreNetflixGrid(${NETFLIX_GRID_BATCH})"
+                                        class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition">
+                                        ➕ Cargar más (${Math.min(NETFLIX_GRID_BATCH, pending)} más)
+                                    </button>
+                                </div>
+                            `;
+                        }
 
                         // 9. SECCIÓN "RECOMENDADAS" - Filas horizontales por género (oculta por defecto)
                         // Crear filas de contenido similar basado en género
@@ -9128,7 +9172,7 @@ if (art.duration > 0 && art.currentTime >= art.duration - 0.5 && (Date.now() - _
                             `;
                         }
 
-                        observeLazyImages();
+                        observeLazyImages(container);
                         return; // Terminar aquí, ya no procesa el Grid viejo!
                     }
 
@@ -9459,6 +9503,17 @@ if (art.duration > 0 && art.currentTime >= art.duration - 0.5 && (Date.now() - _
                     // 5. RENDERIZAR TEMPORADAS (Lista de episodios estilo Netflix)
                     const seasonNames = Object.keys(groups).sort();
                     const isDetailSeasonView = currentPath.split('/').filter(Boolean).length >= 3;
+                    const SEASON_EPISODE_BATCH = 60;
+                    if (!window.seasonEpisodeRenderLimits) window.seasonEpisodeRenderLimits = {};
+                    window.loadMoreSeasonEpisodes = function(showPathEncoded, seasonEncoded, step = SEASON_EPISODE_BATCH) {
+                        const showPath = decodeURIComponent(showPathEncoded || '');
+                        const seasonName = decodeURIComponent(seasonEncoded || '');
+                        const safeStep = Number(step) > 0 ? Number(step) : SEASON_EPISODE_BATCH;
+                        const key = `${showPath}::${seasonName}`;
+                        const prev = Math.max(SEASON_EPISODE_BATCH, Number(window.seasonEpisodeRenderLimits[key] || SEASON_EPISODE_BATCH));
+                        window.seasonEpisodeRenderLimits[key] = prev + safeStep;
+                        renderLib();
+                    };
                     
                     // GENERADOR DE PILLS DE TEMPORADAS
                     if (!isDetailSeasonView && seasonNames.filter(n => groups[n].isSeason).length > 1) {
@@ -9496,13 +9551,33 @@ if (art.duration > 0 && art.currentTime >= art.duration - 0.5 && (Date.now() - _
                         </div>`;
 
                             const sortedFiles = groups[name].files.sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' }));
-                            
+
+                            const seasonKey = `${currentPath}::${name}`;
+                            const seasonLimit = Math.max(
+                                SEASON_EPISODE_BATCH,
+                                Number(window.seasonEpisodeRenderLimits[seasonKey] || SEASON_EPISODE_BATCH)
+                            );
+                            const visibleEpisodes = sortedFiles.slice(0, seasonLimit);
+                            const encodedPath = encodeURIComponent(currentPath);
+                            const encodedSeason = encodeURIComponent(name);
+
                             // Usar vista de episodios para video, o el formato normal para otros
-                            container.innerHTML += `<div class="col-span-full flex flex-col gap-1">`;
-                            sortedFiles.forEach((f, idx) => {
-                                container.innerHTML += createEpisodeRow(f, idx + 1);
-                            });
-                            container.innerHTML += `</div>`;
+                            container.innerHTML += `
+                                <div class="col-span-full flex flex-col gap-1">
+                                    ${visibleEpisodes.map((f, idx) => createEpisodeRow(f, idx + 1)).join('')}
+                                </div>
+                            `;
+                            if (sortedFiles.length > seasonLimit) {
+                                const pendingEpisodes = sortedFiles.length - seasonLimit;
+                                container.innerHTML += `
+                                    <div class="col-span-full flex justify-center mt-2 mb-1">
+                                        <button onclick="loadMoreSeasonEpisodes('${encodedPath}','${encodedSeason}',${SEASON_EPISODE_BATCH})"
+                                            class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 border border-white/10 text-white/90 text-xs font-bold transition">
+                                            ➕ Cargar más en ${escapeHtml(name)} (${Math.min(SEASON_EPISODE_BATCH, pendingEpisodes)} más)
+                                        </button>
+                                    </div>
+                                `;
+                            }
                         }
                     });
 
@@ -9519,7 +9594,7 @@ if (art.duration > 0 && art.currentTime >= art.duration - 0.5 && (Date.now() - _
                     }
 
                     // ✅ Lazy load y salir SOLO del bloque de video
-                    observeLazyImages();
+                    observeLazyImages(container);
 
                     return;
                 } // ⬅️ ESTA LLAVE FALTABA - cierra el if (currentLibrary === 'video')
