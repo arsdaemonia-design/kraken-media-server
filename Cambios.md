@@ -1468,3 +1468,139 @@ ImplementaciÃ³n de mejoras crÃ­ticas al sistema de streaming HLS: timeout extend
 
 ---
 
+## 2026-05-03 21:23 — Refactor UI Video (Fase A + inicio Fase B)
+
+### Contexto
+Se inició la unificación de la vista de video (estilo Netflix) para reducir acoplamiento en `renderLib()` sin romper funciones existentes de audio/video.
+
+### Cambios aplicados
+
+#### 1) Estado unificado de video (Fase A)
+- **Archivo:** `templates/index.html`
+- **Nuevo estado central:** `videoUIState`
+  - `mode`, `activeCategory`, `genreFilter`, `gridRenderLimit`, `recommendationsOpen`, `search`, `pathDepth`, `detailView`.
+- **Compatibilidad hacia atrás:** se crearon bindings con `Object.defineProperty` para mantener funcionando código legado que usa:
+  - `window.netflixActiveCategory`
+  - `window.netflixGenreFilter`
+  - `window.netflixGridRenderLimit`
+- **Sincronización derivada por render:** `syncVideoDerivedState()` se ejecuta antes de `_renderLibActual()`.
+
+#### 2) Integración de estado en flujos clave
+- `goHome()` resetea estado visual de video (`genreFilter`, `recommendationsOpen`, `gridRenderLimit`).
+- `setLibraryMode('video')` normaliza límite de grid.
+- `navigateUp()` actualiza categoría activa vía estado.
+- `toggleRecommendations()` sincroniza `videoUIState.recommendationsOpen`.
+
+#### 3) Extracción de lógica de filtros Netflix (Fase B parcial)
+- **Nueva función:** `setupNetflixRootFilters(categoriesArray, genresArray)`
+- Centraliza handlers y dropdowns de root video:
+  - `filterByGenre`
+  - `changeNetflixCategory`
+  - `toggleCategoryDropdown`
+  - `toggleGenreDropdown`
+  - `toggleRecommendations`
+  - `hideDropdownByType`
+- Devuelve HTML de menús:
+  - `categoryMenuHtml`
+  - `genreMenuHtml`
+
+#### 4) Extracción de recomendaciones
+- **Nueva función:** `appendNetflixRecommendationsSection(container, uniqueShows)`
+- Se movió fuera de `renderLib()`:
+  - construcción de filas por género
+  - flechas/scroll horizontal desktop
+  - inyección de bloque `#recommendations-section`
+
+### Resultado
+- Se redujo complejidad del bloque root de video sin cambiar UX.
+- Audio no se vio afectado en pruebas manuales.
+- Base lista para siguiente fase: extraer `Hero + Grid + Load More` en función dedicada.
+
+---
+## 2026-05-03 21:51 — Refactor UI Video (avance adicional)
+
+### Cambios aplicados en esta iteración
+
+#### 1) Hero + Grid extraídos a helpers
+- **Archivo:** `templates/index.html`
+- **Nuevas funciones:**
+  - `appendNetflixHero(container, heroItem)`
+  - `appendNetflixGrid(container, showsToDisplay)`
+- **Resultado:** el root de video dejó de tener bloques inline largos para hero y paginado de cards.
+
+#### 2) Maratón modularizado
+- **Nueva función:** `setupNetflixMarathon(uniqueShows)`
+- Se reemplazó la definición inline de `window.shuffleVideoMarathon` dentro del root por una llamada directa al helper.
+- **Resultado:** menos lógica embebida en `renderLib()` y misma UX de botón `Maratón`.
+
+#### 3) Estado de render de video centralizado
+- **Nueva función:** `getVideoRenderState(searchValue)`
+- Centraliza flags usados en enrutado de video:
+  - `isRoot`
+  - `isSearching`
+  - `shouldForceVideoList`
+  - `isEpisodeQuery`
+
+#### 4) Búsqueda root de video extraída
+- **Nuevas funciones:**
+  - `buildVideoRootSearchEntities(filtered, searchValue, activeCategory)`
+  - `renderVideoRootSearchResults(container, filtered, searchValue)`
+- Se reemplazó la rama inline `isSearching && isRoot && !isEpisodeQuery` por llamada a helper.
+- **Resultado:** cache y ranking se mantienen, pero el flujo queda desacoplado.
+
+#### 5) Catálogo root de Netflix extraído
+- **Nueva función:** `buildNetflixRootCatalog(filtered)`
+- Centraliza:
+  - normalización de paths de video
+  - categorías disponibles
+  - categoría activa por defecto
+  - `uniqueShows`
+  - `genresArray`
+- Se reemplazó bloque inline grande del root por:
+  - `const { categoriesArray, uniqueShows, genresArray } = buildNetflixRootCatalog(filtered);`
+
+### Resultado de arquitectura
+- `renderLib()` quedó significativamente más corto en la rama de video.
+- Se preservó comportamiento funcional (sin cambios de UX intencionales).
+- Audio permanece sin cambios de lógica.
+
+---
+
+## 2026-05-03 22:50 - Refactor UI Video (Fase C Final) y Mejoras MÃ³viles
+
+### Contexto
+Tercera y Ãºltima etapa de la unificaciÃ³n del render de video. AdemÃ¡s, se aplicaron mejoras visuales al reproductor y la experiencia mÃ³vil estilo Netflix.
+
+### Cambios de Arquitectura en Video
+- **ExtracciÃ³n de Cabeceras:**
+  - `renderVideoPathHeader(container, shouldForceVideoList)` (tÃ­tulo + botÃ³n subir adaptativo).
+  - `renderVideoDetailHeroAndSeasonControls(container, filtered)` (hero detalle + selector de temporada + acciones).
+- **ExtracciÃ³n de Directorios:**
+  - `buildVideoDirectoryGroups(filtered, isSearching)`
+  - `renderVideoFolderGroups(container, groups, shouldForceVideoList)`
+- **Resultado:** `renderLib()` ahora es casi 100% orquestador en la rama de video, llamando a funciones modulares y limpias.
+
+### Cambios Visuales y de UX (Netflix/Plex Style)
+- **Sidebar Global (Drawer):**
+  - El menÃº lateral dejÃ³ de ser persistente. Ahora es un "drawer" (overlay) que se abre y cierra (`sidebar-open`).
+  - AÃ±adido botÃ³n hamburguesa en desktop.
+  - Cierre con la tecla `Esc` y al dar clic fuera del menÃº (backdrop blur).
+  - IntegraciÃ³n fluida: el drawer se oculta automÃ¡ticamente al iniciar reproducciÃ³n de video.
+- **Reproductor de Video (`#player-bar`):**
+  - Se eliminÃ³ el margen lateral izquierdo (`md:ml-64`) ya que el menÃº no ocupa espacio en el flujo normal.
+  - Se ajustÃ³ el reproductor para no superponerse a la consola del desarrollador, elevÃ¡ndolo ligeramente (`bottom-[24px]`) y reestableciendo el botÃ³n y panel de consola a sus ubicaciones anteriores en la parte inferior (`bottom:0` y `bottom:24px`).
+- **Vista MÃ³vil (EstadÃ­sticas):**
+  - Se escondieron las estadÃ­sticas de reproducciÃ³n (`#lib-stats`) en un acordeÃ³n desplegable para mantener la interfaz inicial mÃ¡s limpia y Ã¡gil.
+
+### Estabilizacin Global de Navegacin y UI (04-Mayo-2026)
+- **Barra Superior Persistente:**
+  - Implementacin de una barra superior fija de 40px con el logo de Kraken centrado y estética metálica.
+  - Consolidacin del botn de men hamburguesa como elemento global en la barra superior para Desktop y Mvil.
+- **Rediseo de Controles de Librera:**
+  - Reubicacin de los botones de Vista (Grid/List) y el Switch de Offline en la parte superior de la sidebar.
+  - Implementacin de un **Switch tipo Pastilla (Pill Toggle)** robusto basado en CSS nativo para garantizar animaciones fluidas y estados claros en dispositivos mviles.
+  - Optimizacin de tamaos de botones (40px) para mejorar la usabilidad tctil en celulares.
+- **Correcciones de Estructura y UX:**
+  - Resolucin de solapamientos de capas (z-index) entre la barra superior y el men lateral.
+  - Limpieza de headers redundantes en las vistas de msica y video para una interfaz ms despejada.
+  - Sincronizacin mejorada del estado Offline mediante eventos globales y gestin de localStorage.

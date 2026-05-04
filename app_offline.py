@@ -47,27 +47,11 @@ def _inject_template(template: str) -> str:
     # 2. Body toggle
     template = re.sub(r'(<body[^>]*>)', r'\1', template)
 
-    # 3. Zoom -> add toggle
-    offline_toggle = """
-        <button id="offline-mode-btn" onclick="toggleOfflineMode()" class="flex items-center gap-2 px-2 py-1 rounded-full bg-[#18181b] border border-emerald-700">
-          <span id="offline-mode-label" class="text-[9px] font-bold uppercase tracking-widest text-emerald-300">Online</span>
-          <span id="offline-mode-track" class="relative inline-flex w-9 h-5 rounded-full bg-emerald-900/50 border border-emerald-700/60">
-            <span id="offline-mode-knob" class="absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-emerald-400 transition-transform"></span>
-          </span>
-        </button>
-    """
-    template = re.sub(r'(class=\"w-12 accent-emerald-500\"[^>]*oninput=\"changeZoom\(this\.value\)\">.*?</div>)', r'\1 ' + offline_toggle, template, flags=re.DOTALL)
+    # 3. Zoom -> add toggle (REMOVED: Now handled exclusively in sidebar)
+    # template = re.sub(r'(class=\"w-12 accent-emerald-500\"[^>]*oninput=\"changeZoom\(this\.value\)\">.*?</div>)', r'\1 ' + offline_toggle, template, flags=re.DOTALL)
 
-    # 4. Mobile search + Wifi Toggle
-    mobile_btn = """
-            <button id="offline-mode-btn-mobile" onclick="toggleOfflineMode()" class="shrink-0 flex items-center gap-1.5 px-2 py-2 rounded-lg bg-[#18181b] border border-emerald-700 transition-all">
-                <i id="offline-icon-mobile" class="fa-solid fa-wifi text-emerald-400 text-xs"></i>
-                <span id="offline-mode-track-mobile" class="relative inline-flex w-7 h-4 rounded-full bg-emerald-900/50 border border-emerald-700/60">
-                    <span id="offline-mode-knob-mobile" class="absolute left-0.5 top-0.5 w-3 h-3 rounded-full bg-emerald-400 transition-transform"></span>
-                </span>
-            </button>
-    """
-    template = re.sub(r'(<input type=\"text\" id=\"lib-search-mobile\"[^>]+>)', r'\1 ' + mobile_btn, template, flags=re.DOTALL)
+    # 4. Mobile search + Wifi Toggle (REMOVED: Now handled exclusively in sidebar)
+    # template = re.sub(r'(<input type=\"text\" id=\"lib-search-mobile\"[^>]+>)', r'\1 ' + mobile_btn, template, flags=re.DOTALL)
 
     # 5. Sidebar Nav (Historial -> Offline Files)
     nav_offline = """        <div onclick="ver('offline')" id="nav-offline" class="sidebar-link"><i class="fa-solid fa-download w-4 text-center"></i> Offline Files</div>"""

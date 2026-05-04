@@ -53,70 +53,33 @@ function isOfflineModeEnabled() {
     }
 }
 
-function toggleOfflineMode() {
-    const enabled = isOfflineModeEnabled();
-    setOfflineMode(!enabled);
-}
-
-function setOfflineMode(enabled) {
-    try {
-        localStorage.setItem('kraken-offline-mode', enabled ? '1' : '0');
-    } catch (_) {}
-    updateOfflineModeUi();
-    applyOfflineModeToSw();
+function toggleOfflineMode(e) {
+    if (e) {
+        e.stopPropagation();
+    }
+    
+    const checkbox = document.getElementById('offline-pill-checkbox');
+    if (checkbox) {
+        setOfflineMode(checkbox.checked);
+    }
 }
 
 function updateOfflineModeUi() {
-    // Desktop elements
-    const label = document.getElementById('offline-mode-label');
-    const track = document.getElementById('offline-mode-track');
-    const knob = document.getElementById('offline-mode-knob');
-    const btn = document.getElementById('offline-mode-btn');
-    
-    // Mobile elements
-    const btnMobile = document.getElementById('offline-mode-btn-mobile');
-    const trackMobile = document.getElementById('offline-mode-track-mobile');
-    const knobMobile = document.getElementById('offline-mode-knob-mobile');
-    const iconMobile = document.getElementById('offline-icon-mobile');
-    
+    const checkbox = document.getElementById('offline-pill-checkbox');
+    const statusLabel = document.getElementById('offline-pill-status');
     const enabled = isOfflineModeEnabled();
     
-    // Update desktop toggle
-    if (label && track && knob && btn) {
-        if (enabled) {
-            label.textContent = 'Offline';
-            label.className = 'text-[9px] font-bold uppercase tracking-widest text-red-300';
-            track.className = 'relative inline-flex w-9 h-5 rounded-full bg-red-900/50 border border-red-500/60';
-            knob.className = 'absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-red-400 transition-transform translate-x-4';
-            btn.classList.remove('border-emerald-700');
-            btn.classList.add('border-red-500/60');
-        } else {
-            label.textContent = 'Online';
-            label.className = 'text-[9px] font-bold uppercase tracking-widest text-emerald-300';
-            track.className = 'relative inline-flex w-9 h-5 rounded-full bg-emerald-900/50 border border-emerald-700/60';
-            knob.className = 'absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-emerald-400 transition-transform';
-            btn.classList.remove('border-red-500/60');
-            btn.classList.add('border-emerald-700');
-        }
+    if (checkbox) {
+        checkbox.checked = enabled;
     }
     
-    // Update mobile toggle
-    if (btnMobile && trackMobile && knobMobile && iconMobile) {
-        if (enabled) {
-            iconMobile.className = 'fa-solid fa-wifi-slash text-red-400 text-xs';
-            trackMobile.className = 'relative inline-flex w-7 h-4 rounded-full bg-red-900/50 border border-red-500/60';
-            knobMobile.className = 'absolute left-0.5 top-0.5 w-3 h-3 rounded-full bg-red-400 transition-transform translate-x-3';
-            btnMobile.classList.remove('border-emerald-700');
-            btnMobile.classList.add('border-red-500/60');
-        } else {
-            iconMobile.className = 'fa-solid fa-wifi text-emerald-400 text-xs';
-            trackMobile.className = 'relative inline-flex w-7 h-4 rounded-full bg-emerald-900/50 border border-emerald-700/60';
-            knobMobile.className = 'absolute left-0.5 top-0.5 w-3 h-3 rounded-full bg-emerald-400 transition-transform';
-            btnMobile.classList.remove('border-red-500/60');
-            btnMobile.classList.add('border-emerald-700');
-        }
+    if (statusLabel) {
+        statusLabel.textContent = enabled ? 'Offline' : 'Online';
     }
 }
+window.updateOfflineModeUi = updateOfflineModeUi;
+window.toggleOfflineMode = toggleOfflineMode;
+window.isOfflineModeEnabled = isOfflineModeEnabled;
 
 function applyOfflineModeToSw() {
     const enabled = isOfflineModeEnabled();

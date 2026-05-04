@@ -592,14 +592,14 @@
         /* ========== FILTERS ========== */
         .filter-chip {
             padding: 4px 12px;
-            border-radius: 999px;
+            border-radius: 2px;
             font-size: 10px;
             font-weight: bold;
             cursor: pointer;
             transition: all 0.2s;
             border: 1px solid rgba(255, 255, 255, 0.1);
-            background: rgba(255, 255, 255, 0.05);
-            color: #94a3b8;
+            background: #18181b;
+            color: #a1a1aa;
         }
 
         .filter-chip:hover {
@@ -1445,6 +1445,19 @@
             text-shadow: 0 0 15px rgba(16, 185, 129, 0.8);
         }
 
+        /* Robusto Switch CSS */
+        #offline-pill-checkbox:checked + .pill-bg {
+            background-color: #450a0a !important;
+            border-color: #ef4444 !important;
+        }
+        #offline-pill-checkbox:checked + .pill-bg .pill-dot {
+            transform: translateX(16px);
+            background-color: #ef4444 !important;
+        }
+        #offline-pill-checkbox:checked ~ .pill-text .pill-status {
+            color: #ef4444 !important;
+        }
+
         .clip-kraken-full {
             clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
         }
@@ -1968,7 +1981,37 @@
     </div>
 
     <div id="session-status-bar"
-        class="fixed top-0 left-0 w-full text-center text-[10px] font-bold tracking-widest z-[9999] cursor-pointer hidden transition-all duration-300 shadow-md">
+        class="fixed top-0 left-0 w-full text-center text-[10px] font-bold tracking-widest z-[10000] cursor-pointer hidden transition-all duration-300 shadow-md">
+    </div>
+
+    <!-- ========== TOP BAR (Barra Persistente) ========== -->
+    <div
+        class="fixed top-0 left-0 w-full h-10 bg-[#0a0a0a] border-b border-white/10 z-[500] flex items-center justify-center px-3 md:px-4">
+        <!-- Izquierda: Botón Menú (Global) -->
+        <div class="absolute left-3 flex items-center">
+            <button onclick="toggleSidebar()" class="text-zinc-400 hover:text-white transition">
+                <i class="fa-solid fa-bars text-lg"></i>
+            </button>
+        </div>
+
+        <!-- Centro: Logo con Estética Kraken -->
+        <div class="flex items-center gap-3 select-none">
+            <img src="/assets/kraken.svg" class="h-6 w-6 kraken-neon-filter" alt="Logo">
+            <div class="flex flex-col items-center">
+                <h1
+                    class="text-lg font-black tracking-[0.2em] text-metal leading-none flex items-center gap-0.5 font-sans">
+                    KRAK<span class="kraken-xi text-xl relative -top-px">Ξ</span>N
+                </h1>
+                <span class="text-emerald-500 font-bold tracking-[0.3em] text-[7px] uppercase opacity-80 -mt-0.5">Media
+                    Server</span>
+            </div>
+        </div>
+
+        <!-- Derecha: Status -->
+        <div class="absolute right-3 hidden sm:flex items-center gap-4">
+            <div id="cast-status-top" class="text-[9px] font-bold text-zinc-500 tracking-tighter opacity-40 uppercase">
+                v4.88</div>
+        </div>
     </div>
 
     <div id="top-spacer" class="h-0 transition-all duration-300"></div>
@@ -1998,126 +2041,311 @@
 
         <aside id="main-sidebar"
             class="w-64 bg-noise flex flex-col border-r border-white/5 shrink-0 h-full z-[300] fixed transition-transform duration-300 top-0 left-0">
-            <div class="relative-z h-full flex flex-col">
-                <div class="relative-z h-full flex flex-col">
+            <!-- Espaciador para la barra superior -->
+            <div class="h-10 shrink-0"></div>
 
-                    <div
-                        class="relative bg-[#020202] p-4 border-b border-white/5 flex flex-col items-center justify-center gap-1 overflow-hidden group select-none shadow-lg shrink-0">
-                        <div class="absolute inset-0 opacity-20 bg-[url('/assets/noise.svg')] mix-blend-overlay">
-                        </div>
-                        <div
-                            class="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-emerald-900/20 to-transparent opacity-60">
-                        </div>
+            <div class="relative-z h-full flex flex-col overflow-hidden">
 
-                        <div
-                            class="relative z-10 w-24 h-24 mb-0 transition-transform duration-500 group-hover:scale-105">
-                            <img src="/assets/kraken.svg" class="w-full h-full object-contain kraken-neon-filter"
-                                alt="Kraken">
-                        </div>
-
-                        <div class="relative z-10 text-center flex flex-col items-center">
-                            <h1
-                                class="text-2xl font-black tracking-[0.25em] text-metal leading-none flex items-center gap-1 font-sans ml-1">
-                                KRAK<span class="kraken-xi text-3xl relative -top-0.5">Ξ</span>N
-                            </h1>
-                            <div class="flex items-center gap-2 mt-1 opacity-80">
-                                <span class="text-[9px] font-bold text-emerald-600 tracking-[0.3em]">Servidor
-                                    Multimedia</span>
+                    <div class="flex items-center gap-2 px-3 py-3 border-b border-white/5 bg-black/30 shrink-0">
+                        <!-- Pastilla Toggle (Offline) con Checkbox Robusto -->
+                        <label class="flex-1 flex items-center gap-2.5 cursor-pointer group bg-white/5 hover:bg-white/10 p-2 rounded-lg border border-white/5 transition-all">
+                            <input type="checkbox" id="offline-pill-checkbox" onchange="window.toggleOfflineMode(event)" class="hidden">
+                            <div class="pill-bg w-9 h-5 rounded-full bg-zinc-800 relative transition-all duration-300 border border-white/10 shrink-0">
+                                <div class="pill-dot absolute top-1 left-1 w-3 h-3 rounded-full bg-zinc-500 transition-all duration-300 shadow-sm"></div>
                             </div>
-
+                            <div class="flex flex-col pill-text">
+                                <span class="text-[8px] font-black uppercase tracking-[0.2em] text-zinc-400 group-hover:text-white transition leading-none">Status</span>
+                                <span id="offline-pill-status" class="pill-status text-[10px] font-bold uppercase tracking-widest text-emerald-500 leading-none mt-1">Online</span>
+                            </div>
+                        </label>
+                        
+                        <!-- Grid/List Buttons -->
+                        <div class="flex gap-1 bg-white/5 rounded p-1 border border-white/5 shrink-0">
+                            <button onclick="setView('grid')" class="w-10 h-10 flex items-center justify-center rounded hover:bg-white/10 text-zinc-400 hover:text-white transition" title="Ver como Cuadrícula">
+                                <i class="fa-solid fa-border-all text-sm"></i>
+                            </button>
+                            <button onclick="setView('list')" class="w-10 h-10 flex items-center justify-center rounded hover:bg-white/10 text-zinc-400 hover:text-white transition" title="Ver como Lista">
+                                <i class="fa-solid fa-list text-sm"></i>
+                            </button>
                         </div>
                     </div>
 
-                    <div class="flex border-b border-white/5 shrink-0">
-                        <div onclick="setLibraryMode('audio')" id="tab-audio" class="mode-btn active"><i
-                                class="fa-solid fa-music text-lg block mb-1"></i>MÚSICA</div>
-                        <div onclick="setLibraryMode('video')" id="tab-video" class="mode-btn"><i
-                                class="fa-solid fa-film text-lg block mb-1"></i>VIDEO</div>
+                <div class="flex border-b border-white/5 shrink-0">
+                    <div onclick="setLibraryMode('audio')" id="tab-audio" class="mode-btn active"><i
+                            class="fa-solid fa-music text-lg block mb-1"></i>MÚSICA</div>
+                    <div onclick="setLibraryMode('video')" id="tab-video" class="mode-btn"><i
+                            class="fa-solid fa-film text-lg block mb-1"></i>VIDEO</div>
+                </div>
+
+                <nav class="px-4 space-y-1 mt-4 shrink-0">
+                    <div onclick="enterMainLibrary()" id="nav-library" class="sidebar-link active"><i
+                            class="fa-solid fa-layer-group w-4 text-center"></i> Biblioteca</div>
+                    <div onclick="enterNerdLibrary()" id="nav-nerd" class="sidebar-link"><i
+                            class="fa-solid fa-gamepad w-4 text-center"></i> OST Nerd</div>
+                    <div onclick="ver('downloader')" id="nav-downloader" class="sidebar-link"><i
+                            class="fa-solid fa-cloud-arrow-down w-4 text-center"></i> Descargar</div>
+                    <div onclick="ver('history')" id="nav-history" class="sidebar-link hover:text-yellow-400"><i
+                            class="fa-solid fa-clock-rotate-left w-4 text-center"></i> Historial</div>
+                </nav>
+
+                <div id="sidebar-filters" class="flex-1 flex flex-col min-h-0 px-4 mt-0 pb-2">
+
+                    <div class="accordion-header group shrink-0" onclick="toggleAcc('acc-playlists')">
+                        <span class="group-hover:text-emerald-400 transition">MIS PLAYLISTS</span>
+                        <i class="fa-solid fa-chevron-down text-[12px] transition-transform duration-300"
+                            id="icon-acc-playlists"></i>
                     </div>
 
-                    <nav class="px-4 space-y-1 mt-4 shrink-0">
-                        <div onclick="enterMainLibrary()" id="nav-library" class="sidebar-link active"><i
-                                class="fa-solid fa-layer-group w-4 text-center"></i> Biblioteca</div>
-                        <div onclick="enterNerdLibrary()" id="nav-nerd" class="sidebar-link"><i
-                                class="fa-solid fa-gamepad w-4 text-center"></i> OST Nerd</div>
-                        <div onclick="ver('downloader')" id="nav-downloader" class="sidebar-link"><i
-                                class="fa-solid fa-cloud-arrow-down w-4 text-center"></i> Descargar</div>
-                        <div onclick="ver('history')" id="nav-history" class="sidebar-link hover:text-yellow-400"><i
-                                class="fa-solid fa-clock-rotate-left w-4 text-center"></i> Historial</div>
-                    </nav>
-
-                    <div id="sidebar-filters" class="flex-1 flex flex-col min-h-0 px-4 mt-0 pb-2">
-
-                        <div class="accordion-header group shrink-0" onclick="toggleAcc('acc-playlists')">
-                            <span class="group-hover:text-emerald-400 transition">MIS PLAYLISTS</span>
-                            <i class="fa-solid fa-chevron-down text-[12px] transition-transform duration-300"
-                                id="icon-acc-playlists"></i>
+                    <div id="acc-playlists" class="show pl-1 mt-2 flex-1 flex flex-col min-h-0">
+                        <div class="flex gap-2 shrink-0 mb-2">
+                            <div onclick="crearPlaylist()"
+                                class="sidebar-link text-[11px] text-emerald-500 py-2 border border-dashed border-emerald-500/50 hover:bg-emerald-500/10 justify-center flex-1">
+                                <i class="fa-solid fa-plus-circle"></i> Nueva
+                            </div>
+                            <div onclick="importPlaylistModal()"
+                                class="sidebar-link text-[11px] text-cyan-400 py-2 border border-dashed border-cyan-500/50 hover:bg-cyan-500/10 justify-center flex-1">
+                                <i class="fa-solid fa-download"></i> Importar
+                            </div>
                         </div>
-
-                        <div id="acc-playlists" class="show pl-1 mt-2 flex-1 flex flex-col min-h-0">
-                            <div class="flex gap-2 shrink-0 mb-2">
-                                <div onclick="crearPlaylist()"
-                                    class="sidebar-link text-[11px] text-emerald-500 py-2 border border-dashed border-emerald-500/50 hover:bg-emerald-500/10 justify-center flex-1">
-                                    <i class="fa-solid fa-plus-circle"></i> Nueva
-                                </div>
-                                <div onclick="importPlaylistModal()"
-                                    class="sidebar-link text-[11px] text-cyan-400 py-2 border border-dashed border-cyan-500/50 hover:bg-cyan-500/10 justify-center flex-1">
-                                    <i class="fa-solid fa-download"></i> Importar
-                                </div>
-                            </div>
-                            <div id="list-playlists-container"
-                                class="flex-1 overflow-y-auto custom-scroll pr-2 space-y-1">
-                            </div>
+                        <div id="list-playlists-container" class="flex-1 overflow-y-auto custom-scroll pr-2 space-y-1">
                         </div>
                     </div>
+                </div>
 
-                    <div class="mt-auto bg-[#080808] border-t border-white/5 shrink-0">
-                        <div class="px-4 pt-3 pb-4">
-                            <!-- Botones -->
-                            <div class="flex gap-2 mb-0" id="rescan-buttons-row">
-                                <button onclick="rescanLibrary()" id="btn-rescan"
-                                    class="flex-1 bg-emerald-900/10 hover:bg-emerald-600 border border-emerald-500/20 hover:border-emerald-500 text-emerald-500 hover:text-white transition-all duration-300 py-2 rounded-md text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 group shadow-[0_0_10px_rgba(0,0,0,0.5)]">
-                                    <i
-                                        class="fa-solid fa-rotate group-hover:rotate-180 transition-transform duration-500"></i>
-                                    <span>Sincronizar</span>
-                                </button>
-                                <button onclick="showSettingsPanel()" id="btn-settings" title="Configuración"
-                                    class="bg-zinc-800/50 hover:bg-zinc-700 border border-white/10 hover:border-white/20 text-zinc-400 hover:text-white transition-all duration-300 p-2 rounded-md shadow-[0_0_10px_rgba(0,0,0,0.5)]">
-                                    <i class="fa-solid fa-gear text-sm"></i>
-                                </button>
+                <div class="mt-auto bg-[#080808] border-t border-white/5 shrink-0">
+                    <div class="px-4 pt-3 pb-4">
+                        <!-- Botones -->
+                        <div class="flex gap-2 mb-0" id="rescan-buttons-row">
+                            <button onclick="rescanLibrary()" id="btn-rescan"
+                                class="flex-1 bg-emerald-900/10 hover:bg-emerald-600 border border-emerald-500/20 hover:border-emerald-500 text-emerald-500 hover:text-white transition-all duration-300 py-2 rounded-md text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 group shadow-[0_0_10px_rgba(0,0,0,0.5)]">
+                                <i
+                                    class="fa-solid fa-rotate group-hover:rotate-180 transition-transform duration-500"></i>
+                                <span>Sincronizar</span>
+                            </button>
+                            <button onclick="showSettingsPanel()" id="btn-settings" title="Configuración"
+                                class="bg-zinc-800/50 hover:bg-zinc-700 border border-white/10 hover:border-white/20 text-zinc-400 hover:text-white transition-all duration-300 p-2 rounded-md shadow-[0_0_10px_rgba(0,0,0,0.5)]">
+                                <i class="fa-solid fa-gear text-sm"></i>
+                            </button>
+                        </div>
+
+                        <!-- Barra de progreso del escaneo -->
+                        <div id="rescan-progress-container" class="hidden w-full mt-4">
+                            <div class="flex justify-between items-center text-[11px] text-emerald-400 mb-2">
+                                <span id="rescan-stage-text" class="font-medium tracking-wide">Contando
+                                    archivos...</span>
+                                <span id="rescan-percent-text" class="font-bold">0%</span>
                             </div>
-
-                            <!-- Barra de progreso del escaneo -->
-                            <div id="rescan-progress-container" class="hidden w-full mt-4">
-                                <div class="flex justify-between items-center text-[11px] text-emerald-400 mb-2">
-                                    <span id="rescan-stage-text" class="font-medium tracking-wide">Contando
-                                        archivos...</span>
-                                    <span id="rescan-percent-text" class="font-bold">0%</span>
-                                </div>
-                                <div
-                                    class="w-full h-3 bg-gray-800/80 rounded-lg overflow-hidden border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.15)]">
-                                    <div id="rescan-progress-bar"
-                                        class="h-full bg-gradient-to-r from-emerald-600 via-emerald-400 to-emerald-500 transition-all duration-500 rounded-lg relative"
-                                        style="width: 0%">
-                                        <div
-                                            class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-shimmer">
-                                        </div>
+                            <div
+                                class="w-full h-3 bg-gray-800/80 rounded-lg overflow-hidden border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.15)]">
+                                <div id="rescan-progress-bar"
+                                    class="h-full bg-gradient-to-r from-emerald-600 via-emerald-400 to-emerald-500 transition-all duration-500 rounded-lg relative"
+                                    style="width: 0%">
+                                    <div
+                                        class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-shimmer">
                                     </div>
                                 </div>
-                                <div id="rescan-message" class="text-[10px] text-gray-500 mt-2 text-center"></div>
                             </div>
+                            <div id="rescan-message" class="text-[10px] text-gray-500 mt-2 text-center"></div>
                         </div>
                     </div>
                 </div>
-                <div class="p-4 border-t border-emerald-900/20 bg-[#080808] relative overflow-hidden group">
-                </div>
+            </div>
+            <div class="p-4 border-t border-emerald-900/20 bg-[#080808] relative overflow-hidden group">
             </div>
     </div>
     </aside>
     <div id="sidebar-backdrop" onclick="closeSidebar()"></div>
 
     <main
-        class="flex-1 flex flex-col h-full relative bg-gradient-to-br from-[#18181b] via-[#09090b] to-black overflow-hidden">
+        class="flex-1 flex flex-col h-full relative bg-gradient-to-br from-[#18181b] via-[#09090b] to-black overflow-hidden mt-10">
+        <!-- ========== MÓVIL: HEADER SUPERIOR GLOBAL ========== -->
+        <div id="mobile-header"
+            class="md:hidden bg-[#111111]/98 backdrop-blur-xl z-40 border-b border-white/5 shadow-xl shrink-0">
+            <!-- FILA 1: Hamburguesa | Título | Play -->
+            <div class="flex items-center gap-4 px-3 py-2">
+                <div class="flex-1 min-w-0 pl-1">
+                    <div class="text-[9px] font-bold text-emerald-500 uppercase tracking-widest flex items-center gap-1"
+                        id="lib-mode-label-mobile">
+                        <i class="fa-solid fa-music"></i> MÚSICA
+                    </div>
+                    <h2 class="text-sm font-bold text-white leading-tight truncate" id="lib-title-mobile">Mi Colección
+                    </h2>
+                </div>
+                <button onclick="playContext()"
+                    class="w-9 h-9 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition flex items-center justify-center shrink-0 shadow-lg">
+                    <i class="fa-solid fa-play text-xs ml-0.5"></i>
+                </button>
+            </div>
+
+            <!-- FILA 2: Búsqueda + Select + Sort -->
+            <div class="flex items-center gap-1.5 px-3 pb-2">
+                <div class="relative flex-1">
+                    <i class="fa-solid fa-search absolute left-3 top-2.5 text-emerald-500 text-xs"></i>
+                    <input type="text" id="lib-search-mobile" onkeyup="renderLib()" placeholder="Buscar..."
+                        class="w-full bg-[#18181b] border border-emerald-700 rounded-lg py-2 pl-9 pr-3 text-xs outline-none focus:border-emerald-500 text-white">
+                </div>
+                <div class="relative shrink-0">
+                    <button onclick="toggleSortMenuMobile()"
+                        class="filter-chip text-[9px] flex items-center gap-1 h-[34px]">
+                        <i class="fa-solid fa-arrow-down-wide-short"></i>
+                    </button>
+                    <div id="sort-menu-mobile"
+                        class="hidden absolute right-0 top-full mt-2 w-44 bg-[#0a0a0a] border border-white/10 rounded-xl shadow-2xl z-50 p-2 text-xs">
+                        <button onclick="setSortMobile('new')"
+                            class="w-full text-left px-3 py-2 rounded hover:bg-white/10">⭐ Novedades</button>
+                        <button onclick="setSortMobile('top')"
+                            class="w-full text-left px-3 py-2 rounded hover:bg-white/10">🔥 Top</button>
+                        <button onclick="setSortMobile('recent')"
+                            class="w-full text-left px-3 py-2 rounded hover:bg-white/10">🕒 Recientes</button>
+                        <button onclick="setSortMobile('az')"
+                            class="w-full text-left px-3 py-2 rounded hover:bg-white/10">🔤 A–Z</button>
+                        <button onclick="setSortMobile('artist')"
+                            class="w-full text-left px-3 py-2 rounded hover:bg-white/10">🎤 Artista</button>
+                    </div>
+                </div>
+                <button onclick="toggleSelectionMode()" id="btn-select-mode-mobile"
+                    class="w-9 h-9 rounded-lg bg-[#18181b] border border-emerald-700 text-emerald-300 flex items-center justify-center shrink-0">
+                    <i class="fa-regular fa-square-check text-xs"></i>
+                </button>
+                <button onclick="selectAllVisible()" id="btn-select-all-vis-mobile"
+                    class="hidden w-9 h-9 rounded-lg bg-[#18181b] border border-dashed border-emerald-700 text-emerald-300 flex items-center justify-center shrink-0">
+                    <i class="fa-solid fa-check-double text-xs"></i>
+                </button>
+            </div>
+
+            <!-- FILA 3: Tabs de scope (scroll horizontal) -->
+            <div class="px-3 pb-2 overflow-x-auto no-scrollbar">
+                <div
+                    class="flex gap-4 text-[10px] font-bold text-zinc-400 border-b border-emerald-900/50 w-max min-w-full">
+                    <button id="tab-search-mob-all" onclick="setSearchScope('all')"
+                        class="pb-2 border-b-2 border-transparent hover:text-emerald-400 flex items-center gap-1 transition whitespace-nowrap">
+                        <i class="fa-solid fa-globe"></i> Todo
+                    </button>
+                    <button id="tab-search-mob-tracks" onclick="setSearchScope('tracks')"
+                        class="pb-2 border-b-2 border-emerald-500 text-emerald-400 flex items-center gap-1 transition whitespace-nowrap">
+                        <i class="fa-solid fa-music"></i> Tracks
+                    </button>
+                    <button id="tab-search-mob-albums" onclick="setSearchScope('albums')"
+                        class="pb-2 border-b-2 border-transparent hover:text-emerald-400 flex items-center gap-1 transition whitespace-nowrap">
+                        <i class="fa-solid fa-compact-disc"></i> Albums
+                    </button>
+                    <button id="tab-search-mob-artists" onclick="setSearchScope('artists')"
+                        class="pb-2 border-b-2 border-transparent hover:text-emerald-400 flex items-center gap-1 transition whitespace-nowrap">
+                        <i class="fa-solid fa-user"></i> Artists
+                    </button>
+                    <button id="tab-search-mob-playlists" onclick="setSearchScope('playlists')"
+                        class="pb-2 border-b-2 border-transparent hover:text-emerald-400 flex items-center gap-1 transition whitespace-nowrap">
+                        <i class="fa-solid fa-list"></i> Playlists
+                    </button>
+                </div>
+            </div>
+            <div id="video-pills-row-mobile" class="hidden flex-wrap items-center gap-1.5 px-3 pb-2"></div>
+            <div id="mobile-controls-row" class="hidden"></div>
+        </div>
+
+        <!-- ========== DESKTOP: HEADER GLOBAL ========== -->
+        <div id="desktop-header"
+            class="hidden md:flex bg-[#111111]/98 backdrop-blur-xl p-3 z-40 border-b border-white/5 shadow-2xl flex-col gap-2 shrink-0">
+            <div class="flex items-center justify-between">
+                <div class="min-w-[200px] shrink-0 flex items-center gap-5 pl-4">
+                    <div>
+                        <div class="text-[9px] font-bold text-emerald-500 uppercase tracking-widest flex items-center gap-1"
+                            id="lib-mode-label-desktop">
+                            <i class="fa-solid fa-music"></i> MÚSICA
+                        </div>
+                        <h2 class="text-xl font-bold text-white leading-none truncate" id="lib-title-desktop">Mi
+                            Colección</h2>
+                    </div>
+                </div>
+
+                <div class="flex-1 flex justify-center px-4">
+                    <div
+                        class="flex gap-4 px-1 text-[11px] font-bold text-zinc-400 mt-1 border-b border-emerald-900/50 pb-0 shrink-0">
+                        <button id="tab-search-dsktp-all" onclick="setSearchScope('all')"
+                            class="pb-2 border-b-2 border-transparent hover:text-emerald-400 flex items-center gap-1.5 transition whitespace-nowrap">
+                            <i class="fa-solid fa-globe text-[10px]"></i> Todo
+                        </button>
+                        <button id="tab-search-dsktp-tracks" onclick="setSearchScope('tracks')"
+                            class="pb-2 border-b-2 border-emerald-500 text-emerald-400 flex items-center gap-1.5 transition whitespace-nowrap">
+                            <i class="fa-solid fa-music text-[10px]"></i> Tracks
+                        </button>
+                        <button id="tab-search-dsktp-albums" onclick="setSearchScope('albums')"
+                            class="pb-2 border-b-2 border-transparent hover:text-emerald-400 flex items-center gap-1.5 transition whitespace-nowrap">
+                            <i class="fa-solid fa-compact-disc text-[10px]"></i> Albums
+                        </button>
+                        <button id="tab-search-dsktp-artists" onclick="setSearchScope('artists')"
+                            class="pb-2 border-b-2 border-transparent hover:text-emerald-400 flex items-center gap-1.5 transition whitespace-nowrap">
+                            <i class="fa-solid fa-user text-[10px]"></i> Artists
+                        </button>
+                        <button id="tab-search-dsktp-playlists" onclick="setSearchScope('playlists')"
+                            class="pb-2 border-b-2 border-transparent hover:text-emerald-400 flex items-center gap-1.5 transition whitespace-nowrap">
+                            <i class="fa-solid fa-list text-[10px]"></i> Playlists
+                        </button>
+                    </div>
+                </div>
+
+                <div id="lib-zoom-controls"
+                    class="flex items-center gap-2 bg-[#18181b] px-3 py-1.5 rounded-sm border border-emerald-700 shrink-0">
+                    <i class="fa-solid fa-magnifying-glass text-[10px] text-emerald-400"></i>
+                    <input type="range" min="0" max="2" value="0" class="w-12 accent-emerald-500"
+                        oninput="changeZoom(this.value)">
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-1.5 px-2">
+                <div class="flex items-center gap-2">
+                    <div class="relative flex-1">
+                        <i class="fa-solid fa-search absolute left-3 top-2.5 text-emerald-500 text-xs"></i>
+                        <input type="text" id="lib-search-desktop" onkeyup="renderLib()" placeholder="Buscar..."
+                            class="w-full bg-[#18181b] border border-emerald-700 rounded-sm py-2 pl-9 pr-4 text-xs outline-none focus:border-emerald-500 text-white">
+                    </div>
+
+                    <div id="audio-actions-header" class="hidden gap-2 shrink-0"></div>
+                </div>
+                <div id="video-pills-row" class="hidden flex flex-wrap items-center gap-2 pb-1"></div>
+            </div>
+
+            <div id="desktop-actions-row" class="flex items-center gap-2 relative px-2">
+                <div class="relative shrink-0">
+                    <button onclick="toggleSortMenuDesktop()" class="filter-chip flex items-center gap-1">
+                        <i class="fa-solid fa-arrow-down-wide-short"></i> Ordenar
+                    </button>
+                    <div id="sort-menu-desktop"
+                        class="hidden absolute top-full left-0 mt-2 w-48 bg-[#0a0a0a] border border-white/10 rounded shadow-2xl z-50 p-2 text-xs">
+                        <button onclick="setSortDesktop('new')"
+                            class="w-full text-left px-3 py-2 rounded-sm hover:bg-white/10">⭐ Novedades</button>
+                        <button onclick="setSortDesktop('top')"
+                            class="w-full text-left px-3 py-2 rounded-sm hover:bg-white/10">🔥 Top</button>
+                        <button onclick="setSortDesktop('recent')"
+                            class="w-full text-left px-3 py-2 rounded-sm hover:bg-white/10">🕒 Recientes</button>
+                        <button onclick="setSortDesktop('az')"
+                            class="w-full text-left px-3 py-2 rounded-sm hover:bg-white/10">🔤 A–Z</button>
+                        <button onclick="setSortDesktop('artist')"
+                            class="w-full text-left px-3 py-2 rounded-sm hover:bg-white/10">🎤 Artista</button>
+                    </div>
+                </div>
+
+                <div id="desktop-selection-controls" class="flex items-center gap-2 shrink-0">
+                    <button onclick="toggleSelectionMode()" id="btn-select-mode" class="filter-chip">
+                        <i class="fa-regular fa-square-check mr-1"></i> Select
+                    </button>
+                    <button onclick="selectAllVisible()" id="btn-select-all-vis"
+                        class="filter-chip hidden border-dashed">
+                        <i class="fa-solid fa-check-double mr-1"></i> Todos
+                    </button>
+                </div>
+
+                <div class="flex-1"></div>
+
+                <button onclick="playContext()"
+                    class="filter-chip shrink-0 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/15">
+                    <i class="fa-solid fa-play mr-1"></i> Play All
+                </button>
+                <div id="desktop-selection-anchor" class="hidden"></div>
+            </div>
+        </div>
+
+
 
         <div class="flex-1 overflow-y-auto p-6 scroll-smooth" id="main-scroll">
 
@@ -2394,240 +2622,7 @@
                     <!-- Contenedor de estadísticas -->
                     <div id="lib-stats" class="hidden md:grid grid-cols-2 sm:grid-cols-4 gap-2 md:gap-3"></div>
                 </div>
-                <!-- ========== MÓVIL: HEADER SUPERIOR ========== -->
-                <div id="mobile-header"
-                    class="md:hidden sticky top-0 bg-[#171717]/95 backdrop-blur-md z-40 border-b border-white/5 shadow-xl">
-
-                    <!-- FILA 1: Título -->
-                    <div class="text-center py-2 px-3 border-t border-white/5">
-                        <div class="text-[10px] font-bold text-emerald-500 uppercase tracking-widest flex items-center justify-center gap-1"
-                            id="lib-mode-label-mobile">
-                            <i class="fa-solid fa-music"></i> MÚSICA
-                        </div>
-                        <h2 class="text-sm font-bold text-white leading-tight mt-1" id="lib-title-mobile">Mi Colección
-                        </h2>
-                    </div>
-
-                    <!-- FILA 2: Menú / Play / Select -->
-                    <div class="flex gap-2 px-3 py-2">
-                        <button onclick="toggleSidebar()"
-                            class="flex-1 bg-[#18181b] hover:bg-emerald-700 border border-emerald-700 text-white rounded-lg py-2.5 font-bold text-xs transition flex items-center justify-center gap-2">
-                            <i class="fa-solid fa-bars"></i>
-                            <span class="hidden sm:inline">Menú</span>
-                        </button>
-
-                        <button onclick="playContext()"
-                            class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg py-2.5 font-bold text-xs transition shadow-lg flex items-center justify-center gap-2">
-                            <i class="fa-solid fa-play ml-0.5"></i>
-                            <span class="hidden sm:inline">Play</span>
-                        </button>
-
-                        <button onclick="toggleSelectionMode()" id="btn-select-mode-mobile"
-                            class="flex-1 bg-[#18181b] hover:bg-emerald-700 border border-emerald-700 text-emerald-300 rounded-lg py-2.5 font-bold text-xs transition flex items-center justify-center gap-2">
-                            <i class="fa-regular fa-square-check"></i>
-                            <span class="hidden sm:inline">Sel</span>
-                        </button>
-                        <button onclick="selectAllVisible()" id="btn-select-all-vis-mobile" class="hidden flex-1 bg-[#18181b] hover:bg-emerald-700 border border-dashed
-               border-emerald-700 text-emerald-300 rounded-lg py-2.5 font-bold text-xs
-               transition flex items-center justify-center gap-2">
-                            <i class="fa-solid fa-check-double"></i>
-                            <span class="hidden sm:inline">Todos</span>
-                        </button>
-                    </div>
-
-                    <!-- FILA 3: Búsqueda -->
-                    <div class="px-3 pb-2">
-                        <div class="relative">
-                            <i class="fa-solid fa-search absolute left-3 top-2.5 text-emerald-500 text-xs"></i>
-                            <input type="text" id="lib-search-mobile" onkeyup="renderLib()" placeholder="Buscar..."
-                                class="w-full bg-[#18181b] border border-emerald-700 rounded-lg py-2 pl-9 pr-3 text-xs outline-none focus:border-emerald-500 text-white">
-                        </div>
-                    </div>
-
-                    <!-- FILA VIDEO MOBILE: Pills de filtros (Solo visible en modo video) -->
-                    <div id="video-pills-row-mobile" class="hidden flex-wrap items-center gap-1.5 px-3 pb-2"></div>
-
-                    <!-- FILA 4: Ordenar + Vista -->
-                    <div id="mobile-controls-row" class="px-3 pb-2 flex gap-2 items-center relative">
-                        <button onclick="toggleSortMenuMobile()"
-                            class="filter-chip shrink-0 text-[9px] flex items-center gap-1">
-                            <i class="fa-solid fa-arrow-down-wide-short"></i> Ordenar
-                        </button>
-
-                        <!-- NUEVOS TABS DE BÚSQUEDA (SCOPE) -->
-                        <div
-                            class="flex gap-4 px-1 text-[11px] font-bold text-zinc-400 mt-2 border-b border-emerald-900/50 pb-0 mx-0 overflow-x-auto no-scrollbar">
-                            <button id="tab-search-mob-all" onclick="setSearchScope('all')"
-                                class="pb-2 border-b-2 border-transparent hover:text-emerald-400 flex items-center gap-1.5 transition whitespace-nowrap">
-                                <i class="fa-solid fa-globe"></i> Todo
-                            </button>
-                            <button id="tab-search-mob-tracks" onclick="setSearchScope('tracks')"
-                                class="pb-2 border-b-2 border-emerald-500 text-emerald-400 flex items-center gap-1.5 transition whitespace-nowrap">
-                                <i class="fa-solid fa-music"></i> Tracks
-                            </button>
-                            <button id="tab-search-mob-albums" onclick="setSearchScope('albums')"
-                                class="pb-2 border-b-2 border-transparent hover:text-emerald-400 flex items-center gap-1.5 transition whitespace-nowrap">
-                                <i class="fa-solid fa-compact-disc"></i> Albums
-                            </button>
-                            <button id="tab-search-mob-artists" onclick="setSearchScope('artists')"
-                                class="pb-2 border-b-2 border-transparent hover:text-emerald-400 flex items-center gap-1.5 transition whitespace-nowrap">
-                                <i class="fa-solid fa-user"></i> Artists
-                            </button>
-                            <button id="tab-search-mob-playlists" onclick="setSearchScope('playlists')"
-                                class="pb-2 border-b-2 border-transparent hover:text-emerald-400 flex items-center gap-1.5 transition whitespace-nowrap">
-                                <i class="fa-solid fa-list"></i> Playlists
-                            </button>
-                        </div>
-
-                        <div class="flex-1"></div>
-
-                        <button onclick="setView('grid')" id="view-grid-mobile" class="btn-view shrink-0" title="Grid">
-                            <i class="fa-solid fa-border-all text-xs"></i>
-                        </button>
-                        <button onclick="setView('list')" id="view-list-mobile" class="btn-view shrink-0" title="List">
-                            <i class="fa-solid fa-list text-xs"></i>
-                        </button>
-
-                        <!-- Menú flotante móvil -->
-                        <div id="sort-menu-mobile"
-                            class="hidden absolute left-3 right-3 top-full mt-2 bg-[#0a0a0a] border border-white/10 rounded-xl shadow-2xl z-50 p-2 text-xs">
-                            <button onclick="setSortMobile('new')"
-                                class="w-full text-left px-3 py-2 rounded hover:bg-white/10">⭐ Novedades</button>
-                            <button onclick="setSortMobile('top')"
-                                class="w-full text-left px-3 py-2 rounded hover:bg-white/10">🔥 Top</button>
-                            <button onclick="setSortMobile('recent')"
-                                class="w-full text-left px-3 py-2 rounded hover:bg-white/10">🕒 Recientes</button>
-                            <button onclick="setSortMobile('az')"
-                                class="w-full text-left px-3 py-2 rounded hover:bg-white/10">🔤 A–Z</button>
-                            <button onclick="setSortMobile('artist')"
-                                class="w-full text-left px-3 py-2 rounded hover:bg-white/10">🎤 Artista</button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ========== DESKTOP: HEADER ========== -->
-                <div id="desktop-header"
-                    class="hidden md:flex sticky top-0 bg-[#171717]/95 backdrop-blur-md p-2.5 z-40 rounded-xl border border-white/5 shadow-xl mb-3 flex-col gap-2">
-                    <div class="flex items-center justify-between">
-                        <div class="min-w-[150px] shrink-0 flex items-center gap-2">
-                            <button onclick="toggleSidebar()"
-                                class="w-9 h-9 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white transition">
-                                <i class="fa-solid fa-bars"></i>
-                            </button>
-                            <div>
-                                <div class="text-[9px] font-bold text-emerald-500 uppercase tracking-widest flex items-center gap-1"
-                                    id="lib-mode-label-desktop">
-                                    <i class="fa-solid fa-music"></i> MÚSICA
-                                </div>
-                                <h2 class="text-lg md:text-xl font-bold text-white leading-none truncate"
-                                    id="lib-title-desktop">Mi Colección</h2>
-                            </div>
-                        </div>
-
-                        <!-- NUEVOS TABS DE BÚSQUEDA (SCOPE) - ALINEADOS ARRIBA -->
-                        <div class="flex-1 flex justify-center px-4">
-                            <div
-                                class="flex gap-4 px-1 text-[11px] font-bold text-zinc-400 mt-1 border-b border-emerald-900/50 pb-0 shrink-0">
-                                <button id="tab-search-dsktp-all" onclick="setSearchScope('all')"
-                                    class="pb-2 border-b-2 border-transparent hover:text-emerald-400 flex items-center gap-1.5 transition whitespace-nowrap">
-                                    <i class="fa-solid fa-globe text-[10px]"></i> Todo
-                                </button>
-                                <button id="tab-search-dsktp-tracks" onclick="setSearchScope('tracks')"
-                                    class="pb-2 border-b-2 border-emerald-500 text-emerald-400 flex items-center gap-1.5 transition whitespace-nowrap">
-                                    <i class="fa-solid fa-music text-[10px]"></i> Tracks
-                                </button>
-                                <button id="tab-search-dsktp-albums" onclick="setSearchScope('albums')"
-                                    class="pb-2 border-b-2 border-transparent hover:text-emerald-400 flex items-center gap-1.5 transition whitespace-nowrap">
-                                    <i class="fa-solid fa-compact-disc text-[10px]"></i> Albums
-                                </button>
-                                <button id="tab-search-dsktp-artists" onclick="setSearchScope('artists')"
-                                    class="pb-2 border-b-2 border-transparent hover:text-emerald-400 flex items-center gap-1.5 transition whitespace-nowrap">
-                                    <i class="fa-solid fa-user text-[10px]"></i> Artists
-                                </button>
-                                <button id="tab-search-dsktp-playlists" onclick="setSearchScope('playlists')"
-                                    class="pb-2 border-b-2 border-transparent hover:text-emerald-400 flex items-center gap-1.5 transition whitespace-nowrap">
-                                    <i class="fa-solid fa-list text-[10px]"></i> Playlists
-                                </button>
-                            </div>
-                        </div>
-
-                        <div id="lib-zoom-controls"
-                            class="flex items-center gap-2 bg-[#18181b] px-3 py-1.5 rounded-lg border border-emerald-700 shrink-0">
-                            <i class="fa-solid fa-magnifying-glass text-[10px] text-emerald-400"></i>
-                            <input type="range" min="0" max="2" value="0" class="w-12 accent-emerald-500"
-                                oninput="changeZoom(this.value)">
-
-                        </div>
-                    </div>
-
-                    <!-- UNIFIED SEARCH + ACTIONS ROW -->
-                    <div class="flex flex-col gap-1.5">
-                        <div class="flex items-center gap-2">
-                            <!-- Buscador Universal -->
-                            <div class="relative flex-1">
-                                <i class="fa-solid fa-search absolute left-3 top-2.5 text-emerald-500 text-xs"></i>
-                                <input type="text" id="lib-search-desktop" onkeyup="renderLib()" placeholder="Buscar..."
-                                    class="w-full bg-[#18181b] border border-emerald-700 rounded-lg py-2 pl-9 pr-4 text-xs outline-none focus:border-emerald-500 text-white">
-                            </div>
-
-                            <!-- Controles de Vista Audio (Grid/List) -->
-                            <div id="audio-view-controls"
-                                class="bg-[#18181b] rounded-lg p-1 border border-emerald-700 flex items-center shrink-0">
-                                <button onclick="setView('grid')" id="view-grid" class="btn-view"><i
-                                        class="fa-solid fa-border-all text-sm"></i></button>
-                                <div class="w-px h-4 bg-emerald-600 mx-1"></div>
-                                <button onclick="setView('list')" id="view-list" class="btn-view"><i
-                                        class="fa-solid fa-list text-sm"></i></button>
-                            </div>
-
-                            <!-- Botones Select/Todos (Movidos aquí para que no estorben en video) -->
-                            <div id="audio-actions-header" class="hidden gap-2 shrink-0"></div>
-                        </div>
-
-                        <!-- FILA VIDEO: Pills de filtros (Solo visible en modo video) -->
-                        <div id="video-pills-row" class="hidden flex flex-wrap items-center gap-2 pb-1"></div>
-                    </div>
-
-                    <div id="desktop-actions-row" class="flex items-center gap-2 relative">
-                        <button onclick="toggleSortMenuDesktop()" class="filter-chip shrink-0 flex items-center gap-1">
-                            <i class="fa-solid fa-arrow-down-wide-short"></i> Ordenar
-                        </button>
-
-
-
-                        <button onclick="playContext()" class="filter-chip shrink-0">
-                            <i class="fa-solid fa-play mr-1"></i> Play All
-                        </button>
-
-                        <div id="desktop-selection-anchor" class="shrink-0">
-                            <div id="desktop-selection-controls" class="flex items-center gap-2">
-                                <button onclick="toggleSelectionMode()" id="btn-select-mode"
-                                    class="filter-chip shrink-0">
-                                    <i class="fa-regular fa-square-check mr-1"></i> Select
-                                </button>
-                                <button onclick="selectAllVisible()" id="btn-select-all-vis"
-                                    class="filter-chip hidden border-dashed shrink-0">
-                                    <i class="fa-solid fa-check-double mr-1"></i> Todos
-                                </button>
-                            </div>
-                        </div>
-
-
-                        <div id="sort-menu-desktop"
-                            class="hidden absolute top-full left-0 mt-2 w-56 bg-[#0a0a0a] border border-white/10 rounded-xl shadow-2xl z-50 p-2 text-xs">
-                            <button onclick="setSortDesktop('new')"
-                                class="w-full text-left px-3 py-2 rounded hover:bg-white/10">⭐ Novedades</button>
-                            <button onclick="setSortDesktop('top')"
-                                class="w-full text-left px-3 py-2 rounded hover:bg-white/10">🔥 Top</button>
-                            <button onclick="setSortDesktop('recent')"
-                                class="w-full text-left px-3 py-2 rounded hover:bg-white/10">🕒 Recientes</button>
-                            <button onclick="setSortDesktop('az')"
-                                class="w-full text-left px-3 py-2 rounded hover:bg-white/10">🔤 A–Z</button>
-                            <button onclick="setSortDesktop('artist')"
-                                class="w-full text-left px-3 py-2 rounded hover:bg-white/10">🎤 Artista</button>
-                        </div>
-                    </div>
-                </div>
+                <!-- HEADERS REMOVED: Migrated to global main container for persistent layout across views -->
 
 
                 <!-- CAMBIOS EN LOS SMART MIXES (MÁS COMPACTOS EN MÓVIL) -->
