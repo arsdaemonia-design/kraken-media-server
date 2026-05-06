@@ -254,9 +254,8 @@ class HLSTranscoder:
         hls_mode = (hls_mode or "stream").strip().lower()
         hls_args = [
             "-f", "hls",
-            "-hls_time", "2",
-            "-hls_list_size", "4",
-            "-hls_flags", "delete_segments+append_list", # 🔧 ¡IMPORTANTE! Activa 'delete_segments' 
+            "-hls_time", "6",
+            "-hls_list_size", "0",
         ]
         if hls_mode == "vod":
             hls_args += [
