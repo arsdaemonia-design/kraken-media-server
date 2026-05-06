@@ -434,7 +434,7 @@ def generar_biblioteca_viva(owner_email='public'):
         SELECT id, rel_path, filename, folder, full_folder, media_type,
                title, artist, album, genre, duration_sec, size_bytes, date_added,
                rating, play_count, last_played, language, folder_type, tmdb_id,
-               tmdb_title, tmdb_year, tmdb_genres, tmdb_poster, tmdb_rating
+               tmdb_title, tmdb_year, tmdb_genres, tmdb_poster, tmdb_rating, is_adult
         FROM media
         ORDER BY folder, title
     ''')
@@ -503,7 +503,8 @@ def generar_biblioteca_viva(owner_email='public'):
         'tmdb_year': row['tmdb_year'],
         'tmdb_genres': row['tmdb_genres'],
         'tmdb_poster': row['tmdb_poster'],
-        'tmdb_rating': row['tmdb_rating']
+        'tmdb_rating': row['tmdb_rating'],
+        'is_adult': row['is_adult']
     }
         
         rel_path = f['path']

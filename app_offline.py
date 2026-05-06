@@ -26,8 +26,8 @@ from state import cleanup_inactive_users, cleanup_old_hls_sessions
 from utils import check_ffmpeg
 import alexa_handlers
 
-APP_VERSION = "4.92"
-OFFLINE_VERSION = "4.92"
+APP_VERSION = "4.95"
+OFFLINE_VERSION = "4.95"
 OFFLINE_LIMIT = 500
 GITHUB_REPO = "arsdaemonia-design/kraken-media-server"
 
@@ -207,7 +207,7 @@ def main(open_browser: bool = True):
     if PYWEBVIEW_AVAILABLE:
         # Arrancar Flask en un hilo daemon
         flask_thread = threading.Thread(
-            target=lambda: app.run(host='127.0.0.1', port=5000, debug=False, use_reloader=False),
+            target=lambda: app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False),
             daemon=True
         )
         flask_thread.start()

@@ -191,3 +191,6 @@ GENRE_MAPPING = {
     'Blues': ['blues'],
     'Classical': ['classical', 'classical music']
 }
+
+# Adult Vault Auto-Ratings
+ADULT_RATINGS = ['18', '18+']

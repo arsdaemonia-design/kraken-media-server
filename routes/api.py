@@ -1411,6 +1411,14 @@ def biblioteca():
     # Agregar info de modo niños a la respuesta
     data['is_kid_mode'] = is_kid_mode
 
+    # Adult Vault - Filtrar si no hay PIN válido
+    import config
+    pin_header = request.headers.get('X-Master-Pin')
+    has_valid_pin = pin_header == get_master_pin()
+    
+    if not has_valid_pin:
+        data['files'] = [f for f in data['files'] if not f.get('is_adult')]
+
     return jsonify(data)
 
 @api_bp.route('/radio/artist/<path:artist_name>')
@@ -2221,6 +2229,7 @@ def autotag_library():
 
 @api_bp.route('/api/setup/status', methods=['GET'])
 def setup_status():
+    import config
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT COUNT(*) as count FROM users WHERE is_superadmin = 1")
@@ -2231,9 +2240,9 @@ def setup_status():
     runtime = _load_runtime_config()
     
     return jsonify({
-        'needs_setup': needs_setup,
-        'current_pin': '****' if runtime.get('pin') else None,
-        'current_media_path': runtime.get('media_path', '')
+        'is_configured': not needs_setup,
+        'current_media_path': runtime.get('media_path', config.DOWNLOAD_FOLDER),
+        'adult_ratings': getattr(config, 'ADULT_RATINGS', [])
     })
 
 
@@ -2655,7 +2664,11 @@ def auto_tag_library_videos():
                         from services.video_tagger import get_tv_details; res = get_tv_details(video[1])
                         
                     if res and res.get('content_rating'):
-                        c.execute('UPDATE media SET tmdb_rating = ? WHERE rel_path = ?', (res.get('content_rating'), video[0]))
+                        rating = res.get('content_rating')
+                        import config
+                        adult_ratings = getattr(config, 'ADULT_RATINGS', [])
+                        is_adult = 1 if rating in adult_ratings else 0
+                        c.execute('UPDATE media SET tmdb_rating = ?, is_adult = ? WHERE rel_path = ?', (rating, is_adult, video[0]))
                         conn.commit()
                         updated_ratings += 1
                         
@@ -2739,13 +2752,16 @@ def update_video_ratings():
                 rating = result.get('content_rating')
                 
                 if rating:
-                    # Actualizar solo el rating
+                    # Actualizar rating y flag adulto
+                    import config
+                    adult_ratings = getattr(config, 'ADULT_RATINGS', [])
+                    is_adult = 1 if rating in adult_ratings else 0
                     c.execute('''
-                        UPDATE media SET tmdb_rating = ? WHERE rel_path = ?
-                    ''', (rating, video_path))
+                        UPDATE media SET tmdb_rating = ?, is_adult = ? WHERE rel_path = ?
+                    ''', (rating, is_adult, video_path))
                     conn.commit()
                     updated += 1
-                    print(f"✅ Rating actualizado: {video.get('tmdb_title', 'Unknown')} -> {rating}")
+                    print(f"✅ Rating actualizado: {video.get('tmdb_title', 'Unknown')} -> {rating} (Adult: {bool(is_adult)})")
                 else:
                     print(f"⚠️ No hay rating para: {video.get('tmdb_title', 'Unknown')}")
             else:
@@ -3101,6 +3117,113 @@ def admin_toggle_kid_mode(email):
     conn.close()
     
     return jsonify({'ok': True, 'is_kid_mode': is_kid_mode})
+
+
+# ========================================
+# ADULT VAULT (Contenido Restringido)
+# ========================================
+
+@api_bp.route('/api/admin/adult/apply', methods=['POST'])
+def adult_apply_ratings():
+    """Aplica el flag is_adult a todos los videos con los ratings especificados."""
+    import config
+    if request.headers.get('X-Master-Pin') != get_master_pin():
+        return jsonify({'error': 'PIN incorrecto'}), 401
+        
+    data = request.get_json() or {}
+    ratings = data.get('ratings', [])
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    # Actualizar configuración de ratings automáticos en config.py
+    try:
+        config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.py')
+        with open(config_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            
+        with open(config_path, 'w', encoding='utf-8') as f:
+            found = False
+            for line in lines:
+                if line.startswith('ADULT_RATINGS ='):
+                    f.write(f"ADULT_RATINGS = {repr(ratings)}\n")
+                    found = True
+                else:
+                    f.write(line)
+            if not found:
+                f.write(f"\n# Adult Vault Auto-Ratings\nADULT_RATINGS = {repr(ratings)}\n")
+                
+        # Actualizar en memoria para el proceso actual
+        config.ADULT_RATINGS = ratings
+    except Exception as e:
+        print(f"Error guardando ADULT_RATINGS en config.py: {e}")
+    
+    # Limpiamos is_adult basado en rating y luego remarcamos los correctos
+    if not ratings:
+        c.execute("UPDATE media SET is_adult = 0 WHERE tmdb_rating IS NOT NULL AND tmdb_rating != ''")
+        updated = c.rowcount
+        conn.commit()
+        conn.close()
+        global BIB_CACHE_BY_OWNER
+        BIB_CACHE_BY_OWNER = {}
+        return jsonify({'ok': True, 'updated': updated})
+        
+    c.execute("UPDATE media SET is_adult = 0 WHERE tmdb_rating IS NOT NULL AND tmdb_rating != ''")
+    placeholders = ', '.join(['?'] * len(ratings))
+    query = f"UPDATE media SET is_adult = 1 WHERE media_type = 'video' AND tmdb_rating IN ({placeholders})"
+    
+    c.execute(query, ratings)
+    updated = c.rowcount
+    conn.commit()
+    conn.close()
+    
+    # Limpiar caché de biblioteca
+    BIB_CACHE_BY_OWNER = {}
+    
+    return jsonify({'ok': True, 'updated': updated})
+
+@api_bp.route('/api/admin/adult/item', methods=['POST'])
+def adult_toggle_item():
+    """Marca o desmarca un ítem individual como adulto."""
+    import config
+    if request.headers.get('X-Master-Pin') != get_master_pin():
+        return jsonify({'error': 'PIN incorrecto'}), 401
+        
+    data = request.get_json() or {}
+    path = data.get('path')
+    is_adult = 1 if data.get('is_adult') else 0
+    
+    if not path:
+        return jsonify({'error': 'Ruta requerida'}), 400
+        
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("UPDATE media SET is_adult = ? WHERE rel_path = ?", (is_adult, path))
+    updated = c.rowcount
+    conn.commit()
+    conn.close()
+    
+    if updated > 0:
+        global BIB_CACHE_BY_OWNER
+        BIB_CACHE_BY_OWNER = {}
+        
+    return jsonify({'ok': True, 'updated': updated > 0})
+
+@api_bp.route('/api/admin/adult/list', methods=['GET'])
+def adult_list_items():
+    """Lista todos los ítems marcados como adultos."""
+    import config
+    pin = request.headers.get('X-Master-Pin') or request.args.get('pin')
+    if pin != get_master_pin():
+        return jsonify({'error': 'PIN incorrecto'}), 401
+        
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT rel_path, title, tmdb_rating FROM media WHERE is_adult = 1 ORDER BY title ASC")
+    items = [dict(row) for row in c.fetchall()]
+    conn.close()
+    
+    return jsonify({'items': items})
 
 
 @api_bp.route('/api/admin/invite', methods=['POST'])
@@ -3652,7 +3775,8 @@ def update_video_meta():
     if not get_master_pin() or pin != get_master_pin():
         return jsonify({'error': 'PIN incorrecto'}), 401
         
-    if not path:
+    paths_array = data.get('paths_array', [])
+    if not path and not paths_array:
         return jsonify({'error': 'Falta path'}), 400
         
     from services.database import get_db
@@ -3693,31 +3817,43 @@ def update_video_meta():
                     values.append(tmdb_overview)
                     
                 if fields_to_set:
+                    import config
+                    adult_ratings = getattr(config, 'ADULT_RATINGS', [])
+                    is_adult = 1 if tmdb_rating in adult_ratings else 0
+                    fields_to_set.append("is_adult = ?")
+                    values.append(is_adult)
+                    
                     values.append(p)
                     query = f"UPDATE media SET {', '.join(fields_to_set)} WHERE rel_path = ?"
                     c.execute(query, tuple(values))
         elif is_virtual:
             # Actualiza todos los hijos (Single Click on Series)
+            import config
+            is_adult = 1 if tmdb_rating in getattr(config, 'ADULT_RATINGS', []) else 0
             c.execute("""
                 UPDATE media SET 
                 tmdb_title = ?, 
                 tmdb_rating = ?, 
                 tmdb_year = ?, 
                 tmdb_genres = ?, 
-                tmdb_overview = ?
+                tmdb_overview = ?,
+                is_adult = ?
                 WHERE rel_path LIKE ?
-            """, (tmdb_title, tmdb_rating, tmdb_year, tmdb_genres, tmdb_overview, f"{path}/%"))
+            """, (tmdb_title, tmdb_rating, tmdb_year, tmdb_genres, tmdb_overview, is_adult, f"{path}/%"))
         elif path:
             # Archivo unico
+            import config
+            is_adult = 1 if tmdb_rating in getattr(config, 'ADULT_RATINGS', []) else 0
             c.execute("""
                 UPDATE media SET 
                 tmdb_title = ?, 
                 tmdb_rating = ?, 
                 tmdb_year = ?, 
                 tmdb_genres = ?, 
-                tmdb_overview = ?
+                tmdb_overview = ?,
+                is_adult = ?
                 WHERE rel_path = ?
-            """, (tmdb_title, tmdb_rating, tmdb_year, tmdb_genres, tmdb_overview, path))
+            """, (tmdb_title, tmdb_rating, tmdb_year, tmdb_genres, tmdb_overview, is_adult, path))
             
         conn.commit()
         

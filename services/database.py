@@ -199,6 +199,12 @@ def init_db():
     except sqlite3.OperationalError:
         pass # Column already exists
 
+    # Adult Vault — columna para contenido restringido para adultos
+    try:
+        c.execute("ALTER TABLE media ADD COLUMN is_adult BOOLEAN DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass # Column already exists
+
     # ═══ Video Technical Metadata Columns (v4.92) ═══
     # Estas columnas almacenan info técnica extraída por ffprobe durante el escaneo.
     # Beneficio: NO necesita hacer ffprobe en cada reproducción, la info ya está en DB.
@@ -299,10 +305,10 @@ def _create_performance_indexes(cursor):
     for idx_name, idx_def in indexes:
         try:
             cursor.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {idx_def}")
-            print(f"  ✓ Index {idx_name} created/verified")
+            print(f"  OK Index {idx_name} created/verified")
         except sqlite3.OperationalError as e:
             # Skip if column doesn't exist yet
-            print(f"  ⚠ Index {idx_name} skipped: {e}")
+            print(f"  WARN Index {idx_name} skipped: {e}")
 
 
 def _migrate_json_to_sqlite(conn):

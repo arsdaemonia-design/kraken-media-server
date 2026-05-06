@@ -1306,20 +1306,34 @@
         }
         }
 
-        @keyframes slide-in {
-            from {
-                transform: translateY(-10px);
-                opacity: 0;
-            }
+        .animate-slide-in {
+            animation: slide-in 0.2s ease-out forwards;
+        }
 
-            to {
-                transform: translateY(0);
+        /* Nueva transición suave para la biblioteca */
+        .content-transition {
+            animation: content-entry 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+        }
+
+        @keyframes content-entry {
+            0% {
+                opacity: 0;
+                transform: translateY(10px) scale(0.99);
+            }
+            100% {
                 opacity: 1;
+                transform: translateY(0) scale(1);
             }
         }
 
-        .animate-slide-in {
-            animation: slide-in 0.2s ease-out;
+        /* Efecto de carga suave para cards */
+        .card-entry {
+            animation: card-pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        @keyframes card-pop {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
         }
 
         #main-scroll {
@@ -1630,12 +1644,16 @@
                 const originalFetch = window.fetch;
                 window.fetch = function (url, options = {}) {
                     const token = localStorage.getItem(AUTH_KEY);
-                    if (token && typeof url === 'string' && (url.startsWith('/') || url.startsWith(window.location.origin))) {
+                    const masterPin = sessionStorage.getItem('kraken_master_pin');
+                    
+                    if ((token || masterPin) && typeof url === 'string' && (url.startsWith('/') || url.startsWith(window.location.origin))) {
                         options.headers = options.headers || {};
                         if (options.headers instanceof Headers) {
-                            if (!options.headers.has('Authorization')) options.headers.set('Authorization', 'Bearer ' + token);
+                            if (token && !options.headers.has('Authorization')) options.headers.set('Authorization', 'Bearer ' + token);
+                            if (masterPin && !options.headers.has('X-Master-Pin')) options.headers.set('X-Master-Pin', masterPin);
                         } else {
-                            if (!options.headers['Authorization']) options.headers['Authorization'] = 'Bearer ' + token;
+                            if (token && !options.headers['Authorization']) options.headers['Authorization'] = 'Bearer ' + token;
+                            if (masterPin && !options.headers['X-Master-Pin']) options.headers['X-Master-Pin'] = masterPin;
                         }
                     }
                     return originalFetch.call(this, url, options);
@@ -1914,9 +1932,11 @@
         <div class="w-full max-w-lg mx-4">
             <!-- Logo -->
             <div class="text-center mb-8">
-                <div class="text-5xl mb-2">🐙</div>
+                <div class="flex justify-center mb-4">
+                    <img src="/assets/kraken.svg" class="w-32 h-32 kraken-neon-filter select-none pointer-events-none">
+                </div>
                 <h1 class="text-3xl font-bold text-white tracking-tight">KRAKEN</h1>
-                <p class="text-gray-400 text-sm mt-1">Media Server</p>
+                <p class="text-emerald-500/60 text-xs font-mono uppercase tracking-[0.3em] mt-2">Deep Media Server</p>
             </div>
 
             <!-- User Selection (Who's watching?) -->
@@ -2010,29 +2030,24 @@
         <!-- Derecha: Status -->
         <div class="absolute right-3 hidden sm:flex items-center gap-4">
             <div id="cast-status-top" class="text-[9px] font-bold text-zinc-500 tracking-tighter opacity-40 uppercase">
-                v4.88</div>
+                v4.92</div>
         </div>
     </div>
 
     <div id="top-spacer" class="h-0 transition-all duration-300"></div>
 
-    <div id="loader">
-        <div class="ghost">
-            <div class="eyes">
-                <span></span>
-                <span></span>
+    <div id="loader" class="fixed inset-0 z-[100000] bg-[#050505] flex flex-col items-center justify-center gap-8">
+        <div class="relative">
+            <img src="/assets/kraken.svg" class="w-48 h-48 kraken-neon-filter select-none pointer-events-none">
+            <div class="absolute -bottom-4 left-1/2 -translate-x-1/2 w-32 h-1 bg-emerald-500/20 rounded-full overflow-hidden">
+                <div class="h-full bg-emerald-500 animate-[loading-bar_2s_infinite_ease-in-out]"></div>
             </div>
-            <div class="skirt"></div>
         </div>
-
-        <!-- 👇 NUEVO: puntos estilo Pac-Man -->
-        <div class="dots">
-            <span></span><span></span><span></span><span></span><span></span>
+        <div class="text-center">
+            <h1 class="text-4xl font-bold text-white tracking-tighter mb-1">KRAKEN</h1>
+            <p class="text-emerald-500/60 text-[10px] font-mono uppercase tracking-[0.4em]" id="loader-text">Iniciando Protocolo Deep...</p>
         </div>
-
-        <div class="loader-text" id="loader-text">
-            Cargando tu librería <3 </div>
-        </div>
+    </div>
 
         <audio id="main-audio" preload="none" crossorigin="anonymous"></audio>
         <audio id="crossfade-audio" preload="none" crossorigin="anonymous"></audio>
@@ -3838,8 +3853,13 @@
                 });
 
                 const availableCategories = new Set();
+                let hasAdultContent = false;
                 filtered.forEach(f => {
                     if (f.type !== 'video' || !f._normalizedPath) return;
+                    if (f.is_adult) {
+                        hasAdultContent = true;
+                        return; // Omitir las categorías base para adultos
+                    }
                     const parts = f._normalizedPath.split('/');
                     if (parts.length > 2) availableCategories.add(parts[1]);
                     else if (parts.length > 1) availableCategories.add(parts[1]);
@@ -3847,6 +3867,7 @@
 
                 const allCategoryLabel = 'Todo';
                 const categoriesArray = [allCategoryLabel, ...Array.from(availableCategories).sort()];
+                if (hasAdultContent) categoriesArray.push('🔞 Adult');
                 if (!window.netflixActiveCategory || !categoriesArray.includes(window.netflixActiveCategory)) {
                     if (categoriesArray.includes('Peliculas')) window.netflixActiveCategory = 'Peliculas';
                     else if (categoriesArray.includes('Animé')) window.netflixActiveCategory = 'Animé';
@@ -3859,7 +3880,9 @@
                 filtered.forEach(f => {
                     if (f.type !== 'video' || !f._normalizedPath) return;
                     const parts = f._normalizedPath.split('/');
-                    const currentCat = parts.length > 2 ? parts[1] : (parts.length > 1 ? parts[1] : 'Otros');
+                    let currentCat = parts.length > 2 ? parts[1] : (parts.length > 1 ? parts[1] : 'Otros');
+                    if (f.is_adult) currentCat = '🔞 Adult';
+                    
                     if (window.netflixActiveCategory !== allCategoryLabel && currentCat !== window.netflixActiveCategory) return;
 
                     let showKey, showTitle, showPathToOpen;
@@ -4749,6 +4772,7 @@
                                         <button onclick="showSettingsTab('general')" id="tab-general" class="px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium">General</button>
                                         <button onclick="showSettingsTab('users')" id="tab-users" class="px-4 py-2 rounded-lg bg-zinc-700 text-zinc-300 hover:bg-zinc-600">Usuarios</button>
                                         <button onclick="showSettingsTab('invites')" id="tab-invites" class="px-4 py-2 rounded-lg bg-zinc-700 text-zinc-300 hover:bg-zinc-600">Invitaciones</button>
+                                        <button onclick="showSettingsTab('adult')" id="tab-adult" class="hidden px-4 py-2 rounded-lg bg-zinc-700 text-zinc-300 hover:bg-zinc-600">🔞 Adult</button>
                                     </div>
                                     
                                     <div id="content-general">
@@ -4762,6 +4786,12 @@
                                             <div>
                                                 <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Nuevo PIN Maquin</label>
                                                 <input type="password" id="settings-new-pin" placeholder="Mínimo 4 dígitos" minlength="4"
+                                                       class="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition">
+                                            </div>
+                                            
+                                            <div>
+                                                <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Código Especial</label>
+                                                <input type="password" id="settings-secret-word" placeholder="*****"
                                                        class="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition">
                                             </div>
                                             
@@ -4785,6 +4815,19 @@
                                         <div id="users-list" class="space-y-2 max-h-64 overflow-y-auto"></div>
                                     </div>
                                     
+                                <div id="content-adult" class="hidden">
+                                    <h3 class="text-white font-bold mb-2">Configuración de Contenido Adulto</h3>
+                                    <p class="text-xs text-zinc-400 mb-4">Los videos con estas clasificaciones se ocultarán automáticamente de la biblioteca y solo serán visibles para ti en la categoría "🔞 Adult" cuando uses el PIN.</p>
+                                    
+                                    <div class="grid grid-cols-4 gap-2 mb-4" id="adult-ratings-grid">
+                                        <!-- Checkboxes will be rendered here -->
+                                    </div>
+                                    <button onclick="applyAdultRatings()" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-xl transition">Guardar y Aplicar Filtros Automáticos</button>
+                                    
+                                    <h3 class="text-white font-bold mt-8 mb-2">Contenido Oculto Manualmente</h3>
+                                    <div id="adult-items-list" class="space-y-2 max-h-48 overflow-y-auto"></div>
+                                </div>
+                                
                                 <div id="content-invites" class="hidden">
                                     <div class="mb-4">
                                         <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Duración del Código</label>
@@ -4813,19 +4856,109 @@
                         </div>`;
                         document.body.insertAdjacentHTML('beforeend', html);
                         loadAdminUsers();
+                        
+                        // Adult Door event listener
+                        const pathInput = document.getElementById('settings-secret-word');
+                        if (pathInput) {
+                            pathInput.addEventListener('input', async function() {
+                                if (this.value.trim().toLowerCase() === 'adult') {
+                                    this.value = '';
+                                    document.getElementById('tab-adult').classList.remove('hidden');
+                                    showSettingsTab('adult');
+                                    
+                                    const commonRatings = ['G', 'PG', 'PG-13', 'R', 'NC-17', 'TV-Y', 'TV-Y7', 'TV-G', 'TV-PG', 'TV-14', 'TV-MA', '18', '18+', 'MA15+', 'M', '16'];
+                                    // Cargar configuración guardada
+                                    const adultRatings = d.adult_ratings || [];
+                                    
+                                    document.getElementById('adult-ratings-grid').innerHTML = commonRatings.map(r => {
+                                        const isChecked = adultRatings.includes(r);
+                                        return `
+                                            <label class="flex items-center space-x-2 text-sm text-zinc-300 cursor-pointer hover:text-white">
+                                                <input type="checkbox" value="${r}" ${isChecked ? 'checked' : ''} class="adult-rating-cb rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500">
+                                                <span>${r}</span>
+                                            </label>
+                                        `;
+                                    }).join('');
+                                    
+                                    loadAdultList();
+                                }
+                            });
+                        }
                     });
+            }
+
+            async function applyAdultRatings() {
+                const checkboxes = document.querySelectorAll('.adult-rating-cb:checked');
+                const ratings = Array.from(checkboxes).map(cb => cb.value);
+                try {
+                    const r = await fetch('/api/admin/adult/apply', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ratings })
+                    });
+                    const d = await r.json();
+                    if (d.ok) showToast('Filtros aplicados. ' + d.updated + ' actualizados.', 'success');
+                    else showToast(d.error || 'Error', 'error');
+                } catch (e) { showToast('Error', 'error'); }
+            }
+
+            async function loadAdultList() {
+                try {
+                    const r = await fetch('/api/admin/adult/list');
+                    const d = await r.json();
+                    if (d.items) {
+                        const list = document.getElementById('adult-items-list');
+                        if(list) {
+                            list.innerHTML = d.items.map(i => `
+                                <div class="flex justify-between items-center bg-white/5 p-2 rounded">
+                                    <div class="truncate text-sm text-zinc-300 w-3/4">${i.title} <span class="text-xs text-zinc-500">(${i.tmdb_rating||'Sin rating'})</span></div>
+                                    <button onclick="toggleAdultItem('${i.rel_path}', false)" class="text-xs bg-emerald-600 px-2 py-1 rounded">Restaurar</button>
+                                </div>
+                            `).join('');
+                        }
+                    }
+                } catch (e) {}
+            }
+            
+            async function toggleAdultItem(path, is_adult) {
+                try {
+                    const r = await fetch('/api/admin/adult/item', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ path, is_adult })
+                    });
+                    const d = await r.json();
+                    if (d.ok) {
+                        showToast(is_adult ? 'Ocultado en Adult Vault' : 'Restaurado a Biblioteca', 'success');
+                        if (document.getElementById('content-adult')) loadAdultList();
+                        // Refrescar biblioteca en vivo si existe la funcion
+                        if (typeof renderVideoLibrary === 'function') {
+                             fetch('/api/biblioteca').then(r => r.json()).then(data => {
+                                 window.cachedLibraryData = data; // Actualizar cache global si existe
+                                 renderVideoLibrary(data);
+                             });
+                        }
+                    }
+                } catch (e) {}
             }
 
             function showSettingsTab(tab) {
                 document.getElementById('content-general').classList.add('hidden');
                 document.getElementById('content-users').classList.add('hidden');
                 document.getElementById('content-invites').classList.add('hidden');
+                const contentAdult = document.getElementById('content-adult');
+                if(contentAdult) contentAdult.classList.add('hidden');
                 document.getElementById('tab-general').classList.remove('bg-emerald-600', 'text-white');
                 document.getElementById('tab-general').classList.add('bg-zinc-700', 'text-zinc-300');
                 document.getElementById('tab-users').classList.remove('bg-emerald-600', 'text-white');
                 document.getElementById('tab-users').classList.add('bg-zinc-700', 'text-zinc-300');
                 document.getElementById('tab-invites').classList.remove('bg-emerald-600', 'text-white');
                 document.getElementById('tab-invites').classList.add('bg-zinc-700', 'text-zinc-300');
+                const tabAdult = document.getElementById('tab-adult');
+                if(tabAdult) {
+                    tabAdult.classList.remove('bg-emerald-600', 'text-white');
+                    tabAdult.classList.add('bg-zinc-700', 'text-zinc-300');
+                }
                 document.getElementById('content-' + tab).classList.remove('hidden');
                 document.getElementById('tab-' + tab).classList.remove('bg-zinc-700', 'text-zinc-300');
                 document.getElementById('tab-' + tab).classList.add('bg-emerald-600', 'text-white');
@@ -6878,6 +7011,15 @@
 
             async function playVideoMode(file) {
                 closeSidebar();
+                
+                const playerContainer = document.getElementById('view-player');
+                if (playerContainer) {
+                    playerContainer.classList.remove('hidden');
+                    playerContainer.classList.remove('animate-slide-in');
+                    void playerContainer.offsetWidth;
+                    playerContainer.classList.add('animate-slide-in');
+                }
+
                 // Ocultar sidebar
                 const sb = document.getElementById('main-sidebar');
                 if (sb) sb.classList.add('hidden');
@@ -9139,6 +9281,14 @@
                 clearTimeout(renderTimeout);
                 renderTimeout = setTimeout(() => {
                     syncVideoDerivedState();
+                    
+                    const container = document.getElementById('lib-content');
+                    if (container) {
+                        container.classList.remove('content-transition');
+                        void container.offsetWidth; // Trigger reflow
+                        container.classList.add('content-transition');
+                    }
+
                     _renderLibActual();
                 }, 260);
             }
