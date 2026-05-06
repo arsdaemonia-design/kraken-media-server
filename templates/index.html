@@ -161,6 +161,30 @@
             color: var(--color-text-primary);
         }
 
+        /* ========== TV MODE & FOCUS STYLES ========== */
+        .tv-mode {
+            cursor: none !important; /* Hide cursor on TV */
+        }
+
+        /* High-visibility Neon Focus for D-Pad navigation */
+        :focus-visible, .tv-mode *:focus {
+            outline: none !important;
+            border: 2px solid var(--color-accent) !important;
+            box-shadow: 0 0 25px var(--color-accent-glow), inset 0 0 10px var(--color-accent-glow) !important;
+            transform: scale(1.05);
+            z-index: 50;
+            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+        }
+
+        .tv-mode .card-interactive, .tv-mode .list-row {
+            min-height: 60px;
+        }
+
+        /* Special scale for cards on focus */
+        .card-interactive:focus-visible {
+            transform: scale(1.08) translateY(-5px) !important;
+        }
+
         .btn-icon {
             width: 36px;
             height: 36px;
@@ -1320,6 +1344,7 @@
                 opacity: 0;
                 transform: translateY(10px) scale(0.99);
             }
+
             100% {
                 opacity: 1;
                 transform: translateY(0) scale(1);
@@ -1332,8 +1357,15 @@
         }
 
         @keyframes card-pop {
-            from { opacity: 0; transform: scale(0.9); }
-            to { opacity: 1; transform: scale(1); }
+            from {
+                opacity: 0;
+                transform: scale(0.9);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
         }
 
         #main-scroll {
@@ -1460,15 +1492,17 @@
         }
 
         /* Robusto Switch CSS */
-        #offline-pill-checkbox:checked + .pill-bg {
+        #offline-pill-checkbox:checked+.pill-bg {
             background-color: #450a0a !important;
             border-color: #ef4444 !important;
         }
-        #offline-pill-checkbox:checked + .pill-bg .pill-dot {
+
+        #offline-pill-checkbox:checked+.pill-bg .pill-dot {
             transform: translateX(16px);
             background-color: #ef4444 !important;
         }
-        #offline-pill-checkbox:checked ~ .pill-text .pill-status {
+
+        #offline-pill-checkbox:checked~.pill-text .pill-status {
             color: #ef4444 !important;
         }
 
@@ -1608,6 +1642,67 @@
             }
         }
     </style>
+    <script>
+        /**
+         * KRAKEN TV PROTOCOL 🎮
+         * Manages D-Pad navigation and TV detection
+         */
+        window.KRAKEN_TV_MODE = false;
+
+        function detectTVMode() {
+            const ua = navigator.userAgent;
+            const isTV = /Android TV|SmartTV|GoogleTV|Web0S|Tizen|NetCast|Roku|Viera|AppleTV/i.test(ua);
+            const isConsole = /PlayStation|Xbox|Nintendo/i.test(ua);
+            // Si no hay touch y es una pantalla grande, probablemente es un PC con mando o TV
+            const noTouch = !('ontouchstart' in window) && !navigator.maxTouchPoints;
+            
+            return isTV || isConsole || (noTouch && window.innerWidth >= 1280);
+        }
+
+        function initTVNavigation() {
+            if (!detectTVMode()) return;
+            
+            window.KRAKEN_TV_MODE = true;
+            document.body.classList.add('tv-mode');
+            console.log('📺 Kraken TV Mode Activated');
+
+            // Optimizar vista para TV
+            if (!localStorage.getItem('kraken_zoom')) {
+                localStorage.setItem('kraken_zoom', '1.8');
+            }
+
+            // Manejador de Navegación Espacial Simplificado
+            document.addEventListener('keydown', (e) => {
+                const active = document.activeElement;
+                const focusables = Array.from(document.querySelectorAll('button:not([disabled]), [tabindex="0"], a, input, .card-interactive, .list-row'));
+                let index = focusables.indexOf(active);
+
+                // Si nada tiene el foco, empezar por el primero
+                if (index === -1) {
+                    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                        focusables[0].focus();
+                        e.preventDefault();
+                    }
+                    return;
+                }
+
+                if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+                    index = (index + 1) % focusables.length;
+                    focusables[index].focus();
+                    e.preventDefault();
+                } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+                    index = (index - 1 + focusables.length) % focusables.length;
+                    focusables[index].focus();
+                    e.preventDefault();
+                } else if (e.key === 'Enter') {
+                    active.click();
+                }
+            });
+        }
+
+        // Ejecutar al cargar el DOM
+        document.addEventListener('DOMContentLoaded', initTVNavigation);
+    </script>
 
     <script>
             // ═══ KRAKEN AUTH SYSTEM ═══
@@ -1645,7 +1740,7 @@
                 window.fetch = function (url, options = {}) {
                     const token = localStorage.getItem(AUTH_KEY);
                     const masterPin = sessionStorage.getItem('kraken_master_pin');
-                    
+
                     if ((token || masterPin) && typeof url === 'string' && (url.startsWith('/') || url.startsWith(window.location.origin))) {
                         options.headers = options.headers || {};
                         if (options.headers instanceof Headers) {
@@ -2039,135 +2134,147 @@
     <div id="loader" class="fixed inset-0 z-[100000] bg-[#050505] flex flex-col items-center justify-center gap-8">
         <div class="relative">
             <img src="/assets/kraken.svg" class="w-48 h-48 kraken-neon-filter select-none pointer-events-none">
-            <div class="absolute -bottom-4 left-1/2 -translate-x-1/2 w-32 h-1 bg-emerald-500/20 rounded-full overflow-hidden">
+            <div
+                class="absolute -bottom-4 left-1/2 -translate-x-1/2 w-32 h-1 bg-emerald-500/20 rounded-full overflow-hidden">
                 <div class="h-full bg-emerald-500 animate-[loading-bar_2s_infinite_ease-in-out]"></div>
             </div>
         </div>
         <div class="text-center">
             <h1 class="text-4xl font-bold text-white tracking-tighter mb-1">KRAKEN</h1>
-            <p class="text-emerald-500/60 text-[10px] font-mono uppercase tracking-[0.4em]" id="loader-text">Iniciando Protocolo Deep...</p>
+            <p class="text-emerald-500/60 text-[10px] font-mono uppercase tracking-[0.4em]" id="loader-text">Iniciando
+                Protocolo Deep...</p>
         </div>
     </div>
 
-        <audio id="main-audio" preload="none" crossorigin="anonymous"></audio>
-        <audio id="crossfade-audio" preload="none" crossorigin="anonymous"></audio>
+    <audio id="main-audio" preload="none" crossorigin="anonymous"></audio>
+    <audio id="crossfade-audio" preload="none" crossorigin="anonymous"></audio>
 
-        <!-- BOTÓN HAMBURGUESA MÓVIL -->
+    <!-- BOTÓN HAMBURGUESA MÓVIL -->
 
-        <aside id="main-sidebar"
-            class="w-64 bg-noise flex flex-col border-r border-white/5 shrink-0 h-full z-[300] fixed transition-transform duration-300 top-0 left-0">
-            <!-- Espaciador para la barra superior -->
-            <div class="h-10 shrink-0"></div>
+    <aside id="main-sidebar"
+        class="w-64 bg-noise flex flex-col border-r border-white/5 shrink-0 h-full z-[300] fixed transition-transform duration-300 top-0 left-0">
+        <!-- Espaciador para la barra superior -->
+        <div class="h-10 shrink-0"></div>
 
-            <div class="relative-z h-full flex flex-col overflow-hidden">
+        <div class="relative-z h-full flex flex-col overflow-hidden">
 
-                    <div class="flex items-center gap-2 px-3 py-3 border-b border-white/5 bg-black/30 shrink-0">
-                        <!-- Pastilla Toggle (Offline) con Checkbox Robusto -->
-                        <label class="flex-1 flex items-center gap-2.5 cursor-pointer group bg-white/5 hover:bg-white/10 p-2 rounded-lg border border-white/5 transition-all">
-                            <input type="checkbox" id="offline-pill-checkbox" onchange="window.toggleOfflineMode(event)" class="hidden">
-                            <div class="pill-bg w-9 h-5 rounded-full bg-zinc-800 relative transition-all duration-300 border border-white/10 shrink-0">
-                                <div class="pill-dot absolute top-1 left-1 w-3 h-3 rounded-full bg-zinc-500 transition-all duration-300 shadow-sm"></div>
-                            </div>
-                            <div class="flex flex-col pill-text">
-                                <span class="text-[8px] font-black uppercase tracking-[0.2em] text-zinc-400 group-hover:text-white transition leading-none">Status</span>
-                                <span id="offline-pill-status" class="pill-status text-[10px] font-bold uppercase tracking-widest text-emerald-500 leading-none mt-1">Online</span>
-                            </div>
-                        </label>
-                        
-                        <!-- Grid/List Buttons -->
-                        <div class="flex gap-1 bg-white/5 rounded p-1 border border-white/5 shrink-0">
-                            <button onclick="setView('grid')" class="w-10 h-10 flex items-center justify-center rounded hover:bg-white/10 text-zinc-400 hover:text-white transition" title="Ver como Cuadrícula">
-                                <i class="fa-solid fa-border-all text-sm"></i>
-                            </button>
-                            <button onclick="setView('list')" class="w-10 h-10 flex items-center justify-center rounded hover:bg-white/10 text-zinc-400 hover:text-white transition" title="Ver como Lista">
-                                <i class="fa-solid fa-list text-sm"></i>
-                            </button>
+            <div class="flex items-center gap-2 px-3 py-3 border-b border-white/5 bg-black/30 shrink-0">
+                <!-- Pastilla Toggle (Offline) con Checkbox Robusto -->
+                <label
+                    class="flex-1 flex items-center gap-2.5 cursor-pointer group bg-white/5 hover:bg-white/10 p-2 rounded-lg border border-white/5 transition-all">
+                    <input type="checkbox" id="offline-pill-checkbox" onchange="window.toggleOfflineMode(event)"
+                        class="hidden">
+                    <div
+                        class="pill-bg w-9 h-5 rounded-full bg-zinc-800 relative transition-all duration-300 border border-white/10 shrink-0">
+                        <div
+                            class="pill-dot absolute top-1 left-1 w-3 h-3 rounded-full bg-zinc-500 transition-all duration-300 shadow-sm">
                         </div>
                     </div>
+                    <div class="flex flex-col pill-text">
+                        <span
+                            class="text-[8px] font-black uppercase tracking-[0.2em] text-zinc-400 group-hover:text-white transition leading-none">Status</span>
+                        <span id="offline-pill-status"
+                            class="pill-status text-[10px] font-bold uppercase tracking-widest text-emerald-500 leading-none mt-1">Online</span>
+                    </div>
+                </label>
 
-                <div class="flex border-b border-white/5 shrink-0">
-                    <div onclick="setLibraryMode('audio')" id="tab-audio" class="mode-btn active"><i
-                            class="fa-solid fa-music text-lg block mb-1"></i>MÚSICA</div>
-                    <div onclick="setLibraryMode('video')" id="tab-video" class="mode-btn"><i
-                            class="fa-solid fa-film text-lg block mb-1"></i>VIDEO</div>
+                <!-- Grid/List Buttons -->
+                <div class="flex gap-1 bg-white/5 rounded p-1 border border-white/5 shrink-0">
+                    <button onclick="setView('grid')"
+                        class="w-10 h-10 flex items-center justify-center rounded hover:bg-white/10 text-zinc-400 hover:text-white transition"
+                        title="Ver como Cuadrícula">
+                        <i class="fa-solid fa-border-all text-sm"></i>
+                    </button>
+                    <button onclick="setView('list')"
+                        class="w-10 h-10 flex items-center justify-center rounded hover:bg-white/10 text-zinc-400 hover:text-white transition"
+                        title="Ver como Lista">
+                        <i class="fa-solid fa-list text-sm"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex border-b border-white/5 shrink-0">
+                <div onclick="setLibraryMode('audio')" id="tab-audio" class="mode-btn active"><i
+                        class="fa-solid fa-music text-lg block mb-1"></i>MÚSICA</div>
+                <div onclick="setLibraryMode('video')" id="tab-video" class="mode-btn"><i
+                        class="fa-solid fa-film text-lg block mb-1"></i>VIDEO</div>
+            </div>
+
+            <nav class="px-4 space-y-1 mt-4 shrink-0">
+                <div onclick="enterMainLibrary()" id="nav-library" class="sidebar-link active"><i
+                        class="fa-solid fa-layer-group w-4 text-center"></i> Biblioteca</div>
+                <div onclick="enterNerdLibrary()" id="nav-nerd" class="sidebar-link"><i
+                        class="fa-solid fa-gamepad w-4 text-center"></i> OST Nerd</div>
+                <div onclick="ver('downloader')" id="nav-downloader" class="sidebar-link"><i
+                        class="fa-solid fa-cloud-arrow-down w-4 text-center"></i> Descargar</div>
+                <div onclick="ver('history')" id="nav-history" class="sidebar-link hover:text-yellow-400"><i
+                        class="fa-solid fa-clock-rotate-left w-4 text-center"></i> Historial</div>
+            </nav>
+
+            <div id="sidebar-filters" class="flex-1 flex flex-col min-h-0 px-4 mt-0 pb-2">
+
+                <div class="accordion-header group shrink-0" onclick="toggleAcc('acc-playlists')">
+                    <span class="group-hover:text-emerald-400 transition">MIS PLAYLISTS</span>
+                    <i class="fa-solid fa-chevron-down text-[12px] transition-transform duration-300"
+                        id="icon-acc-playlists"></i>
                 </div>
 
-                <nav class="px-4 space-y-1 mt-4 shrink-0">
-                    <div onclick="enterMainLibrary()" id="nav-library" class="sidebar-link active"><i
-                            class="fa-solid fa-layer-group w-4 text-center"></i> Biblioteca</div>
-                    <div onclick="enterNerdLibrary()" id="nav-nerd" class="sidebar-link"><i
-                            class="fa-solid fa-gamepad w-4 text-center"></i> OST Nerd</div>
-                    <div onclick="ver('downloader')" id="nav-downloader" class="sidebar-link"><i
-                            class="fa-solid fa-cloud-arrow-down w-4 text-center"></i> Descargar</div>
-                    <div onclick="ver('history')" id="nav-history" class="sidebar-link hover:text-yellow-400"><i
-                            class="fa-solid fa-clock-rotate-left w-4 text-center"></i> Historial</div>
-                </nav>
-
-                <div id="sidebar-filters" class="flex-1 flex flex-col min-h-0 px-4 mt-0 pb-2">
-
-                    <div class="accordion-header group shrink-0" onclick="toggleAcc('acc-playlists')">
-                        <span class="group-hover:text-emerald-400 transition">MIS PLAYLISTS</span>
-                        <i class="fa-solid fa-chevron-down text-[12px] transition-transform duration-300"
-                            id="icon-acc-playlists"></i>
+                <div id="acc-playlists" class="show pl-1 mt-2 flex-1 flex flex-col min-h-0">
+                    <div class="flex gap-2 shrink-0 mb-2">
+                        <div onclick="crearPlaylist()"
+                            class="sidebar-link text-[11px] text-emerald-500 py-2 border border-dashed border-emerald-500/50 hover:bg-emerald-500/10 justify-center flex-1">
+                            <i class="fa-solid fa-plus-circle"></i> Nueva
+                        </div>
+                        <div onclick="importPlaylistModal()"
+                            class="sidebar-link text-[11px] text-cyan-400 py-2 border border-dashed border-cyan-500/50 hover:bg-cyan-500/10 justify-center flex-1">
+                            <i class="fa-solid fa-download"></i> Importar
+                        </div>
                     </div>
-
-                    <div id="acc-playlists" class="show pl-1 mt-2 flex-1 flex flex-col min-h-0">
-                        <div class="flex gap-2 shrink-0 mb-2">
-                            <div onclick="crearPlaylist()"
-                                class="sidebar-link text-[11px] text-emerald-500 py-2 border border-dashed border-emerald-500/50 hover:bg-emerald-500/10 justify-center flex-1">
-                                <i class="fa-solid fa-plus-circle"></i> Nueva
-                            </div>
-                            <div onclick="importPlaylistModal()"
-                                class="sidebar-link text-[11px] text-cyan-400 py-2 border border-dashed border-cyan-500/50 hover:bg-cyan-500/10 justify-center flex-1">
-                                <i class="fa-solid fa-download"></i> Importar
-                            </div>
-                        </div>
-                        <div id="list-playlists-container" class="flex-1 overflow-y-auto custom-scroll pr-2 space-y-1">
-                        </div>
+                    <div id="list-playlists-container" class="flex-1 overflow-y-auto custom-scroll pr-2 space-y-1">
                     </div>
                 </div>
+            </div>
 
-                <div class="mt-auto bg-[#080808] border-t border-white/5 shrink-0">
-                    <div class="px-4 pt-3 pb-4">
-                        <!-- Botones -->
-                        <div class="flex gap-2 mb-0" id="rescan-buttons-row">
-                            <button onclick="rescanLibrary()" id="btn-rescan"
-                                class="flex-1 bg-emerald-900/10 hover:bg-emerald-600 border border-emerald-500/20 hover:border-emerald-500 text-emerald-500 hover:text-white transition-all duration-300 py-2 rounded-md text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 group shadow-[0_0_10px_rgba(0,0,0,0.5)]">
-                                <i
-                                    class="fa-solid fa-rotate group-hover:rotate-180 transition-transform duration-500"></i>
-                                <span>Sincronizar</span>
-                            </button>
-                            <button onclick="showSettingsPanel()" id="btn-settings" title="Configuración"
-                                class="bg-zinc-800/50 hover:bg-zinc-700 border border-white/10 hover:border-white/20 text-zinc-400 hover:text-white transition-all duration-300 p-2 rounded-md shadow-[0_0_10px_rgba(0,0,0,0.5)]">
-                                <i class="fa-solid fa-gear text-sm"></i>
-                            </button>
+            <div class="mt-auto bg-[#080808] border-t border-white/5 shrink-0">
+                <div class="px-4 pt-3 pb-4">
+                    <!-- Botones -->
+                    <div class="flex gap-2 mb-0" id="rescan-buttons-row">
+                        <button onclick="rescanLibrary()" id="btn-rescan"
+                            class="flex-1 bg-emerald-900/10 hover:bg-emerald-600 border border-emerald-500/20 hover:border-emerald-500 text-emerald-500 hover:text-white transition-all duration-300 py-2 rounded-md text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 group shadow-[0_0_10px_rgba(0,0,0,0.5)]">
+                            <i class="fa-solid fa-rotate group-hover:rotate-180 transition-transform duration-500"></i>
+                            <span>Sincronizar</span>
+                        </button>
+                        <button onclick="showSettingsPanel()" id="btn-settings" title="Configuración"
+                            class="bg-zinc-800/50 hover:bg-zinc-700 border border-white/10 hover:border-white/20 text-zinc-400 hover:text-white transition-all duration-300 p-2 rounded-md shadow-[0_0_10px_rgba(0,0,0,0.5)]">
+                            <i class="fa-solid fa-gear text-sm"></i>
+                        </button>
+                    </div>
+
+                    <!-- Barra de progreso del escaneo -->
+                    <div id="rescan-progress-container" class="hidden w-full mt-4">
+                        <div class="flex justify-between items-center text-[11px] text-emerald-400 mb-2">
+                            <span id="rescan-stage-text" class="font-medium tracking-wide">Contando
+                                archivos...</span>
+                            <span id="rescan-percent-text" class="font-bold">0%</span>
                         </div>
-
-                        <!-- Barra de progreso del escaneo -->
-                        <div id="rescan-progress-container" class="hidden w-full mt-4">
-                            <div class="flex justify-between items-center text-[11px] text-emerald-400 mb-2">
-                                <span id="rescan-stage-text" class="font-medium tracking-wide">Contando
-                                    archivos...</span>
-                                <span id="rescan-percent-text" class="font-bold">0%</span>
-                            </div>
-                            <div
-                                class="w-full h-3 bg-gray-800/80 rounded-lg overflow-hidden border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.15)]">
-                                <div id="rescan-progress-bar"
-                                    class="h-full bg-gradient-to-r from-emerald-600 via-emerald-400 to-emerald-500 transition-all duration-500 rounded-lg relative"
-                                    style="width: 0%">
-                                    <div
-                                        class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-shimmer">
-                                    </div>
+                        <div
+                            class="w-full h-3 bg-gray-800/80 rounded-lg overflow-hidden border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.15)]">
+                            <div id="rescan-progress-bar"
+                                class="h-full bg-gradient-to-r from-emerald-600 via-emerald-400 to-emerald-500 transition-all duration-500 rounded-lg relative"
+                                style="width: 0%">
+                                <div
+                                    class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-shimmer">
                                 </div>
                             </div>
-                            <div id="rescan-message" class="text-[10px] text-gray-500 mt-2 text-center"></div>
                         </div>
+                        <div id="rescan-message" class="text-[10px] text-gray-500 mt-2 text-center"></div>
                     </div>
                 </div>
             </div>
-            <div class="p-4 border-t border-emerald-900/20 bg-[#080808] relative overflow-hidden group">
-            </div>
-    </div>
+        </div>
+        <div class="p-4 border-t border-emerald-900/20 bg-[#080808] relative overflow-hidden group">
+        </div>
+        </div>
     </aside>
     <div id="sidebar-backdrop" onclick="closeSidebar()"></div>
 
@@ -3882,7 +3989,7 @@
                     const parts = f._normalizedPath.split('/');
                     let currentCat = parts.length > 2 ? parts[1] : (parts.length > 1 ? parts[1] : 'Otros');
                     if (f.is_adult) currentCat = '🔞 Adult';
-                    
+
                     if (window.netflixActiveCategory !== allCategoryLabel && currentCat !== window.netflixActiveCategory) return;
 
                     let showKey, showTitle, showPathToOpen;
@@ -4104,7 +4211,7 @@
                         const count = groups[name].files.length;
                         if (shouldForceVideoList) {
                             container.innerHTML += `
-                        <div data-folder="${name}" onclick="navigateTo(this.dataset.folder)" class="list-row group bg-[#121212] border-l-4 border-transparent hover:border-emerald-500 hover:bg-[#1e1e1e] cursor-pointer flex items-center p-2 gap-4">
+                        <div data-folder="${name}" onclick="navigateTo(this.dataset.folder)" tabindex="0" class="list-row group bg-[#121212] border-l-4 border-transparent hover:border-emerald-500 hover:bg-[#1e1e1e] cursor-pointer flex items-center p-2 gap-4">
                             <i class="fa-solid fa-folder text-2xl text-emerald-500 group-hover:text-emerald-400 ml-2"></i>
                             <span class="font-bold text-white flex-1">${name}</span>
                             <span class="text-[10px] bg-emerald-800 text-emerald-400 px-2 py-0.5 rounded">${count} items</span>
@@ -4856,20 +4963,20 @@
                         </div>`;
                         document.body.insertAdjacentHTML('beforeend', html);
                         loadAdminUsers();
-                        
+
                         // Adult Door event listener
                         const pathInput = document.getElementById('settings-secret-word');
                         if (pathInput) {
-                            pathInput.addEventListener('input', async function() {
+                            pathInput.addEventListener('input', async function () {
                                 if (this.value.trim().toLowerCase() === 'adult') {
                                     this.value = '';
                                     document.getElementById('tab-adult').classList.remove('hidden');
                                     showSettingsTab('adult');
-                                    
+
                                     const commonRatings = ['G', 'PG', 'PG-13', 'R', 'NC-17', 'TV-Y', 'TV-Y7', 'TV-G', 'TV-PG', 'TV-14', 'TV-MA', '18', '18+', 'MA15+', 'M', '16'];
                                     // Cargar configuración guardada
                                     const adultRatings = d.adult_ratings || [];
-                                    
+
                                     document.getElementById('adult-ratings-grid').innerHTML = commonRatings.map(r => {
                                         const isChecked = adultRatings.includes(r);
                                         return `
@@ -4879,7 +4986,7 @@
                                             </label>
                                         `;
                                     }).join('');
-                                    
+
                                     loadAdultList();
                                 }
                             });
@@ -4908,18 +5015,18 @@
                     const d = await r.json();
                     if (d.items) {
                         const list = document.getElementById('adult-items-list');
-                        if(list) {
+                        if (list) {
                             list.innerHTML = d.items.map(i => `
                                 <div class="flex justify-between items-center bg-white/5 p-2 rounded">
-                                    <div class="truncate text-sm text-zinc-300 w-3/4">${i.title} <span class="text-xs text-zinc-500">(${i.tmdb_rating||'Sin rating'})</span></div>
+                                    <div class="truncate text-sm text-zinc-300 w-3/4">${i.title} <span class="text-xs text-zinc-500">(${i.tmdb_rating || 'Sin rating'})</span></div>
                                     <button onclick="toggleAdultItem('${i.rel_path}', false)" class="text-xs bg-emerald-600 px-2 py-1 rounded">Restaurar</button>
                                 </div>
                             `).join('');
                         }
                     }
-                } catch (e) {}
+                } catch (e) { }
             }
-            
+
             async function toggleAdultItem(path, is_adult) {
                 try {
                     const r = await fetch('/api/admin/adult/item', {
@@ -4933,13 +5040,13 @@
                         if (document.getElementById('content-adult')) loadAdultList();
                         // Refrescar biblioteca en vivo si existe la funcion
                         if (typeof renderVideoLibrary === 'function') {
-                             fetch('/api/biblioteca').then(r => r.json()).then(data => {
-                                 window.cachedLibraryData = data; // Actualizar cache global si existe
-                                 renderVideoLibrary(data);
-                             });
+                            fetch('/api/biblioteca').then(r => r.json()).then(data => {
+                                window.cachedLibraryData = data; // Actualizar cache global si existe
+                                renderVideoLibrary(data);
+                            });
                         }
                     }
-                } catch (e) {}
+                } catch (e) { }
             }
 
             function showSettingsTab(tab) {
@@ -4947,7 +5054,7 @@
                 document.getElementById('content-users').classList.add('hidden');
                 document.getElementById('content-invites').classList.add('hidden');
                 const contentAdult = document.getElementById('content-adult');
-                if(contentAdult) contentAdult.classList.add('hidden');
+                if (contentAdult) contentAdult.classList.add('hidden');
                 document.getElementById('tab-general').classList.remove('bg-emerald-600', 'text-white');
                 document.getElementById('tab-general').classList.add('bg-zinc-700', 'text-zinc-300');
                 document.getElementById('tab-users').classList.remove('bg-emerald-600', 'text-white');
@@ -4955,7 +5062,7 @@
                 document.getElementById('tab-invites').classList.remove('bg-emerald-600', 'text-white');
                 document.getElementById('tab-invites').classList.add('bg-zinc-700', 'text-zinc-300');
                 const tabAdult = document.getElementById('tab-adult');
-                if(tabAdult) {
+                if (tabAdult) {
                     tabAdult.classList.remove('bg-emerald-600', 'text-white');
                     tabAdult.classList.add('bg-zinc-700', 'text-zinc-300');
                 }
@@ -7011,7 +7118,7 @@
 
             async function playVideoMode(file) {
                 closeSidebar();
-                
+
                 const playerContainer = document.getElementById('view-player');
                 if (playerContainer) {
                     playerContainer.classList.remove('hidden');
@@ -7364,11 +7471,12 @@
                                         const hls = new Hls({
                                             autoStart: false,
                                             startPosition: 0,
-                                            liveSyncDurationCount: 3,
-                                            liveMaxLatencyDurationCount: 5,
-                                            maxBufferLength: 30,
-                                            maxMaxBufferLength: 120,
+                                            liveSyncDurationCount: 1,
+                                            liveMaxLatencyDurationCount: 3,
+                                            maxBufferLength: 5,
+                                            maxMaxBufferLength: 10,
                                             backBufferLength: 30,
+
                                         });
 
                                         hls.loadSource(url);
@@ -9281,7 +9389,7 @@
                 clearTimeout(renderTimeout);
                 renderTimeout = setTimeout(() => {
                     syncVideoDerivedState();
-                    
+
                     const container = document.getElementById('lib-content');
                     if (container) {
                         container.classList.remove('content-transition');
@@ -10341,7 +10449,7 @@
     </button>`;
 
                 return `
-    <div class="list-row group ${isSel} flex items-center p-2 hover:bg-white/5 rounded-lg mb-1 transition border-b border-white/5 relative cursor-pointer" 
+    <div tabindex="0" class="list-row group ${isSel} flex items-center p-2 hover:bg-white/5 rounded-lg mb-1 transition border-b border-white/5 relative cursor-pointer" 
          data-path="${escapeHtml(f.path)}"
          onclick="playNow(this.dataset.path)">
         
