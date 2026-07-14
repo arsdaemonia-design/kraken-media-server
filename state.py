@@ -21,6 +21,7 @@ RESCAN_STATUS = {
 }
 ACTIVE_USERS = {}
 PENDING_COMMANDS = {}
+REMOTE_CONTROL_LINKS = {}
 HLS_SESSIONS = {}
 STREAM_TOKENS = {}
 TOKEN_BLACKLIST = set()  # JTI blacklist para logout seguro
@@ -49,6 +50,15 @@ def cleanup_inactive_users():
                 to_remove = [sid for sid, data in ACTIVE_USERS.items() if now - data.get('last_ping', 0) > 15]
                 for sid in to_remove:
                     del ACTIVE_USERS[sid]
+                    PENDING_COMMANDS.pop(sid, None)
+                    REMOTE_CONTROL_LINKS.pop(sid, None)
+
+                stale_links = [
+                    controller_sid for controller_sid, target_sid in REMOTE_CONTROL_LINKS.items()
+                    if controller_sid not in ACTIVE_USERS or target_sid not in ACTIVE_USERS
+                ]
+                for controller_sid in stale_links:
+                    REMOTE_CONTROL_LINKS.pop(controller_sid, None)
         except Exception as e:
             print("Error cleaning up users:", e)
         time_module.sleep(10)

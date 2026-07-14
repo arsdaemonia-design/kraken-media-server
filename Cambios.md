@@ -1604,3 +1604,73 @@ Tercera y Ãºltima etapa de la unificaciÃ³n del render de video. AdemÃ¡s, s
   - Resolucin de solapamientos de capas (z-index) entre la barra superior y el men lateral.
   - Limpieza de headers redundantes en las vistas de msica y video para una interfaz ms despejada.
   - Sincronizacin mejorada del estado Offline mediante eventos globales y gestin de localStorage.
+# Historial de Cambios - Kraken Media Server
+
+## [v4.90] - 2026-05-05 (Actual)
+### 🔞 Adult Vault & Seguridad
+- **Sistema de Bóveda Oculta**: Implementación de capa de seguridad lógica para ocultar contenido sensible de la biblioteca principal.
+- **Acceso por Palabra Secreta**: Nueva "Puerta Trasera" en el panel de configuración. Al ingresar la palabra secreta `adult` en el campo de "Código Especial", se revela el panel de administración de la bóveda.
+- **Filtrado Dinámico de API**: El endpoint `/api/biblioteca` ahora filtra automáticamente ítems marcados como `is_adult` a menos que se valide el PIN maestro en los headers.
+- **Categoría Virtual 🔞**: Integración en el catálogo tipo Netflix de una categoría exclusiva para contenido adulto, visible únicamente bajo sesión administrativa.
+
+### 🛠️ Mejoras de Backend & Fixes
+- **Fix Edición Masiva**: Corregido error 400 (Bad Request) que impedía actualizar metadata de múltiples archivos simultáneamente ("Falta path").
+- **Auto-Tagging Inteligente**: El sistema ahora marca automáticamente como `is_adult` cualquier contenido cuyo rating (TMDB) coincida con los filtros configurados por el usuario.
+- **Persistencia de Configuración**: Sincronización total entre `config.py` y el frontend para mantener los filtros de ratings seleccionados.
+- **Base de Datos**: Migración de la tabla `media` para incluir soporte nativo para el flag de contenido restringido.
+
+### 🌐 Red & Conectividad
+- **Acceso LAN Desbloqueado**: Modificada la configuración de `app_offline.py` para permitir conexiones desde la red local (0.0.0.0) en lugar de solo localhost, permitiendo el uso de Kraken en dispositivos móviles dentro de casa a máxima velocidad.
+
+#### Contexto Técnico del Control Remoto (14-Jul-2026)
+- **Idea base**:
+  - Kraken ya detectaba varios dispositivos por usuario, pero solo permitía mandar comandos sueltos a un `sid`.
+  - Esta fase convirtió ese comportamiento en un modo de control manual más estable, sin romper la independencia natural entre PC, celular y tablet.
+- **1. El controlador no reemplaza al reproductor**:
+  - Cada dispositivo sigue con su propia cola, su propio estado y su propia reproducción.
+  - El link `controller_sid -> target_sid` solo define quién puede mandar acciones remotas a quién.
+- **2. El heartbeat publica estado enriquecido**:
+  - En cada `/status`, el cliente ahora reporta:
+    - si está reproduciendo
+    - volumen
+    - tipo de media (`audio` / `video`)
+    - modo de librería
+    - nombre y tipo de dispositivo
+  - Eso permite que el equipo controlador vea el estado real del otro dispositivo sin mezclar sesiones.
+- **3. Los comandos dejaron de pisarse**:
+  - Antes `PENDING_COMMANDS[target_sid]` guardaba una sola orden.
+  - Ahora cada destino recibe una cola (`remote_commands`), para que varios toques rápidos como `pause`, `next`, `seek` o `vol+` no se pierdan.
+- **4. El frontend separa control de reproducción local**:
+  - `Controlar dispositivo` enlaza equipos para mandar acciones.
+  - `Reproducir aquí` sigue siendo el comportamiento local normal de Kraken.
+  - Así no se rompe el caso donde PC, celular y tablet usan la misma cuenta pero hacen cosas distintas al mismo tiempo.
+- **5. Widget remoto + modal del radar**:
+  - El radar sigue agrupando por usuario, pero dentro del modal ahora se puede elegir la sesión concreta.
+  - Una vez enlazado, aparece un widget flotante con estado y controles del destino.
+- **6. Compatibilidad audio/video**:
+  - `play/pause`, volumen y seek intentan resolver primero si hay video activo y, si no, usan el player de audio.
+    - `artist`
+    - `type`
+  - Ese payload se manda al destino por el mismo canal remoto ya existente (`/control` -> `remote_commands`).
+  - El dispositivo destino interpreta `play_media_...` y trata de localizar el archivo dentro de su propia biblioteca.
+  - Si lo encuentra, llama a `playNow(path)` y arranca la reproducci�n normal del lado remoto.
+  - Si no encuentra match exacto y es audio, intenta un fallback simple para no perder el intento de reproducci�n.
+- **Por qu� se hizo as�**:
+  - No era buena idea compartir la cola o la memoria entre equipos.
+  - Esta soluci�n reutiliza el �ndice normal de Kraken y mantiene la independencia por dispositivo.
+  - Permite mandar una canci�n o video espec�fico sin obligar sincronizaci�n total entre sesiones.
+
+#### Pr�xima Evoluci�n Recomendada: Dispositivo de Reproducci�n Activo
+- **Idea**:
+  - Lo actual es un modo de control manual y env�o expl�cito.
+  - Lo siguiente ser�a un modo m�s c�modo: elegir un `dispositivo de reproducci�n activo`.
+- **Comportamiento esperado**:
+  - `Sin destino activo`: tocar una canci�n reproduce localmente.
+  - `Destino remoto activo`: tocar una canci�n reproduce directamente en ese dispositivo remoto.
+  - `Modo control`: sigue disponible para play/pause/seek/next/volumen sin alterar por fuerza el comportamiento de tocar.
+- **Ventaja**:
+  - Ya no necesitar�as pulsar `mandar` cada vez.
+  - Bastar�a con decir: `mi salida actual es la PC`, y desde ah� todo lo que elijas en el celular se lanzar�a en la PC.
+- **Por qu� conviene como capa adicional**:
+  - Porque no reemplaza el modo actual ni rompe el flujo local.
+  - Solo agrega una redirecci�n opcional en el momento de elegir contenido.

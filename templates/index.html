@@ -1607,7 +1607,121 @@
                 }
             }
         }
+        /* ========== MODO TV: MÁXIMO RENDIMIENTO (LITE) ========== */
+        body.tv-mode *,
+        body.tv-mode *::before,
+        body.tv-mode *::after {
+            animation: none !important;
+            transition: none !important;
+            box-shadow: none !important;
+            text-shadow: none !important;
+            backdrop-filter: none !important;
+            filter: none !important;
+        }
+
+        body.tv-mode .bg-noise::before,
+        body.tv-mode .bg-grid-pattern,
+        body.tv-mode #visualizer,
+        body.tv-mode .kraken-neon-filter,
+        body.tv-mode .vortex-logo-fixed,
+        body.tv-mode #loader,
+        body.tv-mode .group:hover .kraken-neon-filter {
+            display: none !important;
+            animation: none !important;
+            filter: none !important;
+        }
+
+        /* Tailwind CDN overrides para TV */
+        body.tv-mode .animate-fade-in,
+        body.tv-mode .animate-slide-in,
+        body.tv-mode .animate-float,
+        body.tv-mode .animate-shimmer,
+        body.tv-mode .content-transition,
+        body.tv-mode .card-entry,
+        body.tv-mode [class*="animate-"] {
+            animation: none !important;
+            transition: none !important;
+        }
+
+        /* Elementos interactivos simplificados */
+        body.tv-mode button,
+        body.tv-mode .card-interactive,
+        body.tv-mode .list-row,
+        body.tv-mode .sidebar-link,
+        body.tv-mode input {
+            min-height: 52px !important;
+            font-size: 14px !important;
+            border-radius: 8px !important;
+        }
+
+        body.tv-mode button:focus,
+        body.tv-mode .card-interactive:focus,
+        body.tv-mode .list-row:focus,
+        body.tv-mode .sidebar-link:focus,
+        body.tv-mode input:focus {
+            outline: 4px solid #10b981 !important;
+            outline-offset: 2px;
+            border-color: #10b981 !important;
+            transform: none !important;
+            background: #064e3b !important; /* Esmeralda oscuro sólido */
+        }
+
+        body.tv-mode {
+            cursor: none !important;
+            background: #000000 !important; /* Negro absoluto */
+        }
     </style>
+    <script>
+        /**
+         * KRAKEN TV PROTOCOL LITE 🎮
+         * Detección y navegación de alto rendimiento
+         */
+        (function() {
+            function detectTV() {
+                const ua = navigator.userAgent;
+                return /Android TV|SmartTV|HbbTV|GoogleTV|CrKey|Xbox|PlayStation|Nintendo|Web0S|Tizen|Viera|NetCast|Roku|AFT[ABKMR]/.test(ua);
+            }
+
+            if (detectTV()) {
+                document.addEventListener('DOMContentLoaded', () => {
+                    document.body.classList.add('tv-mode');
+                    console.log('📺 Kraken TV Lite Mode Activated');
+                    
+                    // Desactivar visualizador de audio para ahorrar CPU
+                    if (window.isVisualizerInit !== undefined) window.isVisualizerInit = false;
+                    
+                    // Zoom optimizado
+                    if (!localStorage.getItem('kraken_zoom')) {
+                        localStorage.setItem('kraken_zoom', '1.8');
+                    }
+                });
+
+                // Navegación D-Pad
+                document.addEventListener('keydown', (e) => {
+                    const focusables = Array.from(document.querySelectorAll('button:not([disabled]), .card-interactive, .list-row, .sidebar-link, input, a, [tabindex="0"]'));
+                    let index = focusables.indexOf(document.activeElement);
+
+                    if (index === -1 && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                        focusables[0].focus();
+                        e.preventDefault();
+                        return;
+                    }
+
+                    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+                        index = (index + 1) % focusables.length;
+                        focusables[index].focus();
+                        e.preventDefault();
+                    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+                        index = (index - 1 + focusables.length) % focusables.length;
+                        focusables[index].focus();
+                        e.preventDefault();
+                    } else if (e.key === 'Enter') {
+                        document.activeElement.click();
+                    }
+                });
+            }
+        })();
+    </script>
 
     <script>
             // ═══ KRAKEN AUTH SYSTEM ═══
@@ -4307,6 +4421,14 @@
 
                         // 1. CAMBIO: Forzamos 'true' para que siempre se vea como reproductor
                         const currentTrack = playerQueue[currentTrackIndex];
+                        const playbackSnapshot = getKrakenPlaybackSnapshot();
+                        const activeVideoElement = document.querySelector('#video-screen video');
+                        const currentProgressTime = playbackSnapshot.media_type === 'video'
+                            ? (activeVideoElement ? activeVideoElement.currentTime : 0)
+                            : (audioElement ? audioElement.currentTime : 0);
+                        const currentProgressDuration = playbackSnapshot.media_type === 'video'
+                            ? (activeVideoElement ? activeVideoElement.duration : 0)
+                            : (audioElement ? audioElement.duration : 0);
                         const params = new URLSearchParams({
                             sid: MY_SESSION_ID,
                             user: MY_NAME,
@@ -4314,8 +4436,16 @@
                             song: titleEl ? titleEl.innerText : '',
                             artist: artistEl ? artistEl.innerText : '',
                             path: currentTrack ? currentTrack.path : '',
-                            time: audioElement ? audioElement.currentTime : 0,
-                            duration: audioElement ? audioElement.duration : 0
+                            time: currentProgressTime,
+                            duration: currentProgressDuration,
+                            is_playing: playbackSnapshot.is_playing ? 'true' : 'false',
+                            volume: playbackSnapshot.volume,
+                            queue_length: playbackSnapshot.queue_length,
+                            current_index: playbackSnapshot.current_index,
+                            library_mode: playbackSnapshot.library_mode,
+                            device_name: playbackSnapshot.device_name,
+                            device_type: playbackSnapshot.device_type,
+                            media_type: playbackSnapshot.media_type
                         });
 
                         const res = await fetch(`/status?${params.toString()}`);
@@ -4333,6 +4463,7 @@
                         if (d.online_users) {
                             drawUserRadar(d.online_users);
                         }
+                        applyControlledTargetState(d.controlled_target || null);
                         // --- 2. ALEXA ---
                         const cmd = d.last_command;
                         if (typeof window.lastProcessedTime === 'undefined') window.lastProcessedTime = 0;
@@ -4350,96 +4481,13 @@
                         }
 
                         // --- 2.5 REMOTE CONTROL (EL TITIRITERO) ---
-                        if (d.remote_command) {
-                            console.log("🎮 ORDEN REMOTA:", d.remote_command);
-                            showToast(`🎮 Comando: ${d.remote_command}`, "info");
-                            // Emojis
-                            if (d.remote_command.startsWith('emoji_')) {
-                                const emojiIcon = d.remote_command.split('_')[1];
-                                showEmojiModal(emojiIcon);
-                                showToast("¡Reacción Recibida!", "success");
-                            }
-
-                            // Quick message
-                            if (d.remote_command.startsWith('msg_')) {
-                                const txt = decodeURIComponent(d.remote_command.slice(4));
-                                const sender = d.from_name || 'Alguien';
-                                const mId = 'incoming-msg-' + Date.now();
-                                const mEl = document.createElement('div');
-                                mEl.id = mId;
-                                mEl.className = 'fixed inset-0 z-[10001] flex items-center justify-center bg-black/70 backdrop-blur-md animate-fade-in';
-                                mEl.onclick = () => mEl.remove();
-                                mEl.innerHTML = `
-                                    <div class="bg-[#141414] border border-blue-500/30 rounded-2xl max-w-xs w-full mx-4 p-6 text-center shadow-2xl" onclick="event.stopPropagation()">
-                                        <div class="text-3xl mb-3">💬</div>
-                                        <div class="text-[10px] text-blue-400 uppercase tracking-widest mb-1">${sender} te dice:</div>
-                                        <div class="text-white text-lg font-bold leading-snug mb-5">${txt}</div>
-                                        <button onclick="document.getElementById('${mId}').remove()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-xl text-sm transition">Ok 👍</button>
-                                    </div>`;
-                                document.body.appendChild(mEl);
-                            }
-
-                            // Song recommendation
-                            if (d.remote_command.startsWith('recommend_')) {
-                                try {
-                                    const payload = JSON.parse(d.remote_command.slice(10));
-                                    const sender = d.from_name || 'Alguien';
-                                    const rId = 'incoming-rec-' + Date.now();
-                                    const rEl = document.createElement('div');
-                                    rEl.id = rId;
-                                    rEl.className = 'fixed bottom-24 right-4 z-[10001] animate-slide-up';
-                                    rEl.innerHTML = `
-                                        <div class="bg-[#141414] border border-yellow-500/30 rounded-2xl w-72 p-4 shadow-2xl">
-                                            <div class="flex items-center gap-3 mb-3">
-                                                <span class="text-2xl">⭐</span>
-                                                <div class="flex-1 min-w-0">
-                                                    <div class="text-[9px] text-yellow-400 uppercase tracking-widest">${sender} te recomienda:</div>
-                                                    <div class="text-white font-bold text-sm truncate">${payload.title}</div>
-                                                    <div class="text-zinc-400 text-xs truncate">${payload.artist || ''}</div>
-                                                </div>
-                                                <button onclick="document.getElementById('${rId}').remove()" class="text-zinc-600 hover:text-white text-lg leading-none">×</button>
-                                            </div>
-                                            <div class="flex gap-2">
-                                                <button id="btn-play-${rId}"
-                                                    class="flex-1 bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-2 rounded-xl text-xs transition">
-                                                    🎵 Escuchar
-                                                </button>
-                                                <button onclick="document.getElementById('${rId}').remove()" class="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-400 py-2 rounded-xl text-xs transition">Luego</button>
-                                            </div>
-                                        </div>`;
-                                    rEl.dataset.path = payload.path;
-                                    rEl.dataset.title = payload.title;
-                                    rEl.dataset.artist = payload.artist || '';
-                                    document.body.appendChild(rEl);
-                                    document.getElementById(`btn-play-${rId}`).onclick = function () {
-                                        listenSame('', rEl.dataset.path, rEl.dataset.title, rEl.dataset.artist);
-                                        rEl.remove();
-                                    };
-                                    setTimeout(() => rEl.remove(), 30000);
-                                } catch (_) { }
-                            }
-
-                            // Controles de Reproducción
-                            if (d.remote_command === 'pause') togglePlay();
-                            if (d.remote_command === 'play') {
-                                audioElement.play().catch(e => console.log(e));
-                                updatePlayIcons(true);
-                            }
-                            if (d.remote_command === 'next') playNext();
-                            if (d.remote_command === 'prev') playPrevious();
-
-                            // 👇👇👇 ESTO ES LO QUE TE FALTA AGREGAR (VOLUMEN) 👇👇👇
-                            if (d.remote_command === 'vol_up') {
-                                // Subimos 10%
-                                const newVol = Math.min(1, audioElement.volume + 0.1);
-                                setVolume(newVol);
-                            }
-                            if (d.remote_command === 'vol_down') {
-                                // Bajamos 10%
-                                const newVol = Math.max(0, audioElement.volume - 0.1);
-                                setVolume(newVol);
-                            }
-                            // 👆👆👆 FIN DE LO NUEVO 👆👆👆
+                        if (Array.isArray(d.remote_commands) && d.remote_commands.length) {
+                            d.remote_commands.forEach(cmd => applyRemoteCommand(cmd));
+                        } else if (d.remote_command) {
+                            applyRemoteCommand({
+                                action: d.remote_command,
+                                from_name: d.from_name || 'Alguien'
+                            });
                         }
 
                         // --- 3. DESCARGAS ---
@@ -6756,6 +6804,25 @@
             // --- LOGICA DE VIDEO ---
             function playNow(path) {
                 if (selectionMode) { selectRow(path); return; }
+
+                if (window.KRAKEN_PLAYBACK_TARGET && window.KRAKEN_PLAYBACK_TARGET.session_id) {
+                    let file = libData.files.find(f => f.path === path);
+                    if (!file && path && path.endsWith('/')) {
+                        file = libData.files.find(f => f.path && f.path.startsWith(path) && f.type === 'video');
+                    }
+                    if (!file) {
+                        const allFiles = libData.files;
+                        for (let i = 0; i < allFiles.length; i++) {
+                            if (allFiles[i].sample && allFiles[i].sample.path === path) {
+                                file = allFiles[i];
+                                break;
+                            }
+                        }
+                    }
+                    const payloadFile = file || { path: path, title: path.split('/').pop(), type: 'audio' };
+                    sendFileToControlledDevice(payloadFile, window.KRAKEN_PLAYBACK_TARGET);
+                    return;
+                }
 
                 // Buscar archivo en libData
                 let file = libData.files.find(f => f.path === path);
@@ -11744,6 +11811,56 @@
                 muted: false
             };
 
+            window.KRAKEN_CONTROL_TARGET = null;
+            window.KRAKEN_PLAYBACK_TARGET = null;
+
+            function detectKrakenDeviceType() {
+                const ua = navigator.userAgent || '';
+                if (/ipad|tablet/i.test(ua)) return 'tablet';
+                if (/mobi|android|iphone/i.test(ua)) return 'mobile';
+                return 'desktop';
+            }
+
+            function getKrakenDeviceName() {
+                let saved = localStorage.getItem('kraken_device_name');
+                if (saved) return saved;
+
+                const ua = navigator.userAgent || '';
+                const type = detectKrakenDeviceType();
+                const platform = navigator.platform || '';
+                let inferred = type === 'desktop' ? 'PC Kraken' : (type === 'tablet' ? 'Tablet Kraken' : 'Movil Kraken');
+
+                if (/Win/i.test(platform)) inferred = 'PC Windows';
+                else if (/Mac/i.test(platform)) inferred = 'Mac Kraken';
+                else if (/Linux/i.test(platform)) inferred = 'PC Linux';
+                else if (/iPhone/i.test(ua)) inferred = 'iPhone';
+                else if (/iPad/i.test(ua)) inferred = 'iPad';
+
+                localStorage.setItem('kraken_device_name', inferred);
+                return inferred;
+            }
+
+            function getKrakenPlaybackSnapshot() {
+                const currentTrack = playerQueue[currentTrackIndex];
+                const isVideoTrack = !!(currentTrack && (currentTrack.type === 'video' || (currentTrack.path && /\.(mp4|mkv|avi|webm)$/i.test(currentTrack.path))));
+                const activeVideo = document.querySelector('#video-screen video');
+                const isVideoPlaying = !!(activeVideo && !activeVideo.paused && !activeVideo.ended);
+                const isAudioPlaying = !!(audioElement && audioElement.src && !audioElement.paused && !audioElement.ended);
+                const currentVolume = audioElement ? Number(audioElement.volume || 0) : 0;
+                const currentMode = (currentLibrary === 'video' || isVideoTrack || isVideoPlaying) ? 'video' : 'audio';
+
+                return {
+                    is_playing: isVideoPlaying || isAudioPlaying,
+                    volume: currentVolume,
+                    queue_length: playerQueue.length || 0,
+                    current_index: currentTrackIndex >= 0 ? currentTrackIndex : 0,
+                    library_mode: currentMode,
+                    device_name: getKrakenDeviceName(),
+                    device_type: detectKrakenDeviceType(),
+                    media_type: isVideoTrack || isVideoPlaying ? 'video' : 'audio'
+                };
+            }
+
             setTimeout(() => {
                 const loader = document.getElementById('loader');
                 if (loader && !loader.classList.contains('hidden')) {
@@ -12126,6 +12243,421 @@
             let lastRadarJson = "";
             let LAST_USERS_DATA = [];
 
+            function getDeviceDisplayName(device) {
+                if (!device) return 'Dispositivo';
+                return device.device_name || device.name || `Dispositivo ${String(device.session_id || '').slice(0, 6)}`;
+            }
+
+            function syncRemoteTargetsWithOnlineUsers() {
+                const onlineBySid = new Map((LAST_USERS_DATA || []).map(u => [u.session_id, u]));
+
+                if (window.KRAKEN_CONTROL_TARGET?.session_id) {
+                    const freshControl = onlineBySid.get(window.KRAKEN_CONTROL_TARGET.session_id);
+                    if (freshControl) {
+                        window.KRAKEN_CONTROL_TARGET = freshControl;
+                    } else {
+                        window.KRAKEN_CONTROL_TARGET = null;
+                    }
+                }
+
+                if (window.KRAKEN_PLAYBACK_TARGET?.session_id) {
+                    const freshPlayback = onlineBySid.get(window.KRAKEN_PLAYBACK_TARGET.session_id);
+                    if (freshPlayback) {
+                        window.KRAKEN_PLAYBACK_TARGET = freshPlayback;
+                    } else {
+                        window.KRAKEN_PLAYBACK_TARGET = null;
+                    }
+                }
+            }
+
+            function getActiveRemotePlaybackTarget() {
+                return window.KRAKEN_PLAYBACK_TARGET || window.KRAKEN_CONTROL_TARGET || null;
+            }
+
+            function renderPlaybackTargetWidget() {
+                let panel = document.getElementById('playback-target-widget');
+                const target = window.KRAKEN_PLAYBACK_TARGET;
+
+                if (!target) {
+                    if (panel) panel.remove();
+                    return;
+                }
+
+                if (!panel) {
+                    panel = document.createElement('div');
+                    panel.id = 'playback-target-widget';
+                    panel.className = 'fixed left-4 bottom-[29rem] z-[451] w-[min(92vw,320px)]';
+                    document.body.appendChild(panel);
+                }
+
+                panel.innerHTML = `
+                    <div class="bg-[#101010]/95 border border-cyan-500/25 rounded-2xl shadow-2xl backdrop-blur-md overflow-hidden">
+                        <div class="px-4 py-2 flex items-center justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="text-[10px] uppercase tracking-[0.24em] text-cyan-400">Salida Remota</div>
+                                <div class="text-sm font-bold text-white truncate">${getDeviceDisplayName(target)}</div>
+                                <div class="text-[11px] text-zinc-500 mt-0.5">Tocar una canción la reproducirá allá</div>
+                            </div>
+                            <button onclick="clearPlaybackTarget()" class="shrink-0 w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition" title="Quitar salida remota">
+                                <i class="fa-solid fa-xmark text-xs"></i>
+                            </button>
+                        </div>
+                    </div>`;
+            }
+
+            function renderControlledTargetWidget() {
+                let panel = document.getElementById('remote-control-widget');
+                const target = window.KRAKEN_CONTROL_TARGET;
+
+                if (!target) {
+                    if (panel) panel.remove();
+                    return;
+                }
+
+                if (!panel) {
+                    panel = document.createElement('div');
+                    panel.id = 'remote-control-widget';
+                    panel.className = 'fixed left-4 bottom-40 z-[450] w-[min(92vw,320px)]';
+                    document.body.appendChild(panel);
+                }
+
+                const deviceLabel = getDeviceDisplayName(target);
+                const durationValue = Math.max(0, Number(target.duration || 0));
+                const currentTimeValue = Math.max(0, Math.min(durationValue || 0, Number(target.time || 0)));
+                const mediaLabel = target.song
+                    ? `<div class="text-sm font-semibold text-white truncate">${target.song}</div>
+                       <div class="text-xs text-zinc-400 truncate">${target.artist || 'Sin artista'}</div>`
+                    : `<div class="text-sm font-semibold text-white">Sin reproducción activa</div>
+                       <div class="text-xs text-zinc-500">${target.library_mode === 'video' ? 'Video' : 'Audio'} listo para controlar</div>`;
+                const playLabel = target.is_playing ? 'pause' : 'play';
+                const playIcon = target.is_playing ? 'fa-pause' : 'fa-play';
+
+                panel.innerHTML = `
+                    <div class="bg-[#141414]/95 border border-emerald-500/25 rounded-2xl shadow-2xl backdrop-blur-md overflow-hidden">
+                        <div class="px-4 py-2 border-b border-white/5 flex items-center justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="text-[10px] uppercase tracking-[0.24em] text-emerald-400">Controlando</div>
+                                <div class="text-sm font-bold text-white truncate">${deviceLabel}</div>
+                            </div>
+                            <button onclick="unlinkControlledDevice()" class="shrink-0 w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition" title="Dejar de controlar">
+                                <i class="fa-solid fa-link-slash text-xs"></i>
+                            </button>
+                        </div>
+                        <div class="px-4 py-3">
+                            ${mediaLabel}
+                            <div class="text-[11px] text-zinc-500 mt-2">${target.time ? `${formatTimeShort(target.time)} / ${formatTimeShort(target.duration)}` : 'Sincronizando estado...'}</div>
+                            ${durationValue > 0 ? `
+                            <div class="mt-3">
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="${durationValue}"
+                                    step="1"
+                                    value="${currentTimeValue}"
+                                    class="w-full accent-emerald-500"
+                                    onchange="sendRemoteSeek(this.value)"
+                                    oninput="document.getElementById('remote-seek-label').innerText = formatTimeShort(this.value) + ' / ${formatTimeShort(target.duration)}'">
+                                <div id="remote-seek-label" class="mt-1 text-[10px] text-zinc-500 text-center">${formatTimeShort(target.time)} / ${formatTimeShort(target.duration)}</div>
+                            </div>` : ''}
+                            <div class="flex items-center justify-center gap-3 mt-4">
+                                <button onclick="sendCommand(null,'prev')" class="w-10 h-10 rounded-full bg-white/5 hover:bg-white/15 border border-white/10 flex items-center justify-center transition">
+                                    <i class="fa-solid fa-backward-step text-xs"></i>
+                                </button>
+                                <button onclick="sendCommand(null,'${playLabel}')" class="w-12 h-12 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-lg transition">
+                                    <i class="fa-solid ${playIcon} text-sm"></i>
+                                </button>
+                                <button onclick="sendCommand(null,'next')" class="w-10 h-10 rounded-full bg-white/5 hover:bg-white/15 border border-white/10 flex items-center justify-center transition">
+                                    <i class="fa-solid fa-forward-step text-xs"></i>
+                                </button>
+                            </div>
+                            <div class="flex items-center justify-center gap-2 mt-3">
+                                <button onclick="sendCommand(null,'vol_down')" class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-zinc-300 transition">Vol -</button>
+                                <button onclick="sendCommand(null,'vol_up')" class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-zinc-300 transition">Vol +</button>
+                            </div>
+                            <button onclick="sendCurrentTrackToControlledDevice()" class="mt-3 w-full px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-medium transition">
+                                <i class="fa-solid fa-paper-plane mr-1"></i> Enviar lo que suena aquí
+                            </button>
+                        </div>
+                    </div>`;
+            }
+
+            function applyControlledTargetState(target) {
+                window.KRAKEN_CONTROL_TARGET = target || null;
+                renderControlledTargetWidget();
+            }
+
+            function applyPlaybackTargetState(target) {
+                window.KRAKEN_PLAYBACK_TARGET = target || null;
+                renderPlaybackTargetWidget();
+            }
+
+            function setPlaybackTarget(targetSid) {
+                if (!targetSid) return;
+                if (targetSid === MY_SESSION_ID) {
+                    showToast('Este equipo ya es tu salida local', 'warning');
+                    return;
+                }
+
+                const target = LAST_USERS_DATA.find(u => u.session_id === targetSid);
+                if (!target) {
+                    showToast('Ese dispositivo ya no está en línea', 'warning');
+                    return;
+                }
+
+                applyPlaybackTargetState(target);
+                showToast(`Salida remota activa: ${getDeviceDisplayName(target)}`, 'success');
+                document.getElementById('control-modal')?.remove();
+            }
+
+            function clearPlaybackTarget(silent = false) {
+                applyPlaybackTargetState(null);
+                if (!silent) showToast('Salida remota desactivada', 'info');
+            }
+
+            function sendRemoteSeek(value) {
+                const seconds = Math.max(0, Math.floor(Number(value) || 0));
+                sendCommand(null, `seek_to_${seconds}`);
+            }
+
+            function sendFileToControlledDevice(file, target = null) {
+                const resolvedTarget = target || getActiveRemotePlaybackTarget();
+                const targetSid = resolvedTarget?.session_id;
+                if (!targetSid) {
+                    showToast('Primero elige un dispositivo remoto', 'warning');
+                    return;
+                }
+                if (!file || !file.path) {
+                    showToast('No se pudo identificar el archivo', 'error');
+                    return;
+                }
+
+                const payload = JSON.stringify({
+                    path: file.path,
+                    title: file.title || '',
+                    artist: file.artist || '',
+                    type: file.type || 'audio'
+                });
+
+                sendCommand(targetSid, `play_media_${payload}`);
+                showToast(`Enviando "${file.title || 'archivo'}" a ${getDeviceDisplayName(resolvedTarget)}`, 'success');
+            }
+
+            function sendCurrentTrackToControlledDevice() {
+                const currentFile = playerQueue[currentTrackIndex];
+                if (!currentFile) {
+                    showToast('No hay nada sonando para enviar', 'warning');
+                    return;
+                }
+                sendFileToControlledDevice(currentFile);
+            }
+
+            async function linkControlledDevice(targetSid) {
+                if (!targetSid) return;
+                if (targetSid === MY_SESSION_ID) {
+                    showToast('Ese dispositivo ya eres tú', 'warning');
+                    return;
+                }
+
+                try {
+                    const res = await fetch('/device/control/link', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            controller_sid: MY_SESSION_ID,
+                            target_sid: targetSid
+                        })
+                    });
+                    const data = await res.json();
+                    if (!data.ok) {
+                        showToast(data.error || 'No se pudo enlazar el control', 'error');
+                        return;
+                    }
+
+                    const target = LAST_USERS_DATA.find(u => u.session_id === targetSid);
+                    applyControlledTargetState(target || {
+                        session_id: targetSid,
+                        name: data.target?.name || 'Dispositivo',
+                        device_name: data.target?.device_name || '',
+                        device_type: data.target?.device_type || 'unknown'
+                    });
+                    showToast(`Ahora controlas ${getDeviceDisplayName(target || data.target)}`, 'success');
+                    document.getElementById('control-modal')?.remove();
+                } catch (e) {
+                    console.error(e);
+                    showToast('Error enlazando dispositivo', 'error');
+                }
+            }
+
+            async function unlinkControlledDevice(silent = false) {
+                try {
+                    await fetch('/device/control/unlink', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ controller_sid: MY_SESSION_ID })
+                    });
+                } catch (e) {
+                    console.error(e);
+                } finally {
+                    applyControlledTargetState(null);
+                    if (!silent) showToast('Control remoto liberado', 'info');
+                }
+            }
+
+            function applyRemoteCommand(command) {
+                if (!command || !command.action) return;
+
+                const action = command.action;
+                const sender = command.from_name || 'Alguien';
+
+                console.log("🎮 ORDEN REMOTA:", action);
+
+                if (action.startsWith('emoji_')) {
+                    const emojiIcon = action.split('_')[1];
+                    showEmojiModal(emojiIcon);
+                    showToast("¡Reacción Recibida!", "success");
+                    return;
+                }
+
+                if (action.startsWith('msg_')) {
+                    const txt = decodeURIComponent(action.slice(4));
+                    const mId = 'incoming-msg-' + Date.now();
+                    const mEl = document.createElement('div');
+                    mEl.id = mId;
+                    mEl.className = 'fixed inset-0 z-[10001] flex items-center justify-center bg-black/70 backdrop-blur-md animate-fade-in';
+                    mEl.onclick = () => mEl.remove();
+                    mEl.innerHTML = `
+                        <div class="bg-[#141414] border border-blue-500/30 rounded-2xl max-w-xs w-full mx-4 p-6 text-center shadow-2xl" onclick="event.stopPropagation()">
+                            <div class="text-3xl mb-3">💬</div>
+                            <div class="text-[10px] text-blue-400 uppercase tracking-widest mb-1">${sender} te dice:</div>
+                            <div class="text-white text-lg font-bold leading-snug mb-5">${txt}</div>
+                            <button onclick="document.getElementById('${mId}').remove()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-xl text-sm transition">Ok 👍</button>
+                        </div>`;
+                    document.body.appendChild(mEl);
+                    return;
+                }
+
+                if (action.startsWith('recommend_')) {
+                    try {
+                        const payload = JSON.parse(action.slice(10));
+                        const rId = 'incoming-rec-' + Date.now();
+                        const rEl = document.createElement('div');
+                        rEl.id = rId;
+                        rEl.className = 'fixed bottom-24 right-4 z-[10001] animate-slide-up';
+                        rEl.innerHTML = `
+                            <div class="bg-[#141414] border border-yellow-500/30 rounded-2xl w-72 p-4 shadow-2xl">
+                                <div class="flex items-center gap-3 mb-3">
+                                    <span class="text-2xl">⭐</span>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="text-[9px] text-yellow-400 uppercase tracking-widest">${sender} te recomienda:</div>
+                                        <div class="text-white font-bold text-sm truncate">${payload.title}</div>
+                                        <div class="text-zinc-400 text-xs truncate">${payload.artist || ''}</div>
+                                    </div>
+                                    <button onclick="document.getElementById('${rId}').remove()" class="text-zinc-600 hover:text-white text-lg leading-none">×</button>
+                                </div>
+                                <div class="flex gap-2">
+                                    <button id="btn-play-${rId}" class="flex-1 bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-2 rounded-xl text-xs transition">🎵 Escuchar</button>
+                                    <button onclick="document.getElementById('${rId}').remove()" class="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-400 py-2 rounded-xl text-xs transition">Luego</button>
+                                </div>
+                            </div>`;
+                        rEl.dataset.path = payload.path;
+                        rEl.dataset.title = payload.title;
+                        rEl.dataset.artist = payload.artist || '';
+                        document.body.appendChild(rEl);
+                        document.getElementById(`btn-play-${rId}`).onclick = function () {
+                            listenSame('', rEl.dataset.path, rEl.dataset.title, rEl.dataset.artist);
+                            rEl.remove();
+                        };
+                        setTimeout(() => rEl.remove(), 30000);
+                    } catch (_) { }
+                    return;
+                }
+
+                if (action.startsWith('play_media_')) {
+                    try {
+                        const payload = JSON.parse(action.slice(11));
+                        const targetPath = (payload.path || '').replace(/\\/g, '/');
+                        const match = window.libData?.files?.find(f => (f.path || '').replace(/\\/g, '/') === targetPath);
+                        if (match) {
+                            playNow(match.path);
+                            showToast(`📡 Reproduciendo enviado: ${match.title || payload.title || 'archivo'}`, 'success');
+                        } else if (payload.type !== 'video' && payload.path) {
+                            const fakeTrack = {
+                                path: payload.path,
+                                title: payload.title || payload.path.split('/').pop(),
+                                artist: payload.artist || '',
+                                album: '',
+                                genre: '',
+                                type: payload.type || 'audio'
+                            };
+                            playerQueue = [fakeTrack];
+                            currentTrackIndex = 0;
+                            playTrack(fakeTrack);
+                            showToast(`📡 Reproduciendo enviado: ${fakeTrack.title}`, 'success');
+                        } else {
+                            showToast('No encontré ese archivo en este dispositivo', 'warning');
+                        }
+                    } catch (e) {
+                        console.warn('No se pudo procesar play_media_', e);
+                    }
+                    return;
+                }
+
+                const activeVideo = document.getElementById('main-video');
+
+                if (action === 'pause') {
+                    if (activeVideo && !activeVideo.paused) {
+                        activeVideo.pause();
+                        syncPlayPauseIcon?.();
+                    } else {
+                        togglePlay();
+                    }
+                    return;
+                }
+                if (action === 'play') {
+                    if (activeVideo && activeVideo.paused) {
+                        activeVideo.play().catch(e => console.log(e));
+                        syncPlayPauseIcon?.();
+                    } else if (audioElement && audioElement.src) {
+                        audioElement.play().catch(e => console.log(e));
+                        updatePlayIcons(true);
+                    }
+                    return;
+                }
+                if (action === 'next') { playNext(); return; }
+                if (action === 'prev') { playPrevious(); return; }
+                if (action === 'vol_up') {
+                    const newVol = Math.min(1, (audioElement?.volume || 0) + 0.1);
+                    setVolume(newVol);
+                    if (activeVideo) activeVideo.volume = newVol;
+                    syncPlayerUI?.();
+                    return;
+                }
+                if (action === 'vol_down') {
+                    const newVol = Math.max(0, (audioElement?.volume || 0) - 0.1);
+                    setVolume(newVol);
+                    if (activeVideo) activeVideo.volume = newVol;
+                    syncPlayerUI?.();
+                    return;
+                }
+                if (action.startsWith('set_volume_')) {
+                    const raw = Number(action.slice('set_volume_'.length));
+                    if (!Number.isNaN(raw)) {
+                        const safeVolume = Math.max(0, Math.min(1, raw));
+                        setVolume(safeVolume);
+                        if (activeVideo) activeVideo.volume = safeVolume;
+                        syncPlayerUI?.();
+                    }
+                    return;
+                }
+                if (action.startsWith('seek_to_')) {
+                    const raw = Number(action.slice('seek_to_'.length));
+                    if (!Number.isNaN(raw)) {
+                        if (activeVideo) activeVideo.currentTime = Math.max(0, raw);
+                        else if (audioElement) audioElement.currentTime = Math.max(0, raw);
+                    }
+                }
+            }
+
             function drawUserRadar(users) {
                 LAST_USERS_DATA = users;
 
@@ -12305,10 +12837,12 @@
 
                 // --- Playback controls ---
                 const controlsHtml = devices.map(d => {
-                    const accId = `acc-${d.session_id}`;
+                    const deviceLabel = getDeviceDisplayName(d);
+                    const isCurrentSession = d.session_id === MY_SESSION_ID;
+                    const isControlled = window.KRAKEN_CONTROL_TARGET && window.KRAKEN_CONTROL_TARGET.session_id === d.session_id;
                     return `
                     <div class="mb-3 last:mb-0">
-                        ${devices.length > 1 ? `<div class="text-[9px] text-zinc-600 uppercase tracking-widest mb-2">Dispositivo ${d.session_id.slice(0, 6)}</div>` : ''}
+                        ${devices.length > 1 ? `<div class="flex items-center justify-between gap-2 mb-2"><div class="text-[9px] text-zinc-600 uppercase tracking-widest">${deviceLabel}</div>${isCurrentSession ? '<span class="text-[9px] text-emerald-400 uppercase tracking-widest">Este equipo</span>' : ''}</div>` : ''}
                         <div class="flex justify-center gap-3">
                             <button onclick="sendCommand('${d.session_id}','prev')" class="w-9 h-9 rounded-full bg-white/5 hover:bg-white/15 border border-white/10 flex items-center justify-center transition">
                                 <i class="fa-solid fa-backward-step text-xs"></i></button>
@@ -12325,6 +12859,17 @@
                                 <i class="fa-solid fa-plus text-[8px]"></i></button>
                             <i class="fa-solid fa-volume-high text-[9px] text-zinc-600"></i>
                         </div>
+                        ${!isCurrentSession ? `
+                        <div class="mt-3 flex gap-2">
+                            <button onclick="${isControlled ? "unlinkControlledDevice()" : `linkControlledDevice('${d.session_id}')`}" class="flex-1 flex items-center justify-center gap-2 ${isControlled ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300' : 'bg-white/5 border-white/10 text-zinc-300 hover:border-emerald-500/30 hover:text-emerald-300'} border rounded-xl py-2 text-[11px] font-medium transition">
+                                <i class="fa-solid ${isControlled ? 'fa-link-slash' : 'fa-gamepad'} text-[10px]"></i>
+                                ${isControlled ? 'Soltar control' : 'Controlar'}
+                            </button>
+                            <button onclick="setPlaybackTarget('${d.session_id}'); document.getElementById('${modalId}').remove();" class="flex-1 flex items-center justify-center gap-2 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 rounded-xl py-2 text-[11px] font-medium transition" title="Enviar música/video a este dispositivo">
+                                <i class="fa-solid fa-satellite-dish text-[10px]"></i>
+                                Salida Activa
+                            </button>
+                        </div>` : ''}
                     </div>`;
                 }).join('');
 
@@ -12519,12 +13064,17 @@
 
             // Función para enviar la orden al servidor
             async function sendCommand(targetSid, action) {
+                const resolvedTarget = targetSid || window.KRAKEN_CONTROL_TARGET?.session_id;
+                if (!resolvedTarget) {
+                    showToast("Primero elige un dispositivo para controlar", "warning");
+                    return;
+                }
                 try {
                     await fetch('/control', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            target: targetSid,
+                            target: resolvedTarget,
                             action: action,
                             from_name: MY_NAME || 'Alguien',
                             from_email: window.MY_EMAIL || ''
@@ -12730,6 +13280,10 @@
                 overlay.onclick = (e) => { if (e.target === overlay) closeContextMenu(); };
 
                 // 4. El HTML del Menú
+                const remotePlayBtn = (window.KRAKEN_CONTROL_TARGET && file && file.path && file.type !== 'folder') ? `
+                <button onclick="ctxAction('send_remote')" style="background: transparent; border: none; width: 100%; padding: 12px; color: #34d399; text-align: left; font-size: 14px; display: flex; align-items: center; gap: 15px; cursor: pointer; border-radius: 8px;" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'">
+                    <i class="fa-solid fa-paper-plane" style="width: 20px; text-align: center;"></i> Reproducir en ${getDeviceDisplayName(window.KRAKEN_CONTROL_TARGET)}
+                </button>` : '';
                 overlay.innerHTML = `
         <div id="kraken-menu-panel" style="
             width: 100%; max-width: 400px; background: #121212;
@@ -12747,6 +13301,7 @@
             </div>
 
             <div style="display: flex; flex-direction: column; gap: 8px;">
+            ${remotePlayBtn}
             <button onclick="ctxAction('edit')" style="background: transparent; border: none; width: 100%; padding: 12px; color: #fbbf24; text-align: left; font-size: 14px; display: flex; align-items: center; gap: 15px; cursor: pointer; border-radius: 8px;" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'">
                     <i class="fa-solid fa-pen-to-square" style="width: 20px; text-align: center;"></i> Editar etiquetas
                 </button>
@@ -12791,6 +13346,10 @@
                 closeContextMenu();
 
                 // Ya no necesitamos safePath - usamos currentContextPath directamente
+                if (action === 'send_remote') {
+                    const file = libData?.files?.find(f => f.path === currentContextPath);
+                    sendFileToControlledDevice(file || { path: currentContextPath, title: currentContextPath.split('/').pop(), artist: '', type: 'audio' });
+                }
                 if (action === 'edit') abrirEditorMasivo(currentContextPath);
                 if (action === 'move') abrirMover(currentContextPath);
                 if (action === 'delete') borrar(currentContextPath);
@@ -14087,3 +14646,4 @@
 </body>
 
 </html>
+

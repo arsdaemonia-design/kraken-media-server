@@ -387,15 +387,65 @@ def remote_control():
     from_email = data.get('from_email', '')
     
     if target_sid and action:
-        PENDING_COMMANDS[target_sid] = {
+        command = {
             'action': action,
             'time': time.time(),
             'from_name': from_name,
             'from_email': from_email
         }
-        return jsonify({'status': 'sent', 'target': target_sid, 'action': action})
+        with USERS_LOCK:
+            queue = PENDING_COMMANDS.setdefault(target_sid, [])
+            queue.append(command)
+            queue_size = len(queue)
+        return jsonify({'status': 'sent', 'target': target_sid, 'action': action, 'queued': queue_size})
     
     return jsonify({'status': 'error', 'msg': 'Faltan datos'})
+
+@api_bp.route('/device/control/link', methods=['POST'])
+def link_remote_controller():
+    data = request.json or {}
+    controller_sid = data.get('controller_sid')
+    target_sid = data.get('target_sid')
+
+    if not controller_sid or not target_sid:
+        return jsonify({'ok': False, 'error': 'controller_sid y target_sid son requeridos'}), 400
+
+    if controller_sid == target_sid:
+        return jsonify({'ok': False, 'error': 'No puedes controlarte a ti mismo'}), 400
+
+    with USERS_LOCK:
+        if controller_sid not in ACTIVE_USERS:
+            return jsonify({'ok': False, 'error': 'El controlador ya no está en línea'}), 404
+        if target_sid not in ACTIVE_USERS:
+            return jsonify({'ok': False, 'error': 'El dispositivo destino ya no está en línea'}), 404
+
+        REMOTE_CONTROL_LINKS[controller_sid] = target_sid
+        target_data = dict(ACTIVE_USERS[target_sid])
+
+    return jsonify({
+        'ok': True,
+        'controller_sid': controller_sid,
+        'target_sid': target_sid,
+        'target': {
+            'session_id': target_sid,
+            'name': target_data.get('name', 'Dispositivo'),
+            'device_name': target_data.get('device_name', ''),
+            'device_type': target_data.get('device_type', 'unknown')
+        }
+    })
+
+@api_bp.route('/device/control/unlink', methods=['POST'])
+def unlink_remote_controller():
+    data = request.json or {}
+    controller_sid = data.get('controller_sid')
+
+    if not controller_sid:
+        return jsonify({'ok': False, 'error': 'controller_sid es requerido'}), 400
+
+    with USERS_LOCK:
+        removed = REMOTE_CONTROL_LINKS.pop(controller_sid, None)
+
+    return jsonify({'ok': True, 'removed': bool(removed)})
 
 @api_bp.route('/assets/<path:filename>')
 def serve_assets(filename):
@@ -1693,6 +1743,19 @@ def status():
     current_time = request.args.get('time', '0')
     total_duration = request.args.get('duration', '0')
     is_speaker = (is_speaker_param == 'true')
+    is_playing_param = request.args.get('is_playing', '')
+    current_volume = request.args.get('volume', '1')
+    queue_length = request.args.get('queue_length', '0')
+    current_index = request.args.get('current_index', '0')
+    library_mode = request.args.get('library_mode', '')
+    device_name = request.args.get('device_name', '')
+    device_type = request.args.get('device_type', '')
+    current_media_type = request.args.get('media_type', '')
+
+    if is_playing_param == '':
+        is_playing = bool(current_song)
+    else:
+        is_playing = (is_playing_param == 'true')
     
     # --- INTERCEPCIÃ“N CLOUDFLARE ---
     # --- AUTENTICACIÓN: JWT local → Cloudflare fallback ---
@@ -1762,11 +1825,20 @@ def status():
                 'path': current_path,
                 'time': current_time,
                 'duration': total_duration,
-                'needs_registration': needs_registration
+                'needs_registration': needs_registration,
+                'is_playing': is_playing,
+                'volume': current_volume,
+                'queue_length': queue_length,
+                'current_index': current_index,
+                'library_mode': library_mode,
+                'device_name': device_name,
+                'device_type': device_type,
+                'media_type': current_media_type
             }
 
     # 4. PREPARAR LISTA
     online_list = []
+    linked_target = None
     with USERS_LOCK:
         for sid, data in ACTIVE_USERS.items():
             online_list.append({
@@ -1782,12 +1854,45 @@ def status():
                 'artist': data.get('artist', ''),
                 'path': data.get('path', ''),
                 'time': data.get('time', '0'),
-                'duration': data.get('duration', '0')
+                'duration': data.get('duration', '0'),
+                'is_playing': data.get('is_playing', False),
+                'volume': data.get('volume', '1'),
+                'queue_length': data.get('queue_length', '0'),
+                'current_index': data.get('current_index', '0'),
+                'library_mode': data.get('library_mode', ''),
+                'device_name': data.get('device_name', ''),
+                'device_type': data.get('device_type', ''),
+                'media_type': data.get('media_type', '')
             })
+
+        if session_id and session_id in REMOTE_CONTROL_LINKS:
+            target_sid = REMOTE_CONTROL_LINKS.get(session_id)
+            target_data = ACTIVE_USERS.get(target_sid)
+            if target_data:
+                linked_target = {
+                    'session_id': target_sid,
+                    'name': target_data.get('name', ''),
+                    'device_name': target_data.get('device_name', ''),
+                    'device_type': target_data.get('device_type', ''),
+                    'song': target_data.get('song', ''),
+                    'artist': target_data.get('artist', ''),
+                    'path': target_data.get('path', ''),
+                    'time': target_data.get('time', '0'),
+                    'duration': target_data.get('duration', '0'),
+                    'is_playing': target_data.get('is_playing', False),
+                    'volume': target_data.get('volume', '1'),
+                    'queue_length': target_data.get('queue_length', '0'),
+                    'current_index': target_data.get('current_index', '0'),
+                    'library_mode': target_data.get('library_mode', ''),
+                    'media_type': target_data.get('media_type', '')
+                }
+            else:
+                REMOTE_CONTROL_LINKS.pop(session_id, None)
 
     response = progress_status.copy()
     response['last_command'] = LAST_ALEXA_COMMAND
     response['online_users'] = online_list
+    response['controlled_target'] = linked_target
     
     # Retornamos flag global para forzar al frontend de ESTE cliente a registrarse
     if session_id and session_id in ACTIVE_USERS:
@@ -1795,11 +1900,17 @@ def status():
     
     # CHEQUEO DE BUZÃ“N (CONTROL REMOTO)
     if session_id in PENDING_COMMANDS:
-        cmd = PENDING_COMMANDS[session_id]
-        if time.time() - cmd['time'] < 10:
-            response['remote_command'] = cmd['action']
-            response['from_name'] = cmd.get('from_name', 'Alguien')
-        del PENDING_COMMANDS[session_id]
+        commands = PENDING_COMMANDS.get(session_id, [])
+        fresh_commands = [
+            cmd for cmd in commands
+            if time.time() - cmd.get('time', 0) < 15
+        ]
+        if fresh_commands:
+            response['remote_commands'] = fresh_commands
+            first_command = fresh_commands[0]
+            response['remote_command'] = first_command.get('action')
+            response['from_name'] = first_command.get('from_name', 'Alguien')
+        PENDING_COMMANDS.pop(session_id, None)
     
     return jsonify(response)
 
