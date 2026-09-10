@@ -17,6 +17,9 @@ def _wait_hls_ready(process, session_dir, video_duration=0, hls_mode='stream', l
     """Espera a que HLS quede utilizable segun modo."""
     import time as _time
 
+    def is_segment(filename):
+        return filename.endswith(('.ts', '.m4s'))
+
     playlist_path = os.path.join(session_dir, "playlist.m3u8")
     mode = (hls_mode or 'stream').strip().lower()
 
@@ -46,16 +49,16 @@ def _wait_hls_ready(process, session_dir, video_duration=0, hls_mode='stream', l
 
         if not os.path.exists(playlist_path):
             return False, "No se genero playlist.m3u8 en modo VOD"
-        ts_files = [f for f in os.listdir(session_dir) if f.endswith('.ts')]
-        if len(ts_files) < 1:
-            return False, "No se generaron segmentos .ts en modo VOD"
+        segment_files = [f for f in os.listdir(session_dir) if is_segment(f)]
+        if len(segment_files) < 1:
+            return False, "No se generaron segmentos HLS en modo VOD"
         return True, None
 
     # STREAM mode (actual): arranque rapido con playlist + 1 segmento.
     for _ in range(50):
         if os.path.exists(playlist_path):
-            ts_files = [f for f in os.listdir(session_dir) if f.endswith('.ts')]
-            if len(ts_files) >= 1:
+            segment_files = [f for f in os.listdir(session_dir) if is_segment(f)]
+            if len(segment_files) >= 1:
                 return True, None
         if process.poll() is not None:
             stdout, stderr = process.communicate()
@@ -222,7 +225,8 @@ def play_hls():
         full_video_path,
         session_dir,
         selected_audio_index=selected_audio_track,
-        hls_mode=hls_mode
+        hls_mode=hls_mode,
+        hls_segment_type=config.HLS_SEGMENT_TYPE
     )
     external_subs = _find_external_subtitles(full_video_path)
     subtitle_url = external_subs[0]["url"] if external_subs else None
@@ -358,7 +362,8 @@ def reconnect_hls():
         full_video_path,
         session_dir,
         selected_audio_index=selected_audio_track,
-        hls_mode=hls_mode
+        hls_mode=hls_mode,
+        hls_segment_type=config.HLS_SEGMENT_TYPE
     )
 
     if process == "DIRECT":
@@ -435,8 +440,8 @@ def hls_status():
     if not os.path.exists(session_dir):
         return jsonify({"ready": False, "segments": 0, "alive": False})
 
-    ts_files = [f for f in os.listdir(session_dir) if f.endswith('.ts')]
-    segment_count = len(ts_files)
+    segment_files = [f for f in os.listdir(session_dir) if f.endswith(('.ts', '.m4s'))]
+    segment_count = len(segment_files)
     ready = segment_count >= 2  # ~12 segundos (2 segmentos x 6s)
 
     return jsonify({"ready": ready, "segments": segment_count, "alive": True})
@@ -516,15 +521,28 @@ def serve_hls_segment(session_id, filename):
                 rewritten.append(line)
             response = Response('\n'.join(rewritten), mimetype=mimetype)
         else:
-            response = send_file(file_path, mimetype=mimetype)
+            response = send_file(file_path, mimetype=mimetype, conditional=False, etag=False, max_age=0)
     elif filename.endswith('.ts'):
         mimetype = 'video/MP2T'
-        response = send_file(file_path, mimetype=mimetype)
+        response = send_file(file_path, mimetype=mimetype, conditional=False, etag=False, max_age=0)
+    elif filename.endswith('.m4s'):
+        mimetype = 'video/iso.segment'
+        response = send_file(file_path, mimetype=mimetype, conditional=False, etag=False, max_age=0)
+    elif filename.endswith('.mp4'):
+        mimetype = 'video/mp4'
+        response = send_file(file_path, mimetype=mimetype, conditional=False, etag=False, max_age=0)
     else:
         mimetype = 'application/octet-stream'
         response = send_file(file_path, mimetype=mimetype)
     
     response.headers['Access-Control-Allow-Origin'] = '*'
+    if filename.endswith(('.m3u8', '.ts', '.m4s', '.mp4')):
+        # Playlist y segmentos deben entregarse siempre con cuerpo actual.
+        # Las respuestas 304 pueden dejar a HLS.js reintentando el mismo
+        # fragmento cuando la sesion todavia esta creciendo.
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
     return response
 
 

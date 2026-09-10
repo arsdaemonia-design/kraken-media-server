@@ -85,6 +85,11 @@ os.makedirs(HLS_TEMP_DIR, exist_ok=True)
 # - vod: espera a playlist final completa (seek/duracion estables)
 HLS_MODE = os.getenv('HLS_MODE', 'stream').strip().lower()
 
+# MPEG-TS remains the safe default; fMP4 can be enabled for isolated testing.
+HLS_SEGMENT_TYPE = os.getenv('HLS_SEGMENT_TYPE', 'mpegts').strip().lower()
+if HLS_SEGMENT_TYPE not in {'mpegts', 'fmp4'}:
+    HLS_SEGMENT_TYPE = 'mpegts'
+
 # FFmpeg/FFprobe Paths
 if getattr(sys, 'frozen', False):
     # Running as PyInstaller bundle

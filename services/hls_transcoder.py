@@ -40,7 +40,7 @@ class HLSTranscoder:
             for enc in nvenc_encoders:
                 print(f"[HLS] Probando {enc}...")
                 if test_encoder(enc):
-                    print(f"[HLS] ✓ NVIDIA encoder disponible: {enc}")
+                    print(f"[HLS] NVIDIA encoder disponible: {enc}")
                     self._video_encoder = enc
                     return enc
         
@@ -50,7 +50,7 @@ class HLSTranscoder:
             for enc in mac_encoders:
                 print(f"[HLS] Probando {enc}...")
                 if test_encoder(enc):
-                    print(f"[HLS] ✓ Apple VideoToolbox disponible: {enc}")
+                    print(f"[HLS] Apple VideoToolbox disponible: {enc}")
                     self._video_encoder = enc
                     return enc
         
@@ -161,7 +161,14 @@ class HLSTranscoder:
             print(f"Error analizando {input_file}: {e}")
             return None
 
-    def start_hls_session(self, input_file, output_dir, selected_audio_index=None, hls_mode="stream"):
+    def start_hls_session(
+        self,
+        input_file,
+        output_dir,
+        selected_audio_index=None,
+        hls_mode="stream",
+        hls_segment_type="mpegts",
+    ):
         """Prepara e inicia el proceso FFmpeg para HLS."""
         print(f"[HLS] Input file: {input_file}")
         print(f"[HLS] Output dir: {output_dir}")
@@ -216,7 +223,14 @@ class HLSTranscoder:
         else:
             cmd += ["-map", "0:a?"]
 
-        needs_video_reencode = force_hls_for_audio or analysis.get('video_needs_transcode', True)
+        # Si el audio requiere transcodificacion (AC-3, DTS, etc.), tambien
+        # reencodeamos el video para que los segmentos TS compartan timestamps
+        # y puntos de entrada estables en navegadores/HLS.js.
+        needs_video_reencode = (
+            force_hls_for_audio
+            or analysis.get('video_needs_transcode', True)
+            or analysis.get('needs_audio_transcode', False)
+        )
         if needs_video_reencode:
             # Re-encode video when required and force a stable GOP for better HLS seek/segment boundaries.
             cmd += encoder_settings
@@ -252,22 +266,34 @@ class HLSTranscoder:
         ]
 
         hls_mode = (hls_mode or "stream").strip().lower()
+        hls_segment_type = (hls_segment_type or "mpegts").strip().lower()
+        if hls_segment_type not in {"mpegts", "fmp4"}:
+            hls_segment_type = "mpegts"
         hls_args = [
             "-f", "hls",
             "-hls_time", "6",
             "-hls_list_size", "0",
         ]
+        if hls_segment_type == "fmp4":
+            hls_args += [
+                "-hls_segment_type", "fmp4",
+                "-hls_fmp4_init_filename", "init.mp4",
+            ]
         if hls_mode == "vod":
             hls_args += [
                 "-hls_playlist_type", "vod",
                 "-hls_flags", "independent_segments",
             ]
         else:
+            # EVENT conserva una linea de tiempo VOD que puede crecer mientras
+            # FFmpeg procesa el archivo, sin obligar a esperar la pelicula completa.
             hls_args += [
-                "-hls_flags", "append_list",
+                "-hls_playlist_type", "event",
+                "-hls_flags", "independent_segments",
             ]
+        segment_extension = "m4s" if hls_segment_type == "fmp4" else "ts"
         hls_args += [
-            "-hls_segment_filename", os.path.join(output_dir, "seg_%03d.ts"),
+            "-hls_segment_filename", os.path.join(output_dir, f"seg_%03d.{segment_extension}"),
             playlist_path
         ]
         cmd += hls_args

@@ -6,7 +6,7 @@ con modo online/offline, multiusuario y flujo de instalador para Windows.
 
 ## Version Actual
 
-- `v4.90` (2026-04-10)
+- `v4.98` (2026-09-10)
 
 ## Caracteristicas Principales
 

@@ -10,7 +10,7 @@
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#10b981">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script>window.APP_VERSION = "4.88"; window.OFFLINE_VERSION = "4.88"; window.OFFLINE_LIMIT = 500; window.GITHUB_REPO = "arsdaemonia-design/kraken-media-server";</script>
+    <script>window.APP_VERSION = "4.98"; window.OFFLINE_VERSION = "4.98"; window.OFFLINE_LIMIT = 500; window.GITHUB_REPO = "arsdaemonia-design/kraken-media-server";</script>
     <script src="/assets/tailwind.min.js"></script>
     <script src="/assets/html2canvas.min.js"></script>
     <!-- Chromecast: SDK + Plugin (el plugin maneja la inicialización) -->
@@ -897,6 +897,97 @@
             opacity: 0.9;
         }
 
+        .krk-spin {
+            animation: spin 1s linear infinite;
+            transform-origin: 50% 50%;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                scroll-behavior: auto !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+
+        .krk-video-card-progress {
+            position: absolute;
+            left: 0.65rem;
+            right: 0.65rem;
+            bottom: 0.55rem;
+            height: 3px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.22);
+            z-index: 30;
+        }
+
+        .krk-video-card-progress > span {
+            display: block;
+            height: 100%;
+            border-radius: inherit;
+            background: #10b981;
+        }
+
+        .krk-video-hover-preview {
+            display: none;
+            position: absolute;
+            left: 50%;
+            bottom: calc(100% - 0.5rem);
+            width: min(22rem, 30vw);
+            min-width: 18rem;
+            aspect-ratio: 16 / 9;
+            transform: translateX(-50%) translateY(0.5rem);
+            background: #111 center / cover no-repeat;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 0.75rem;
+            overflow: hidden;
+            box-shadow: 0 18px 50px rgba(0, 0, 0, 0.65);
+            pointer-events: none;
+            z-index: 300;
+        }
+
+        .krk-video-hover-preview::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0.05) 70%);
+        }
+
+        .krk-video-card:hover .krk-video-hover-preview {
+            display: block;
+            animation: krk-preview-in 0.18s ease-out both;
+        }
+
+        @keyframes krk-preview-in {
+            from { opacity: 0; transform: translateX(-50%) translateY(0.8rem) scale(0.98); }
+            to { opacity: 1; transform: translateX(-50%) translateY(0.5rem) scale(1); }
+        }
+
+        @media (max-width: 767px), (hover: none) {
+            .krk-video-hover-preview { display: none !important; }
+        }
+
+        .lazy-img:not(.loaded) {
+            background: linear-gradient(110deg, #151515 8%, #242424 18%, #151515 33%);
+            background-size: 200% 100%;
+            animation: krk-skeleton 1.35s linear infinite;
+        }
+
+        .lazy-img.loaded {
+            animation: none;
+            background: transparent;
+        }
+
+        @keyframes krk-skeleton {
+            to { background-position-x: -200%; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .lazy-img:not(.loaded) { animation: none; }
+        }
+
         /* Hide animation */
         #loader.hidden {
             opacity: 0;
@@ -1238,6 +1329,30 @@
         #artplayer-container .art-video-player.art-fullscreen.art-hover .art-bottom {
             opacity: 1 !important;
             pointer-events: auto;
+        }
+
+        /* ═══════ FULLSCREEN CSS DE RESPALDO (WebView) ═══════
+           El Fullscreen API nativo (requestFullscreen) no es fiable en el WebView.
+           Esta clase fuerza que el contenedor llene toda la ventana con position:fixed,
+           como fallback cuando requestFullscreen falla o no esta soportado. */
+        .krk-fullscreen,
+        #cine-container.krk-fullscreen,
+        #cine-screen.krk-fullscreen,
+        #artplayer-container.krk-fullscreen,
+        #view-player.krk-fullscreen {
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            max-width: none !important;
+            max-height: none !important;
+            margin: 0 !important;
+            border-radius: 0 !important;
+            z-index: 999999 !important;
+            background: #000 !important;
+        }
+        body.krk-fs-lock {
+            overflow: hidden !important;
         }
 
         /* Barra de progreso personalizada */
@@ -2585,15 +2700,19 @@
                         class="absolute inset-0 bg-black flex flex-col items-center justify-center z-50 transition-opacity duration-300">
                         <div class="w-24 h-24 relative">
                             <svg class="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 100 100">
-                                <circle cx="50" cy="50" r="45" fill="none" stroke="rgba(255, 255, 255, 0.1)"
-                                    stroke-width="4" />
-                                <circle id="video-load-progress" cx="50" cy="50" r="45" fill="none" stroke="#10b981"
-                                    stroke-width="4" stroke-dasharray="283" stroke-dashoffset="283"
+                                <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(16, 185, 129, 0.15)"
+                                    stroke-width="8" />
+                                <circle id="video-load-progress" cx="50" cy="50" r="42" fill="none" stroke="#10b981"
+                                    stroke-width="8" stroke-dasharray="264" stroke-dashoffset="264"
                                     stroke-linecap="round" class="transition-all duration-300" />
+                            </svg>
+                            <svg class="absolute inset-0 w-full h-full krk-spin" viewBox="0 0 100 100">
+                                <circle cx="50" cy="50" r="42" fill="none" stroke="#34d399" stroke-width="7"
+                                    stroke-linecap="round" stroke-dasharray="70 195" />
                             </svg>
                         </div>
                         <p id="video-load-percent"
-                            class="text-white/60 text-xs font-mono mt-4 font-bold tracking-widest">0%</p>
+                            class="text-emerald-300 text-sm font-mono mt-5 font-bold tracking-widest">0%</p>
                     </div>
 
                     <!-- VIDEO PRINCIPAL -->
@@ -4331,7 +4450,8 @@
                                 const img = entry.target;
                                 if (img.dataset.src && !img.src) {
                                     img.src = img.dataset.src;
-                                    img.classList.add('loaded'); // Clase opcional para CSS
+                                    img.addEventListener('load', () => img.classList.add('loaded'), { once: true });
+                                    img.addEventListener('error', () => img.classList.add('loaded'), { once: true });
                                     imageObserver.unobserve(img); // ✅ Dejar de observar cuando carga
                                 }
                             }
@@ -4422,7 +4542,7 @@
                         // 1. CAMBIO: Forzamos 'true' para que siempre se vea como reproductor
                         const currentTrack = playerQueue[currentTrackIndex];
                         const playbackSnapshot = getKrakenPlaybackSnapshot();
-                        const activeVideoElement = document.querySelector('#video-screen video');
+                        const activeVideoElement = document.querySelector('#cine-screen video, #artplayer-container video, #main-video');
                         const currentProgressTime = playbackSnapshot.media_type === 'video'
                             ? (activeVideoElement ? activeVideoElement.currentTime : 0)
                             : (audioElement ? audioElement.currentTime : 0);
@@ -4816,8 +4936,9 @@
                                 </div>
                                 
                                 <div class="flex-1 overflow-y-auto p-6">
-                                    <div class="flex gap-2 mb-6">
+                                    <div class="flex gap-2 mb-6 flex-wrap">
                                         <button onclick="showSettingsTab('general')" id="tab-general" class="px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium">General</button>
+                                        <button onclick="showSettingsTab('playback')" id="tab-playback" class="px-4 py-2 rounded-lg bg-zinc-700 text-zinc-300 hover:bg-zinc-600">Reproducción</button>
                                         <button onclick="showSettingsTab('users')" id="tab-users" class="px-4 py-2 rounded-lg bg-zinc-700 text-zinc-300 hover:bg-zinc-600">Usuarios</button>
                                         <button onclick="showSettingsTab('invites')" id="tab-invites" class="px-4 py-2 rounded-lg bg-zinc-700 text-zinc-300 hover:bg-zinc-600">Invitaciones</button>
                                         <button onclick="showSettingsTab('adult')" id="tab-adult" class="hidden px-4 py-2 rounded-lg bg-zinc-700 text-zinc-300 hover:bg-zinc-600">🔞 Adult</button>
@@ -4847,6 +4968,74 @@
                                                     class="w-full bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-bold py-3 rounded-xl transition-all hover:scale-[1.02] flex items-center justify-center gap-2">
                                                 <i class="fa-solid fa-save"></i> Guardar Cambios
                                             </button>
+                                        </div>
+                                    </div>
+
+                                    <div id="content-playback" class="hidden">
+                                        <div class="space-y-5">
+                                            <p class="text-xs text-zinc-500 -mb-1">Estas preferencias se aplican al instante y se guardan en este dispositivo.</p>
+
+                                            <div>
+                                                <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">
+                                                    <i class="fa-solid fa-closed-captioning text-emerald-500 mr-1"></i> Tamaño de subtítulos
+                                                </label>
+                                                <select id="pref-subtitle-size" onchange="setVideoPref('subtitleSize', this.value)"
+                                                        class="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition">
+                                                    <option value="small">Pequeño (18px)</option>
+                                                    <option value="medium" selected>Mediano (22px)</option>
+                                                    <option value="large">Grande (28px)</option>
+                                                    <option value="xlarge">Extra grande (36px)</option>
+                                                </select>
+                                            </div>
+
+                                            <div>
+                                                <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">
+                                                    <i class="fa-solid fa-text-height text-emerald-500 mr-1"></i> Estilo de subtítulos
+                                                </label>
+                                                <select id="pref-subtitle-style" onchange="setVideoPref('subtitleStyle', this.value)"
+                                                        class="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition">
+                                                    <option value="outline" selected>Contorno (texto nítido)</option>
+                                                    <option value="background">Fondo oscuro</option>
+                                                    <option value="both">Contorno + fondo</option>
+                                                </select>
+                                            </div>
+
+                                            <div>
+                                                <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">
+                                                    <i class="fa-solid fa-volume-high text-emerald-500 mr-1"></i> Volumen inicial
+                                                </label>
+                                                <select id="pref-default-volume" onchange="setVideoPref('defaultVolume', this.value)"
+                                                        class="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition">
+                                                    <option value="1">100%</option>
+                                                    <option value="0.75">75%</option>
+                                                    <option value="0.5">50%</option>
+                                                </select>
+                                            </div>
+
+                                            <div>
+                                                <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">
+                                                    <i class="fa-solid fa-gauge-high text-emerald-500 mr-1"></i> Velocidad por defecto
+                                                </label>
+                                                <select id="pref-default-rate" onchange="setVideoPref('defaultRate', this.value)"
+                                                        class="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition">
+                                                    <option value="0.5">0.5x</option>
+                                                    <option value="0.75">0.75x</option>
+                                                    <option value="1" selected>1x (normal)</option>
+                                                    <option value="1.25">1.25x</option>
+                                                    <option value="1.5">1.5x</option>
+                                                    <option value="2">2x</option>
+                                                </select>
+                                            </div>
+
+                                            <div>
+                                                <label class="flex items-center justify-between cursor-pointer bg-black/50 border border-white/10 rounded-xl px-4 py-3">
+                                                    <span class="text-xs font-bold text-zinc-400 uppercase tracking-widest">
+                                                        <i class="fa-solid fa-forward text-emerald-500 mr-1"></i> Auto-reproducir siguiente
+                                                    </span>
+                                                    <input type="checkbox" id="pref-autonext" onchange="setVideoPref('autonext', this.checked)"
+                                                           class="w-5 h-5 accent-emerald-500">
+                                                </label>
+                                            </div>
                                         </div>
                                     </div>
                                     
@@ -4991,28 +5180,22 @@
             }
 
             function showSettingsTab(tab) {
-                document.getElementById('content-general').classList.add('hidden');
-                document.getElementById('content-users').classList.add('hidden');
-                document.getElementById('content-invites').classList.add('hidden');
-                const contentAdult = document.getElementById('content-adult');
-                if(contentAdult) contentAdult.classList.add('hidden');
-                document.getElementById('tab-general').classList.remove('bg-emerald-600', 'text-white');
-                document.getElementById('tab-general').classList.add('bg-zinc-700', 'text-zinc-300');
-                document.getElementById('tab-users').classList.remove('bg-emerald-600', 'text-white');
-                document.getElementById('tab-users').classList.add('bg-zinc-700', 'text-zinc-300');
-                document.getElementById('tab-invites').classList.remove('bg-emerald-600', 'text-white');
-                document.getElementById('tab-invites').classList.add('bg-zinc-700', 'text-zinc-300');
-                const tabAdult = document.getElementById('tab-adult');
-                if(tabAdult) {
-                    tabAdult.classList.remove('bg-emerald-600', 'text-white');
-                    tabAdult.classList.add('bg-zinc-700', 'text-zinc-300');
-                }
-                document.getElementById('content-' + tab).classList.remove('hidden');
-                document.getElementById('tab-' + tab).classList.remove('bg-zinc-700', 'text-zinc-300');
-                document.getElementById('tab-' + tab).classList.add('bg-emerald-600', 'text-white');
+                ['general', 'playback', 'users', 'invites', 'adult'].forEach(t => {
+                    const c = document.getElementById('content-' + t);
+                    if (c) c.classList.add('hidden');
+                    const b = document.getElementById('tab-' + t);
+                    if (b) { b.classList.remove('bg-emerald-600', 'text-white'); b.classList.add('bg-zinc-700', 'text-zinc-300'); }
+                });
+                const content = document.getElementById('content-' + tab);
+                if (content) content.classList.remove('hidden');
+                const tabBtn = document.getElementById('tab-' + tab);
+                if (tabBtn) { tabBtn.classList.remove('bg-zinc-700', 'text-zinc-300'); tabBtn.classList.add('bg-emerald-600', 'text-white'); }
 
                 if (tab === 'users') {
                     loadAdminUsers();
+                }
+                if (tab === 'playback') {
+                    loadVideoPrefs();
                 }
             }
 
@@ -5376,6 +5559,53 @@
                         showToast('Códigos invalidados', 'success');
                     });
             }
+            const KRAKEN_VIDEO_PREFS_KEY = 'kraken-video-prefs';
+
+            function getVideoPrefs() {
+                try { return JSON.parse(localStorage.getItem(KRAKEN_VIDEO_PREFS_KEY) || '{}'); }
+                catch (e) { return {}; }
+            }
+
+            function setVideoPref(key, value) {
+                try {
+                    const prefs = getVideoPrefs();
+                    prefs[key] = value;
+                    localStorage.setItem(KRAKEN_VIDEO_PREFS_KEY, JSON.stringify(prefs));
+                } catch (e) { }
+            }
+
+            function loadVideoPrefs() {
+                const prefs = getVideoPrefs();
+                const map = {
+                    'pref-subtitle-size': prefs.subtitleSize || 'medium',
+                    'pref-subtitle-style': prefs.subtitleStyle || 'outline',
+                    'pref-default-volume': String(prefs.defaultVolume != null ? prefs.defaultVolume : 1),
+                    'pref-default-rate': String(prefs.defaultRate != null ? prefs.defaultRate : 1),
+                };
+                Object.keys(map).forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.value = map[id];
+                });
+                const autoNextEl = document.getElementById('pref-autonext');
+                if (autoNextEl) autoNextEl.checked = prefs.autonext !== false;
+            }
+
+            function buildSubtitleStyle() {
+                const sizeMap = { small: '18px', medium: '22px', large: '28px', xlarge: '36px' };
+                const prefs = getVideoPrefs();
+                const out = { color: '#ffffff', fontSize: sizeMap[prefs.subtitleSize] || '22px' };
+                const style = prefs.subtitleStyle || 'outline';
+                if (style === 'outline' || style === 'both') {
+                    out.textShadow = '0px 1px 3px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.95)';
+                }
+                if (style === 'background' || style === 'both') {
+                    out.background = 'rgba(0,0,0,0.55)';
+                    out.padding = '2px 6px';
+                    out.borderRadius = '4px';
+                }
+                return out;
+            }
+
             async function saveSettings(currentPin) {
                 const newPin = document.getElementById('settings-new-pin').value;
                 const newMediaPath = document.getElementById('settings-media-path')?.value.trim();
@@ -6802,7 +7032,7 @@
                 row.scrollBy({ left: amount * direction, behavior: 'smooth' });
             }
             // --- LOGICA DE VIDEO ---
-            function playNow(path) {
+            function playNow(path, resumeSeconds) {
                 if (selectionMode) { selectRow(path); return; }
 
                 if (window.KRAKEN_PLAYBACK_TARGET && window.KRAKEN_PLAYBACK_TARGET.session_id) {
@@ -6843,6 +7073,8 @@
                 }
 
                 if (!file) return;
+
+                window.krakenPendingResumeSeconds = Number(resumeSeconds || 0);
 
                 // Si es video, creamos la cola de la carpeta completa
                 if (file.type === 'video') {
@@ -7344,8 +7576,10 @@
                                 settings: artSettings,
                                 playsInline: true,
                                 fullscreen: true,
+                                fullscreenWeb: true,
                                 pip: true,
                                 playbackRate: true,
+                                volume: Number(getVideoPrefs().defaultVolume != null ? getVideoPrefs().defaultVolume : 1),
                                 screenshot: false,
                                 airplay: true,
                                 autoHide: window.innerWidth >= 1024 ? 4000 : 0,
@@ -7416,7 +7650,7 @@
                                 artConfig.subtitle = {
                                     url: data.subtitle_url.startsWith('/') ? (window.location.origin + data.subtitle_url) : data.subtitle_url,
                                     type: data.subtitle_url.endsWith('.vtt') ? 'vtt' : 'srt',
-                                    style: { color: '#fff', fontSize: '20px' },
+                                    style: buildSubtitleStyle(),
                                     encoding: 'utf-8'
                                 };
                             }
@@ -7425,14 +7659,26 @@
                                 m3u8: function (video, url, art) {
                                     if (Hls.isSupported()) {
                                         if (art.hls) art.hls.destroy();
-                                        let hlsStarted = false;
-                                        const MIN_BUFFER_SECONDS = 30; // Esperar 30s de buffer antes de reproducir
+let hlsPlaybackStarted = false;
+                                        let hlsPreplayStarted = false;
+                                        const MIN_BUFFER_SECONDS = 8;
+                                        const STARTUP_TIMEOUT_MS = 20000;
+                                        const hlsLoadStartedAt = Date.now();
+                                        let hlsRecoveryAttempts = 0;
+                                        let hlsBufferedFragments = 0;
 
                                         const hls = new Hls({
-                                            autoStart: false,
-                                            startPosition: 0,
-                                            liveSyncDurationCount: 3,
-                                            liveMaxLatencyDurationCount: 5,
+                                            autoStartLoad: true,
+                                            // NO forzar startPosition:0 ni liveSync extremo: una playlist
+                                            // EVENT creciente la trata HLS.js como live, y forzar el inicio
+                                            // en 0 hace que su live-sync intente saltar al borde vivo y se
+                                            // reinicie (stall). Con config live limpia reproduce aunque
+                                            // arranca cerca del borde vivo. Para arrancar en 0 de forma
+                                            // fiable hace falta entrega VOD (no live).
+                                            liveDurationInfinity: false,
+                                            lowLatencyMode: false,
+                                            liveSyncDurationCount: 2,
+                                            liveMaxLatencyDurationCount: 4,
                                             maxBufferLength: 30,
                                             maxMaxBufferLength: 120,
                                             backBufferLength: 30,
@@ -7442,39 +7688,138 @@
                                         hls.attachMedia(video);
                                         art.hls = hls;
 
-                                        console.log('[HLS] Esperando buffer minimo antes de reproducir...');
-                                        const bufferCheck = setInterval(() => {
-                                            if (hlsStarted) return;
+const startPlayback = () => {
+                                            if (hlsPreplayStarted || hlsPlaybackStarted || art.isDestroy) return;
+                                            hlsPreplayStarted = true;
+                                            clearInterval(bufferCheck);
+                                            // Arrancamos en el borde vivo (~12-15s) sin pelear con el live-sync,
+                                            // pero NO reproducimos aun: cargamos buffer detras del loader y
+                                            // luego hacemos UN SOLO seek a 0, para que la pelicula empiece
+                                            // limpia en el segundo 0. El loader oculta ese salto.
+                                            art._hlsJumpedToZero = false;
+                                            if (loader) { loader.classList.remove('hidden', 'opacity-0'); }
+
+                                            const ZERO_JUMP_TARGET_SECONDS = 24;   // buffer adelante antes de saltar (maxBufferLength=30)
+                                            const ZERO_JUMP_TIMEOUT_MS = 30000;    // max espera (FFmpeg lento = fallback)
+                                            const jumpedAt = Date.now();
+                                            // Progreso del loader: sigue el buffer real, pero si el buffer va
+                                            // lento avanza por tiempo, para que nunca parezca "trabado en 100%".
+                                            const setLoaderProgress = (pct) => {
+                                                pct = Math.max(0, Math.min(100, Math.round(pct)));
+                                                const circle = document.getElementById('video-load-progress');
+                                                if (circle) circle.style.strokeDashoffset = String(264 * (1 - pct / 100));
+                                                const text = document.getElementById('video-load-percent');
+                                                if (text) text.innerText = pct + '%';
+                                            };
+                                            const jumpCheck = setInterval(() => {
+                                                if (art.isDestroy) { clearInterval(jumpCheck); return; }
+                                                let bufferedEnd = 0;
+                                                try { bufferedEnd = video.buffered.length ? video.buffered.end(video.buffered.length - 1) : 0; } catch (e) { }
+                                                const ahead = Math.max(0, bufferedEnd - (video.currentTime || 0));
+                                                const timedOut = Date.now() - jumpedAt >= ZERO_JUMP_TIMEOUT_MS;
+                                                const bufferPct = ahead / ZERO_JUMP_TARGET_SECONDS * 100;
+                                                const timePct = (Date.now() - jumpedAt) / ZERO_JUMP_TIMEOUT_MS * 100;
+                                                setLoaderProgress(Math.max(bufferPct, timePct));
+                                                if (ahead >= ZERO_JUMP_TARGET_SECONDS || timedOut) {
+                                                    clearInterval(jumpCheck);
+                                                    setLoaderProgress(100);
+                                                    // Un solo posicionamiento a 0 (no reiniciar startLoad continuamente).
+                                                    try { video.currentTime = 0; } catch (e) { }
+                                                    art._hlsJumpedToZero = true;
+                                                    console.log('[HLS] Salto a 0 con buffer listo, reproduciendo');
+                                                    // Ocultar el loader y fijar el estado SOLO cuando la reproduccion
+                                                    // confirma haber arrancado (evento playing), no antes.
+                                                    const hideLoaderOnPlay = () => {
+                                                        hlsPlaybackStarted = true;
+                                                        if (loader) {
+                                                            loader.classList.add('opacity-0');
+                                                            setTimeout(() => loader.classList.add('hidden'), 300);
+                                                        }
+                                                        video.removeEventListener('playing', hideLoaderOnPlay);
+                                                        art.off('video:playing', hideLoaderOnPlay);
+                                                    };
+                                                    video.addEventListener('playing', hideLoaderOnPlay);
+                                                    art.on('video:playing', hideLoaderOnPlay);
+                                                    art.play().catch(e => {
+                                                        hlsPreplayStarted = false;
+                                                        console.warn('[HLS] play() rechazo:', e.name || 'Error', e.message || e);
+                                                        video.removeEventListener('playing', hideLoaderOnPlay);
+                                                        art.off('video:playing', hideLoaderOnPlay);
+                                                        if (loader) {
+                                                            loader.classList.add('opacity-0');
+                                                            setTimeout(() => loader.classList.add('hidden'), 300);
+                                                        }
+                                                        art.notice.show = 'Pulsa reproducir para iniciar el video';
+                                                    });
+                                                }
+                                            }, 500);
+                                        };
+
+                                        // autoStartLoad:true arranca la carga solo al adjuntar la fuente.
+                                        // Evitamos startLoad(0) manual: en un stream tratado como live podia
+                                        // reiniciar la descarga desde el inicio (re-fetch de seg_000/001).
+                                        console.log(`[HLS] Cargando stream; objetivo inicial: ${MIN_BUFFER_SECONDS}s`);
+
+const bufferCheck = setInterval(() => {
+                                            if (hlsPlaybackStarted || hlsPreplayStarted) return;
                                             if (video.buffered.length > 0) {
                                                 const bufferedEnd = video.buffered.end(video.buffered.length - 1);
-                                                console.log(`[HLS] Buffer actual: ${bufferedEnd.toFixed(0)}s de ${MIN_BUFFER_SECONDS}s`);
-                                                if (bufferedEnd >= MIN_BUFFER_SECONDS) {
-                                                    hlsStarted = true;
-                                                    clearInterval(bufferCheck);
-                                                    console.log(`[HLS] Buffer listo, iniciando reproduccion`);
-                                                    hls.startLoad();
-                                                    art.play().catch(e => console.warn('[HLS] play() rechazo:', e.message));
-                                                }
+                                                const bufferedAhead = Math.max(0, bufferedEnd - (video.currentTime || 0));
+                                                console.log(`[HLS] Buffer disponible: ${bufferedAhead.toFixed(1)}s de ${MIN_BUFFER_SECONDS}s`);
+                                                if (bufferedAhead >= MIN_BUFFER_SECONDS || (bufferedAhead >= 2 && Date.now() - hlsLoadStartedAt >= 12000)) startPlayback();
                                             }
                                         }, 1000);
 
-                                        setTimeout(() => {
-                                            clearInterval(bufferCheck);
-                                            if (!hlsStarted) {
-                                                console.log('[HLS] Timeout, forzando inicio');
-                                                hlsStarted = true;
-                                                hls.startLoad();
-                                                art.play().catch(e => console.warn('[HLS] play() rechazo:', e.message));
+setTimeout(() => {
+                                            if (!hlsPlaybackStarted && !hlsPreplayStarted && !art.isDestroy) {
+                                                console.warn('[HLS] No hubo buffer suficiente durante el arranque');
+                                                art.notice.show = 'La red está tardando en preparar el video';
                                             }
-                                        }, 90000);
+                                        }, STARTUP_TIMEOUT_MS);
 
                                         if (typeof Hls.Events !== 'undefined') {
+                                            hls.on(Hls.Events.FRAG_BUFFERED, () => {
+                                                hlsBufferedFragments += 1;
+                                                if (hlsBufferedFragments >= 2) startPlayback();
+                                            });
+                                            hls.on(Hls.Events.ERROR, (_event, errorData) => {
+                                                console.warn('[HLS] error', {
+                                                    type: errorData?.type,
+                                                    details: errorData?.details,
+                                                    fatal: errorData?.fatal,
+                                                    responseCode: errorData?.response?.code
+                                                });
+                                                if (!errorData?.fatal) return;
+                                                if (hlsRecoveryAttempts >= 1) {
+                                                    hls.stopLoad();
+                                                    if (loader) {
+                                                        loader.classList.add('opacity-0');
+                                                        setTimeout(() => loader.classList.add('hidden'), 300);
+                                                    }
+                                                    art.notice.show = 'No se pudo decodificar este stream HLS';
+                                                    return;
+                                                }
+                                                hlsRecoveryAttempts += 1;
+                                                if (errorData.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                                                    hls.startLoad();
+                                                } else if (errorData.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                                                    hls.recoverMediaError();
+                                                }
+                                            });
                                             hls.on(Hls.Events.MANIFEST_PARSED, () => {
                                                 setTimeout(() => {
                                                     if (window.currentArtPlayer && window.currentArtPlayer.refreshAudioTracks) {
                                                         window.currentArtPlayer.refreshAudioTracks();
                                                     }
                                                 }, 0);
+                                            });
+                                            hls.on(Hls.Events.LEVEL_LOADED, (_event, data) => {
+                                                const details = data?.details;
+                                                console.log('[HLS] Playlist actualizado', {
+                                                    live: details?.live,
+                                                    duration: details?.totalduration,
+                                                    lastSegment: details?.endSN
+                                                });
                                             });
                                             hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => {
                                                 if (window.currentArtPlayer && window.currentArtPlayer.refreshAudioTracks) {
@@ -7487,7 +7832,10 @@
                                                 }
                                             });
                                         }
-                                        art.on('destroy', () => { clearInterval(bufferCheck); hls.destroy(); });
+art.on('destroy', () => {
+                                            clearInterval(bufferCheck);
+                                            hls.destroy();
+                                        });
                                     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
                                         video.src = url;
                                     } else {
@@ -7501,6 +7849,31 @@
                             }
 
                             art = new Artplayer(artConfig);
+
+                            // Reanudar desde el progreso persistido cuando el stream ya tiene duración utilizable.
+                            const pendingResumeSeconds = Number(window.krakenPendingResumeSeconds || 0);
+                            window.krakenPendingResumeSeconds = 0;
+                            if (pendingResumeSeconds > 5) {
+                                let resumeTimer = null;
+                                const applyPendingResume = () => {
+                                    const media = art && art.video;
+                                    const duration = Number(art?.duration || media?.duration || 0);
+                                    const hlsReady = !art?.hls || art._hlsJumpedToZero;
+                                    if (!media || !hlsReady || !Number.isFinite(duration) || duration <= pendingResumeSeconds + 1) return;
+                                    media.currentTime = Math.min(pendingResumeSeconds, Math.max(0, duration - 1));
+                                    console.log('[VIDEO] Reanudado desde', Math.round(media.currentTime), 'segundos');
+                                    if (resumeTimer) clearInterval(resumeTimer);
+                                    resumeTimer = null;
+                                };
+                                resumeTimer = setInterval(applyPendingResume, 500);
+                                setTimeout(() => {
+                                    if (resumeTimer) clearInterval(resumeTimer);
+                                    resumeTimer = null;
+                                }, 60000);
+                                art.on('destroy', () => {
+                                    if (resumeTimer) clearInterval(resumeTimer);
+                                });
+                            }
 
                             // ═══════ TOUCH TOGGLE para controles en móvil ═══════
                             // En móvil, ArtPlayer no detecta hover, así que necesitamos un listener de touch
@@ -7692,6 +8065,9 @@
 
                             art.on('ready', () => {
                                 refreshAudioTracks();
+                                // Aplicar preferencias de velocidad y volumen por defecto
+                                const rate = Number(getVideoPrefs().defaultRate != null ? getVideoPrefs().defaultRate : 1);
+                                if (rate && rate !== 1) { try { art.playbackRate = rate; } catch (e) { } }
                             });
 
                             // Volumen con rueda del ratón
@@ -7711,15 +8087,11 @@
                                     fetch(`/api/hls/status?sid=${sid}`)
                                         .then(r => r.json())
                                         .then(s => {
-                                            // Actualizar texto del loader
-                                            const pct = document.getElementById('video-load-percent');
-                                            const seg = s.segments || 0;
-                                            if (pct && loader && !loader.classList.contains('hidden')) {
-                                                pct.innerText = `${Math.min(100, seg * 20)}%`;
-                                            }
+                                            // El loader ya lo oculta el flujo de reproduccion (hideLoaderOnPlay).
+                                            // Aqui solo detenemos el poller cuando la sesion ya esta lista para
+                                            // no pegarle al servidor de mas.
                                             if (s.ready) {
                                                 clearInterval(bufferPoller);
-                                                hiddenLoader();
                                             }
                                         })
                                         .catch(() => clearInterval(bufferPoller));
@@ -7729,8 +8101,16 @@
                                 art.on('ready', hiddenLoader);
                             }
 
-                            // Auto-avanzar al terminar
-                            art.on('ended', () => { stopProgressTracking(); playNext(); });
+                            // No avanzar si el video nunca llegó a reproducirse. HLS puede emitir
+                            // estados finales durante un fallo de carga o una reconexión.
+                            let _videoPlaybackStarted = false;
+                            art.on('play', () => { _videoPlaybackStarted = true; });
+art.on('ended', () => {
+                                if (!_videoPlaybackStarted || _endedTriggered) return;
+                                _endedTriggered = true;
+                                stopProgressTracking();
+                                if (getVideoPrefs().autonext !== false) playNext();
+                            });
 
                             // ═══════ KEEPALIVE PING para sesión HLS (evita cleanup por inactividad) ═══════
                             let _hlsKeepaliveInterval = null;
@@ -7979,7 +8359,7 @@
 
                                 // Safety net: auto-avance si el video llega al final sin disparar ended
                                 // Solo disparar si pasaron al menos 30s de reproduccion (evita falsos positivos al inicio con HLS)
-                                if (art.duration > 0 && art.currentTime >= art.duration - 0.5 && (Date.now() - _watchStartedAt) >= 30000) {
+                                if (_videoPlaybackStarted && art.duration > 0 && art.currentTime >= art.duration - 0.5 && (Date.now() - _watchStartedAt) >= 30000) {
                                     _endedTriggered = true;
                                     removeNextEpOverlay();
                                     console.log('[ArtPlayer] timeupdate safety -> near end, triggering playNext');
@@ -8127,7 +8507,7 @@
                 const percentText = document.getElementById('video-load-percent');
 
                 if (circle) {
-                    const circumference = 283; // 2 * PI * 45
+                    const circumference = 264; // 2 * PI * 42
                     const offset = circumference - (percent / 100) * circumference;
                     circle.style.strokeDashoffset = offset;
                 }
@@ -8566,61 +8946,116 @@
                 }
             }
 
-            function toggleVideoFullscreen() {
+function toggleVideoFullscreen() {
 
                 // Mostrar la UI nativa de Kraken de nuevo
                 document.querySelectorAll('.cine-controls, .cine-header, #dt-left, #dt-right, #dt-center').forEach(el => {
                     if (el) el.classList.remove('hidden');
                 });
 
+                const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+
+                // Elementos candidatos a fullscreen (nativo o CSS de respaldo)
+                const cine = document.getElementById('cine-container');
+                const artContainer = document.getElementById('artplayer-container');
+
+                const exitFs = () => {
+                    const exitFn = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || (() => { });
+                    try { exitFn.call(document); } catch (e) { }
+                    [cine, artContainer, document.body].forEach(el => { if (el) el.classList.remove('krk-fullscreen'); });
+                    document.body.classList.remove('krk-fs-lock');
+                    const art = window.currentArtPlayer;
+                    if (art && art.fullscreen) { try { art.fullscreen = false; } catch (e) { } }
+                    if (art && art.fullscreenWeb) { try { art.fullscreenWeb = false; } catch (e) { } }
+                };
+
+                const enterNative = (el) => {
+                    const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+                    if (req) {
+                        try { return Promise.resolve(req.call(el)); } catch (e) { return Promise.reject(e); }
+                    }
+                    return Promise.reject(new Error('no-fullscreen-api'));
+                };
+
+                const cssFallbackOn = () => {
+                    const target = artContainer || cine;
+                    if (target) target.classList.add('krk-fullscreen');
+                    document.body.classList.add('krk-fs-lock');
+                };
+
+                // Reintentar nativo; si en el WebView no toma efecto, usar CSS de respaldo
+                const enterWithFallback = (el) => {
+                    enterNative(el).then(() => {
+                        setTimeout(() => {
+                            if (!document.fullscreenElement && !document.webkitFullscreenElement) cssFallbackOn();
+                        }, 120);
+                    }).catch(() => cssFallbackOn());
+                };
+
+                if (isFs) { exitFs(); return; }
+
+                // HLS usa ArtPlayer
+                const art = window.currentArtPlayer;
+                if (art && art.video) {
+                    enterWithFallback(artContainer || cine);
+                    return;
+                }
+
+                // Fallback nativo (#main-video)
                 const v = document.getElementById('main-video');
                 if (!v) return;
-
                 const container = document.getElementById('view-player');
                 if (!container) return;
 
-                if (!document.fullscreenElement) {
-                    v.style.transition = 'transform 0.2s ease';
+                const scaleVideo = () => {
+                    const containerWidth = container.clientWidth;
+                    const containerHeight = container.clientHeight;
+                    const videoWidth = v.videoWidth || v.clientWidth;
+                    const videoHeight = v.videoHeight || v.clientHeight;
+                    if (videoWidth === 0 || videoHeight === 0) return;
+                    const scaleX = containerWidth / videoWidth;
+                    const scaleY = containerHeight / videoHeight;
+                    const scale = Math.min(scaleX, scaleY);
+                    v.style.width = (videoWidth * scale) + 'px';
+                    v.style.height = (videoHeight * scale) + 'px';
+                    v.style.position = 'absolute';
+                    v.style.left = '50%';
+                    v.style.top = '50%';
+                    v.style.transform = 'translate(-50%, -50%)';
+                    v.style.transformOrigin = 'center center';
+                };
+                v.style.transition = 'transform 0.2s ease';
+                v.addEventListener('loadedmetadata', scaleVideo, { once: true });
+                if (v.readyState >= 1) scaleVideo();
 
-                    const scaleVideo = () => {
-                        const containerWidth = container.clientWidth;
-                        const containerHeight = container.clientHeight;
-                        const videoWidth = v.videoWidth || v.clientWidth;
-                        const videoHeight = v.videoHeight || v.clientHeight;
-
-                        if (videoWidth === 0 || videoHeight === 0) return;
-
-                        const scaleX = containerWidth / videoWidth;
-                        const scaleY = containerHeight / videoHeight;
-                        const scale = Math.min(scaleX, scaleY);
-
-                        const newWidth = videoWidth * scale;
-                        const newHeight = videoHeight * scale;
-
-                        v.style.width = newWidth + 'px';
-                        v.style.height = newHeight + 'px';
-                        v.style.position = 'absolute';
-                        v.style.left = '50%';
-                        v.style.top = '50%';
-                        v.style.transform = 'translate(-50%, -50%)';
-                        v.style.transformOrigin = 'center center';
-                    };
-
-                    v.addEventListener('loadedmetadata', scaleVideo, { once: true });
-                    if (v.readyState >= 1) scaleVideo();
-
-                    container.requestFullscreen().catch(() => { });
-                } else {
-                    v.style.width = '';
-                    v.style.height = '';
-                    v.style.position = '';
-                    v.style.left = '';
-                    v.style.top = '';
-                    v.style.transform = '';
-                    v.style.transformOrigin = '';
-                    document.exitFullscreen();
-                }
+                enterWithFallback(container);
             }
+
+            // Si el usuario sale con Escape o con el gesto del sistema, limpiar
+            // los estilos que solo pertenecen al fullscreen del fallback nativo.
+document.addEventListener('fullscreenchange', () => {
+                if (document.fullscreenElement) return;
+                if (window.currentArtPlayer) return;
+                const video = document.getElementById('main-video');
+                if (!video) return;
+                video.style.width = '';
+                video.style.height = '';
+                video.style.position = '';
+                video.style.left = '';
+                video.style.top = '';
+                video.style.transform = '';
+                video.style.transformOrigin = '';
+            });
+
+            // Escape tambien debe salir del fullscreen CSS de respaldo (el WebView
+            // no emite fullscreenchange para el modo position:fixed).
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && (document.querySelector('.krk-fullscreen'))) {
+                    document.querySelectorAll('#cine-container, #cine-screen, #artplayer-container, #view-player, body')
+                        .forEach(el => el.classList.remove('krk-fullscreen'));
+                    document.body.classList.remove('krk-fs-lock');
+                }
+            });
 
             // Controles de Volumen
             function changeVideoVolume() {
@@ -9793,6 +10228,7 @@
                         const heroItem = recentShows[Math.floor(Math.random() * recentShows.length)];
 
                         appendNetflixHero(container, heroItem);
+                        appendContinueWatchingSection(container);
 
 
                         // 7. FILTRAR POR BÚSQUEDA Y GÉNERO
@@ -10074,12 +10510,144 @@
                 }
             }
 
+            window.krakenVideoProgress = window.krakenVideoProgress || {};
+            window.krakenVideoPreviewCache = window.krakenVideoPreviewCache || {};
+
+            function loadVideoCardPreview(card) {
+                if (!card || window.matchMedia('(hover: none)').matches) return;
+                const tmdbId = card.dataset.previewId;
+                if (!tmdbId) return;
+                const preview = card.querySelector('.krk-video-hover-preview');
+                if (!preview || preview.dataset.loaded === '1') return;
+                const mediaType = card.dataset.previewType === 'tv' ? 'tv' : 'movie';
+                const cached = window.krakenVideoPreviewCache[`${mediaType}_${tmdbId}`];
+                if (cached) {
+                    preview.style.backgroundImage = `url("${cached}")`;
+                    preview.dataset.loaded = '1';
+                    return;
+                }
+                fetch(`/api/tmdb/details?id=${encodeURIComponent(tmdbId)}&type=${mediaType}`)
+                    .then(response => response.ok ? response.json() : null)
+                    .then(data => {
+                        const backdrop = data && data.backdrop;
+                        if (!backdrop || !preview.isConnected) return;
+                        window.krakenVideoPreviewCache[`${mediaType}_${tmdbId}`] = backdrop;
+                        preview.style.backgroundImage = `url("${backdrop}")`;
+                        preview.dataset.loaded = '1';
+                    })
+                    .catch(() => { });
+            }
+
+            function installVideoKeyboardShortcuts() {
+                if (window.__krakenVideoShortcutsBound) return;
+                window.__krakenVideoShortcutsBound = true;
+                document.addEventListener('keydown', (event) => {
+                    const target = event.target;
+                    if (target && (target.matches('input, textarea, select, button, [contenteditable="true"]') || target.closest('[role="dialog"]'))) return;
+                    const player = window.currentArtPlayer;
+                    const view = document.getElementById('view-player');
+                    if (!player || !view || view.classList.contains('hidden') || !player.video) return;
+                    const video = player.video;
+                    const key = event.key.toLowerCase();
+                    if (key === ' ' || key === 'k') {
+                        event.preventDefault();
+                        video.paused ? player.play() : player.pause();
+                    } else if (key === 'arrowleft') {
+                        event.preventDefault();
+                        video.currentTime = Math.max(0, video.currentTime - 10);
+                    } else if (key === 'arrowright') {
+                        event.preventDefault();
+                        video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 10);
+                    } else if (key === 'arrowup') {
+                        event.preventDefault();
+                        player.volume = Math.min(1, (player.volume || 0) + 0.1);
+                    } else if (key === 'arrowdown') {
+                        event.preventDefault();
+                        player.volume = Math.max(0, (player.volume || 0) - 0.1);
+                    } else if (key === 'm') {
+                        event.preventDefault();
+                        video.muted = !video.muted;
+                    } else if (key === 'f') {
+                        event.preventDefault();
+                        toggleVideoFullscreen();
+                    }
+                });
+            }
+            installVideoKeyboardShortcuts();
+
+            async function appendContinueWatchingSection(container) {
+                if (currentLibrary !== 'video' || currentPath !== '' || !container) return;
+                try {
+                    const response = await fetch('/api/progress/continue-watching', { cache: 'no-store' });
+                    if (!response.ok) return;
+                    const payload = await response.json();
+                    const items = Array.isArray(payload.items) ? payload.items : [];
+                    if (!items.length || !container.isConnected) return;
+
+                    items.forEach(item => {
+                        window.krakenVideoProgress[item.id] = item;
+                    });
+
+                    const section = document.createElement('section');
+                    section.className = 'w-full mb-7';
+                    section.innerHTML = `
+                        <div class="flex items-center justify-between mb-3 px-1">
+                            <h2 class="text-white text-lg md:text-xl font-black tracking-tight">Seguir viendo</h2>
+                            <span class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Guardado en tu cuenta</span>
+                        </div>
+                        <div class="flex gap-4 overflow-x-auto no-scrollbar pb-2">
+                            ${items.map(item => {
+                                const title = item.tmdb_title || item.title || 'Video';
+                                const pct = item.duration_seconds > 0
+                                    ? Math.max(0, Math.min(100, Math.round((item.progress_seconds / item.duration_seconds) * 100)))
+                                    : 0;
+                                const poster = item.tmdb_poster
+                                    ? `/caratula/${encodeURIComponent(item.tmdb_poster)}`
+                                    : `/caratula/${String(item.rel_path || '').split('/').map(p => encodeURIComponent(p)).join('/')}`;
+                                return `
+                                        <article class="krk-video-card relative shrink-0 w-64 md:w-72 bg-[#121212] border border-white/10 rounded-xl overflow-visible shadow-lg hover:border-emerald-500/40 transition group"
+                                        data-preview-id="${escapeHtml(item.tmdb_id || '')}"
+                                        data-preview-type="${item.folder_type === 'series' ? 'tv' : 'movie'}">
+                                        <div class="relative aspect-video overflow-hidden rounded-t-xl bg-[#0a0a0a]">
+                                            <img src="${poster}" loading="lazy" class="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition duration-500" alt="">
+                                            <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
+                                            <button class="absolute left-3 bottom-3 w-10 h-10 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 transition z-20" data-path="${escapeHtml(item.rel_path || '')}" data-resume="${item.progress_seconds || 0}" onclick="event.stopPropagation(); playNow(this.dataset.path, Number(this.dataset.resume))" aria-label="Continuar ${escapeHtml(title)}">
+                                                <i class="fa-solid fa-play ml-0.5"></i>
+                                            </button>
+                                            <div class="absolute left-3 right-3 bottom-2 h-1 rounded-full bg-white/25 z-10"><span class="block h-full rounded-full bg-emerald-400" style="width:${pct}%"></span></div>
+                                        </div>
+                                        <div class="p-3">
+                                            <h3 class="text-white font-bold text-sm truncate">${escapeHtml(title)}</h3>
+                                            <p class="text-zinc-500 text-[11px] mt-1">${pct}% visto</p>
+                                        </div>
+                                    </article>`;
+                            }).join('')}
+                        </div>`;
+                    const firstGrid = container.querySelector('.grid');
+                    if (firstGrid) firstGrid.before(section);
+                    else container.appendChild(section);
+                } catch (error) {
+                    console.warn('[VIDEO] Continue watching unavailable:', error);
+                }
+            }
+
             function createCard(f) {
                 const safePath = escapeStr(f.path);
                 const coverUrl = getCoverUrl(f);
                 const source = f.sample ? f.sample : f;
+                const isVideoCard = currentLibrary === 'video';
+                const progressSource = isVideoCard
+                    ? (window.krakenVideoProgress[f.id] || window.krakenVideoProgress[source.id] || {})
+                    : {};
+                const previewTmdbId = f.tmdb_id || source.tmdb_id || '';
+                const previewType = (f.folder_type || source.folder_type) === 'series' ? 'tv' : 'movie';
                 const isMovieFolder = f.folder_type === 'movie';
                 const isSel = selectedFiles.has(f.path) ? 'ring-2 ring-emerald-500 bg-emerald-900/20' : 'bg-[#121212]';
+                const progressSeconds = Number(f.progress_seconds || progressSource.progress_seconds || 0);
+                const durationSeconds = Number(f.duration_seconds || progressSource.duration_seconds || 0);
+                const progressPct = isVideoCard && durationSeconds > 0
+                    ? Math.max(0, Math.min(100, Math.round((progressSeconds / durationSeconds) * 100)))
+                    : 0;
 
                 // TMDB RATING
                 const ratingVal = f.tmdb_rating;
@@ -10194,11 +10762,22 @@
                         class="px-3 py-1.5 rounded-full bg-white/15 hover:bg-white/25 border border-white/25 text-white text-[11px] font-bold transition-all duration-200 mb-1">
                     <i class="fa-solid fa-circle-info mr-1"></i> Más información
                 </button>` : '';
+                const hoverPreview = isVideoCard && previewTmdbId ? `
+            <div class="krk-video-hover-preview" data-preview-card aria-hidden="true">
+                <div class="absolute inset-x-3 bottom-3 z-10 text-left">
+                    <div class="text-white text-sm font-bold truncate">${escapeHtml(f.tmdb_title || f.clean_title || f.title || 'Video')}</div>
+                    <div class="text-white/70 text-[10px] mt-1">Vista previa informativa</div>
+                </div>
+            </div>` : '';
 
                 return `
-    <div class="${isSel} p-3 rounded-xl hover:bg-[#1e1e1e] transition duration-300 group cursor-pointer relative shadow-lg border border-white/5 hover:border-white/10" 
+    <div class="${isSel} ${isVideoCard ? 'krk-video-card' : ''} p-3 rounded-xl hover:bg-[#1e1e1e] transition duration-300 group cursor-pointer relative shadow-lg border border-white/5 hover:border-white/10"
+         data-preview-id="${escapeHtml(previewTmdbId)}"
+         data-preview-type="${previewType}"
+         onmouseenter="loadVideoCardPreview(this)"
          data-path="${escapeHtml(f.path)}"
          onclick="${clickAction}">
+        ${hoverPreview}
         <div class="relative w-full ${currentLibrary === 'video' ? 'aspect-[2/3]' : 'aspect-square'} bg-[#0a0a0a] rounded-lg overflow-hidden mb-2 shadow-inner flex items-center justify-center">
             ${ratingBadge}
                 ${favBadge}
@@ -10211,6 +10790,7 @@
             <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center backdrop-blur-[2px] z-20 gap-2">
                 ${selectionMode ? '<i class="fa-regular fa-square-check text-4xl text-white"></i>' : `${movieInfoHoverBtn}<div class="w-10 h-10 bg-emerald-500 text-black rounded-full flex items-center justify-center shadow-xl hover:scale-110 transition"><i class="fa-solid ${folderIcon}"></i></div>`}
             </div>
+            ${progressPct > 0 ? `<div class="krk-video-card-progress"><span style="width:${progressPct}%"></span></div>` : ''}
         </div>
         
         <h3 class="font-bold text-white truncate text-xs mb-0.5 leading-tight flex items-center gap-1">
@@ -11843,7 +12423,7 @@
             function getKrakenPlaybackSnapshot() {
                 const currentTrack = playerQueue[currentTrackIndex];
                 const isVideoTrack = !!(currentTrack && (currentTrack.type === 'video' || (currentTrack.path && /\.(mp4|mkv|avi|webm)$/i.test(currentTrack.path))));
-                const activeVideo = document.querySelector('#video-screen video');
+                const activeVideo = document.querySelector('#cine-screen video, #artplayer-container video, #main-video');
                 const isVideoPlaying = !!(activeVideo && !activeVideo.paused && !activeVideo.ended);
                 const isAudioPlaying = !!(audioElement && audioElement.src && !audioElement.paused && !audioElement.ended);
                 const currentVolume = audioElement ? Number(audioElement.volume || 0) : 0;
@@ -12242,6 +12822,7 @@
 
             let lastRadarJson = "";
             let LAST_USERS_DATA = [];
+            const KRAKEN_PLAYBACK_TARGET_KEY = 'kraken-playback-target-sid';
 
             function getDeviceDisplayName(device) {
                 if (!device) return 'Dispositivo';
@@ -12250,6 +12831,17 @@
 
             function syncRemoteTargetsWithOnlineUsers() {
                 const onlineBySid = new Map((LAST_USERS_DATA || []).map(u => [u.session_id, u]));
+                const previousPlaybackSid = window.KRAKEN_PLAYBACK_TARGET?.session_id || null;
+
+                if (!window.KRAKEN_PLAYBACK_TARGET?.session_id) {
+                    const savedSid = localStorage.getItem(KRAKEN_PLAYBACK_TARGET_KEY);
+                    const savedTarget = savedSid ? onlineBySid.get(savedSid) : null;
+                    if (savedTarget && savedTarget.session_id !== MY_SESSION_ID) {
+                        window.KRAKEN_PLAYBACK_TARGET = savedTarget;
+                    } else if (savedSid) {
+                        localStorage.removeItem(KRAKEN_PLAYBACK_TARGET_KEY);
+                    }
+                }
 
                 if (window.KRAKEN_CONTROL_TARGET?.session_id) {
                     const freshControl = onlineBySid.get(window.KRAKEN_CONTROL_TARGET.session_id);
@@ -12268,6 +12860,9 @@
                         window.KRAKEN_PLAYBACK_TARGET = null;
                     }
                 }
+
+                const currentPlaybackSid = window.KRAKEN_PLAYBACK_TARGET?.session_id || null;
+                if (previousPlaybackSid !== currentPlaybackSid) renderPlaybackTargetWidget();
             }
 
             function getActiveRemotePlaybackTarget() {
@@ -12298,6 +12893,9 @@
                                 <div class="text-sm font-bold text-white truncate">${getDeviceDisplayName(target)}</div>
                                 <div class="text-[11px] text-zinc-500 mt-0.5">Tocar una canción la reproducirá allá</div>
                             </div>
+                            <button onclick="showControlMenu('${String(target.name || '').replace(/'/g, "\\'")}')" class="shrink-0 w-8 h-8 rounded-full bg-white/5 hover:bg-cyan-500/15 text-zinc-400 hover:text-cyan-300 transition" title="Cambiar salida">
+                                <i class="fa-solid fa-arrows-rotate text-xs"></i>
+                            </button>
                             <button onclick="clearPlaybackTarget()" class="shrink-0 w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition" title="Quitar salida remota">
                                 <i class="fa-solid fa-xmark text-xs"></i>
                             </button>
@@ -12393,6 +12991,10 @@
 
             function setPlaybackTarget(targetSid) {
                 if (!targetSid) return;
+                if (targetSid === 'local') {
+                    clearPlaybackTarget();
+                    return;
+                }
                 if (targetSid === MY_SESSION_ID) {
                     showToast('Este equipo ya es tu salida local', 'warning');
                     return;
@@ -12405,12 +13007,14 @@
                 }
 
                 applyPlaybackTargetState(target);
+                localStorage.setItem(KRAKEN_PLAYBACK_TARGET_KEY, target.session_id);
                 showToast(`Salida remota activa: ${getDeviceDisplayName(target)}`, 'success');
                 document.getElementById('control-modal')?.remove();
             }
 
             function clearPlaybackTarget(silent = false) {
                 applyPlaybackTargetState(null);
+                localStorage.removeItem(KRAKEN_PLAYBACK_TARGET_KEY);
                 if (!silent) showToast('Salida remota desactivada', 'info');
             }
 
@@ -12660,6 +13264,7 @@
 
             function drawUserRadar(users) {
                 LAST_USERS_DATA = users;
+                syncRemoteTargetsWithOnlineUsers();
 
                 // 1. CHEQUEO ANTI-BRINCO MEJORADO 🛑
                 // Creamos una "firma" visual que IGNORA el tiempo y la duración.
@@ -12859,7 +13464,11 @@
                                 <i class="fa-solid fa-plus text-[8px]"></i></button>
                             <i class="fa-solid fa-volume-high text-[9px] text-zinc-600"></i>
                         </div>
-                        ${!isCurrentSession ? `
+                        ${isCurrentSession ? `
+                        <button onclick="setPlaybackTarget('local'); document.getElementById('${modalId}').remove();"
+                            class="mt-3 w-full flex items-center justify-center gap-2 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 rounded-xl py-2 text-[11px] text-emerald-300 transition">
+                            <i class="fa-solid fa-house text-[10px]"></i> Usar este equipo como salida
+                        </button>` : `
                         <div class="mt-3 flex gap-2">
                             <button onclick="${isControlled ? "unlinkControlledDevice()" : `linkControlledDevice('${d.session_id}')`}" class="flex-1 flex items-center justify-center gap-2 ${isControlled ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300' : 'bg-white/5 border-white/10 text-zinc-300 hover:border-emerald-500/30 hover:text-emerald-300'} border rounded-xl py-2 text-[11px] font-medium transition">
                                 <i class="fa-solid ${isControlled ? 'fa-link-slash' : 'fa-gamepad'} text-[10px]"></i>
@@ -12869,7 +13478,7 @@
                                 <i class="fa-solid fa-satellite-dish text-[10px]"></i>
                                 Salida Activa
                             </button>
-                        </div>` : ''}
+                        </div>`}
                     </div>`;
                 }).join('');
 

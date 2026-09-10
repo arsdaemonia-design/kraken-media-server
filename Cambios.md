@@ -1674,3 +1674,85 @@ Tercera y Ãºltima etapa de la unificaciÃ³n del render de video. AdemÃ¡s, s
 - **Por qu� conviene como capa adicional**:
   - Porque no reemplaza el modo actual ni rompe el flujo local.
   - Solo agrega una redirecci�n opcional en el momento de elegir contenido.
+#### Correccion de inicio HLS y pantalla completa (08-Sep-2026)
+- **Inicio HLS mas robusto**: la carga de segmentos comienza inmediatamente; el reproductor espera aproximadamente 8 segundos de buffer antes de iniciar, con un margen de arranque de 20 segundos para redes lentas.
+- **Prevencion de saltos falsos**: `playNext()` ya no se ejecuta si el video nunca llego a reproducirse. Esto protege los casos donde falla el manifiesto, la red no entrega segmentos o la sesion HLS se reconecta.
+- **Recuperacion lenta**: si el buffer tarda mas de 20 segundos, se muestra un aviso pero la comprobacion continua para permitir que el video arranque cuando la red se recupere.
+- **Pantalla completa unificada**: el boton externo usa ArtPlayer cuando el video corre por HLS y conserva el fallback nativo para reproducciones directas. Tambien se limpian los estilos al salir con `Escape`.
+- **Archivos tocados**: `templates/index.html`. No se hizo push ni commit.
+#### Correccion de reproduccion para MKV con AC-3 en Windows (08-Sep-2026)
+- **Caso reproducido**: `Anticristo (2009) - (tmdb-17609).mkv` contiene video H.264 1080p y dos pistas de audio AC-3 5.1. VLC lo reproduce, pero el navegador requiere convertir el audio a AAC.
+- **Causa real**: al detectar el encoder `h264_nvenc`, el backend imprimia el simbolo Unicode `✓`. En la consola Windows `cp1252`, ese log provocaba `UnicodeEncodeError` antes de iniciar FFmpeg.
+- **Correccion**: se reemplazaron esos simbolos por mensajes ASCII en `services/hls_transcoder.py`. La sesion ya inicia FFmpeg, crea la playlist y genera segmentos HLS correctamente.
+- **Validacion**: se comprobo el mismo archivo con la ruta real de transcodificacion y se generaron segmentos activos sin que el proceso terminara.
+- **Archivos tocados**: `services/hls_transcoder.py`. No se hizo push ni commit.
+#### HLS progresivo para peliculas con timeline completo (08-Sep-2026)
+- **Problema observado**: Opera reproducia el MKV directamente, mientras Kraken podia quedarse en el primer tramo de la pelicula porque la playlist se servia como `stream` y parecia una transmision viva.
+- **Cambio de playlist**: el modo progresivo ahora usa `-hls_playlist_type event`. Esto permite comenzar con los primeros segmentos y continuar ampliando la misma linea de tiempo hasta completar la pelicula.
+- **Duracion completa**: al terminar FFmpeg, la playlist conserva todos los segmentos y queda lista para seek/reanudacion como VOD.
+- **Cache corregida**: las respuestas `playlist.m3u8` se sirven con `no-store` para evitar que el navegador reutilice una playlist parcial.
+- **Archivos tocados**: `services/hls_transcoder.py`, `routes/hls.py`. No se hizo push ni commit.
+#### Correccion de estado de video en heartbeat (08-Sep-2026)
+- **Problema observado**: los logs mostraban siempre `time=0`, `duration=0` e `is_playing=false` porque el frontend buscaba el video en `#video-screen`, un contenedor que ya no existe.
+- **Correccion**: el heartbeat y el progreso ahora buscan el video en `#cine-screen video`, `#artplayer-container video` y `#main-video`.
+- **Resultado**: el control remoto, el progreso de usuario y los logs `/status` reflejaran el estado real de ArtPlayer/HLS o del fallback nativo.
+- **Archivos tocados**: `templates/index.html`. No se hizo push ni commit.
+#### Mejor manejo cuando el navegador rechaza el inicio HLS (08-Sep-2026)
+- **Problema observado**: HLS podia tener segmentos disponibles, pero `video.play()` podia ser rechazado por el navegador despues de la carga asincrona. El loader quedaba visible y parecia que la pelicula estaba congelada.
+- **Correccion visual**: si el inicio automatico es rechazado, Kraken oculta el loader, muestra un aviso y permite iniciar desde el control de reproduccion.
+- **Diagnostico HLS**: se agregaron logs de errores fatales de red y media, con recuperacion automatica para errores recuperables.
+- **Archivos tocados**: `templates/index.html`. No se hizo push ni commit.
+#### Reencode de video cuando el audio necesita transcodificacion (08-Sep-2026)
+- **Diagnostico confirmado**: el navegador solicitaba repetidamente `seg_000.ts` y `seg_001.ts`, sin avanzar a `seg_002.ts`. La sesion HLS permanecia viva, pero el primer tramo no era aceptado correctamente por el decodificador del navegador.
+- **Causa probable corregida**: el flujo anterior copiaba el H.264 del MKV y solo convertia el audio AC-3. Eso podia dejar timestamps o puntos de entrada incompatibles para HLS.js.
+- **Cambio**: cuando el audio necesita transcodificacion, FFmpeg ahora tambien reencodea el video a H.264 con perfil Main, GOP estable y puntos de entrada cada 2 segundos.
+- **Validacion**: `Anticristo (2009)` genero segmentos continuos con video H.264 Main y audio AAC; el proceso permanecio activo sin errores.
+- **Costo**: esta ruta consume mas GPU/CPU que copiar el video, pero solo se aplica a archivos que no pueden reproducirse directamente en navegador.
+- **Archivos tocados**: `services/hls_transcoder.py`. No se hizo push ni commit.
+#### Cache desactivada para segmentos HLS (08-Sep-2026)
+- **Problema observado**: la sesion recibia `200` para los primeros segmentos y luego `304` al revalidar `seg_000.ts` y `seg_001.ts`, quedando HLS.js atrapado en el inicio.
+- **Correccion**: playlists y segmentos ahora se sirven con `conditional=False`, sin ETag y con `Cache-Control: no-store`, para que cada solicitud reciba el contenido actual completo.
+- **Objetivo**: evitar que respuestas `304` sin cuerpo interfieran con el avance entre fragmentos mientras FFmpeg genera la pelicula.
+- **Archivos tocados**: `routes/hls.py`. No se hizo push ni commit.
+#### Arranque HLS basado en fragmentos anexados (08-Sep-2026)
+- **Problema observado**: la playlist y los primeros dos segmentos llegaban con `200`, pero el navegador permanecia en `is_playing=false` y no solicitaba `seg_002.ts`.
+- **Correccion**: el reproductor ahora inicia tambien al recibir dos eventos `FRAG_BUFFERED` de HLS.js, sin depender exclusivamente de `video.buffered`.
+- **Configuracion corregida**: se usa la opcion oficial `autoStartLoad` de HLS.js en lugar de la clave obsoleta `autoStart`.
+- **Resultado esperado**: una vez anexados los primeros fragmentos, el elemento `<video>` debe comenzar y HLS.js continuar solicitando los siguientes segmentos.
+- **Archivos tocados**: `templates/index.html`. No se hizo push ni commit.
+#### Refresco del playlist HLS durante la transcodificacion (08-Sep-2026)
+- **Diagnostico confirmado**: en `sess_te2mbikyg` FFmpeg genero continuamente `seg_000.ts` hasta al menos `seg_168.ts`, por lo que el archivo y la transcodificacion estaban bien. El navegador solo solicito el playlist inicial y los primeros segmentos; por eso quedaba mostrando una duracion corta (`24.024` segundos) y se detenia.
+- **Resultado de la prueba**: el temporizador que llamaba `startLoad()` cada 4 segundos hizo que HLS.js volviera a pedir `seg_001.ts` y `seg_002.ts`, reiniciando su ventana de carga cerca del segundo 11.9. Esto genero el aviso de decodificacion aunque FFmpeg siguiera produciendo segmentos.
+- **Correccion final**: se retiro el temporizador. HLS.js conserva `autoStartLoad` y su mecanismo nativo de recarga de playlists, sin reiniciar la posicion de carga durante la reproduccion.
+- **Configuracion conservada**: se mantiene desactivado el modo de baja latencia y se mantiene `liveDurationInfinity: false`, para que la duracion de la pelicula pueda crecer sin tratarla como una transmision infinita.
+- **Diagnostico adicional**: se agrego el evento `LEVEL_LOADED`, que registra si el playlist sigue vivo, su duracion acumulada y el ultimo segmento visible para HLS.js.
+- **Limpieza**: ya no existe un temporizador externo que pueda interferir con el estado interno de HLS.js.
+- **Archivos tocados**: `templates/index.html`. No se hizo push ni commit.
+#### Soporte experimental para segmentos HLS fMP4 (09-Sep-2026)
+- **Objetivo**: probar una alternativa mas robusta que MPEG-TS para timestamps y Media Source Extensions, sin migrar a DASH ni cambiar el reproductor.
+- **Flag reversible**: `HLS_SEGMENT_TYPE=mpegts` conserva el comportamiento actual. Para probar fMP4 se puede iniciar Kraken con `HLS_SEGMENT_TYPE=fmp4`.
+- **Implementacion fMP4**: FFmpeg usa `-hls_segment_type fmp4`, genera `init.mp4` y segmentos `seg_###.m4s`.
+- **Servidor**: Flask entrega `init.mp4`, `.m4s` y `.ts` con MIME correcto y sin cache. La espera inicial y `/api/hls/status` reconocen ambos tipos de segmento.
+- **Alcance**: la playlist sigue siendo HLS `EVENT`; este cambio puede mejorar decodificacion y timestamps, pero no garantiza arranque desde el segundo 0.
+- **Archivos tocados**: `config.py`, `services/hls_transcoder.py`, `routes/hls.py`. No se hizo push ni commit.
+#### Mejoras visuales de biblioteca de video y continuidad (09-Sep-2026)
+- **Seguir viendo persistente**: se agrego `GET /api/progress/continue-watching`, que consulta el progreso de videos incompletos guardado por usuario y evita depender del cache del navegador.
+- **Carrusel de continuidad**: la vista raiz de video muestra una fila `Seguir viendo` con poster, porcentaje visto y boton para reanudar desde el segundo guardado.
+- **Reanudacion segura**: al elegir una tarjeta de continuidad, el reproductor espera a tener una duracion valida antes de aplicar el seek. En HLS no fuerza el seek mientras el inicio protegido todavia esta preparando el stream.
+- **Progreso en tarjetas**: las tarjetas de video muestran una barra de avance cuando hay progreso disponible.
+- **Preview informativo**: en escritorio, al pasar el cursor sobre una tarjeta con TMDB se carga bajo demanda el backdrop de TMDB. No se reproduce video y se desactiva en movil o dispositivos sin hover.
+- **Skeleton de caratulas**: las imagenes lazy muestran un shimmer hasta que terminan de cargar; los errores tambien cierran el estado de carga.
+- **Atajos del reproductor**: `Space`/`K` play-pause, flechas izquierda/derecha seek de 10 segundos, flechas arriba/abajo volumen, `M` mute y `F` pantalla completa. No interfieren con inputs ni dialogos.
+- **Accesibilidad de movimiento**: se respeta `prefers-reduced-motion` para animaciones, transiciones y skeletons.
+- **Compatibilidad**: los cambios de tarjeta y preview viven en el flujo de video; no cambian el layout ni la reproduccion de audio. El preview se oculta en movil.
+- **Archivos tocados**: `templates/index.html`, `routes/api.py`. No se hizo push ni commit.
+#### Salida activa y preferencias de subtitulos (09-Sep-2026)
+- **Salida activa persistente**: el dispositivo remoto elegido se guarda localmente y se restaura solo si sigue en linea; si desaparece, se limpia automaticamente.
+- **Sincronizacion del radar**: el radar ahora actualiza el destino remoto cuando cambia su estado o deja de estar disponible.
+- **Cambio rapido de salida**: el widget permite abrir de nuevo el selector y elegir otro dispositivo, y el modal incluye `Usar este equipo como salida`.
+- **Preferencias de subtitulos**: los tamanos quedan en `18`, `22`, `28` y `36 px`, aumentando 2 px respecto a la configuracion anterior en cada nivel.
+- **Archivos tocados**: `templates/index.html`. No se hizo push ni commit.
+#### Preparacion de release v4.98 (10-Sep-2026)
+- Se unificaron las versiones de `app_offline.py`, `templates/index.html`, `README.md` e Inno Setup en `4.98`.
+- Se generara el ejecutable offline con `KrakenOffline.spec` y el instalador con `kraken_installer.iss`.
+- Este release incluye las mejoras de continuidad de video, salida activa remota, subtitulos y UI documentadas arriba.

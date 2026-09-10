@@ -3794,6 +3794,37 @@ def get_series_resume():
         return jsonify({"error": str(e)}), 500
 
 
+@api_bp.route('/api/progress/continue-watching')
+def get_continue_watching():
+    """Return unfinished video progress for the current user, newest first."""
+    try:
+        user_email = get_user_from_request(request) or 'anonymous'
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("""
+            SELECT m.id, m.rel_path, m.title, m.tmdb_title, m.tmdb_poster,
+                   m.tmdb_id, m.tmdb_rating, m.genre, m.folder_type,
+                   p.progress_seconds, p.duration_seconds, p.last_watched
+            FROM user_progress p
+            JOIN media m ON m.id = p.media_id
+            WHERE p.user_email = ?
+              AND m.media_type = 'video'
+              AND p.progress_seconds > 0
+              AND p.duration_seconds > 0
+              AND CAST(p.progress_seconds AS REAL) / p.duration_seconds >= 0.03
+              AND CAST(p.progress_seconds AS REAL) / p.duration_seconds < 0.93
+              AND p.is_finished = 0
+            ORDER BY p.last_watched DESC
+            LIMIT 24
+        """, (user_email,))
+        rows = c.fetchall()
+        conn.close()
+        return jsonify({"items": [dict(row) for row in rows]})
+    except Exception as e:
+        print(f"Error getting continue watching: {e}")
+        return jsonify({"items": [], "error": str(e)}), 500
+
+
 # ============= TMDB EXTENDED DETAILS (Live-Fetch) =============
 
 @api_bp.route('/api/tmdb/details')
