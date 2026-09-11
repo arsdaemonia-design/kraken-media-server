@@ -1756,3 +1756,30 @@ Tercera y Ãºltima etapa de la unificaciÃ³n del render de video. AdemÃ¡s, s
 - Se unificaron las versiones de `app_offline.py`, `templates/index.html`, `README.md` e Inno Setup en `4.98`.
 - Se generara el ejecutable offline con `KrakenOffline.spec` y el instalador con `kraken_installer.iss`.
 - Este release incluye las mejoras de continuidad de video, salida activa remota, subtitulos y UI documentadas arriba.
+#### Deteccion segura de posibles duplicados (11-Sep-2026)
+- Se agrego un detector bajo demanda para audio que separa `Mismo contenido` (hash SHA-256) de `Posible duplicado` (artista, titulo y duracion aproximada).
+- Las variantes con marcadores como `Acoustic`, `Live`, `Remix`, `Instrumental`, `Unplugged`, `Demo`, `Remaster`, `Cover` y similares no se mezclan automaticamente.
+- Se agrego el panel `Posibles duplicados`, accesible desde el menu lateral, con acciones explicitas para conservar, ocultar/restaurar o eliminar cada archivo. No hay borrado automatico.
+- Los archivos ocultos permanecen indexados para poder restaurarlos, pero dejan de mostrarse en la biblioteca normal.
+- Las tarjetas de la biblioteca muestran un distintivo de duplicado pendiente de revision.
+- Al eliminar un archivo se limpian tambien sus referencias en playlists, historial, progreso de reproduccion y candidatos de duplicado.
+- El escaneo se ejecuta en segundo plano y solo calcula hashes para archivos que ya comparten tamano y duracion, reduciendo el impacto sobre la biblioteca.
+- **Archivos tocados**: `services/database.py`, `services/duplicates.py`, `services/library.py`, `routes/api.py`, `templates/index.html`. No se hizo push ni commit.
+- El panel de duplicados ahora distribuye cada grupo en columnas independientes en escritorio y conserva una sola columna en movil para facilitar la comparacion.
+- Se agrego paginacion de 60 grupos por tanda y un boton `Cargar mas grupos` para evitar saturar el navegador cuando el informe contiene cientos de grupos.
+- La revision visual de duplicados se reorganizo: cada grupo muestra el original como tarjeta de referencia y sus duplicados en una lista vertical, con datos compactos de artista, album, duracion, peso y ruta.
+- La seleccion de duplicados ahora es global entre grupos y tandas cargadas; se agregaron `Seleccionar cargados`, `Limpiar seleccion` y `Borrar seleccionados` con una sola confirmacion y PIN.
+- Los grupos se separan en `Identicos confirmados` y un apartado colapsado para `Album distinto o posible duplicado`; la seleccion rapida solo marca los identicos confirmados para reducir el riesgo de borrar una edicion valida.
+- Se corrigio el panel de duplicados para conservar el scroll interno, cargar todas las tandas sin mensajes de estado engañosos y registrar correctamente la seleccion individual de cada checkbox.
+- Se unifico el desplazamiento en un solo contenedor que incluye los grupos y `Cargar mas grupos`, evitando que el panel corte la lista por tener scrolls anidados.
+- La coincidencia fuerte ahora considera mismo artista/titulo, album, tamano y una diferencia maxima de 2 segundos en duracion; los casos con album diferente siguen protegidos en revision manual.
+- Se corrigio la lectura de caratulas embebidas en MP3: ahora se acepta cualquier frame ID3 `APIC:*`, incluyendo claves descriptivas generadas por distintos etiquetadores.
+- Se corrigio el lazy loading de caratulas: ahora se comprueba el atributo `src` real antes de cargar `data-src`, evitando que algunos navegadores consideren cargada la URL de la pagina y muestren el fallback generico.
+- Se ajusto tambien el callback del `IntersectionObserver`, que conservaba la condicion anterior y podia impedir la carga al entrar la tarjeta en pantalla.
+- El auto-tagger de generos ahora reutiliza el mapeo controlado de Kraken para no tomar cualquier tag secundario como genero principal; solo procesa `Otros`, vacios o `Unknown`.
+- Se agrego Deezer como segunda opinion cuando Last.fm no entrega un genero reconocido, sin modificar archivos que ya tienen un genero valido.
+- La radio por similitud ahora da mayor peso al mismo genero, manteniendo artista y album como señales adicionales, para evitar saltos aleatorios entre estilos distintos.
+- Cuando los tags del artista no son suficientes, el auto-tagger consulta tambien la cancion concreta en Last.fm antes de usar Deezer; al terminar invalida el cache de mixes para que las radios se reconstruyan con los nuevos generos.
+- La radio por similitud agrega una proteccion de coherencia: con un genero valido, ordena primero coincidencias del mismo genero, despues canciones sin genero y deja otros estilos como fallback final.
+- MusicBrainz se agrego como primera fuente del auto-tagger para buscar la grabacion concreta por artista y titulo, y luego el artista; Last.fm y Deezer quedan como respaldos. Se mantiene la regla de no tocar generos ya validos.
+- Se corrigio el auto-tagger para validar contra el mismo PIN maestro persistente que usa el resto de Kraken (`runtime_config.json`), evitando la discrepancia entre `3041` y el valor antiguo de `config.py`.

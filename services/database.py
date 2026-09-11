@@ -205,6 +205,28 @@ def init_db():
     except sqlite3.OperationalError:
         pass # Column already exists
 
+    # Manual library hiding is separate from parental/adult filtering.
+    try:
+        c.execute("ALTER TABLE media ADD COLUMN is_hidden BOOLEAN DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass # Column already exists
+
+    # Duplicate detection is advisory: no file is deleted automatically.
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS duplicate_candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_key TEXT NOT NULL,
+            media_id INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            confidence REAL DEFAULT 0,
+            reason TEXT,
+            content_hash TEXT,
+            decision TEXT DEFAULT NULL,
+            created_at REAL DEFAULT (datetime('now')),
+            UNIQUE(group_key, media_id)
+        )
+    ''')
+
     # ═══ Video Technical Metadata Columns (v4.92) ═══
     # Estas columnas almacenan info técnica extraída por ffprobe durante el escaneo.
     # Beneficio: NO necesita hacer ffprobe en cada reproducción, la info ya está en DB.
@@ -300,6 +322,9 @@ def _create_performance_indexes(cursor):
         ("idx_media_play_count", "media(play_count)"),   # Top played, stats, más reproducidas
         ("idx_media_media_type_title", "media(media_type, title)"),  # Composite: búsqueda filtrada por tipo
         ("idx_media_genre_type", "media(genre, media_type)"),        # Composite: filtro género + tipo (música vs video)
+        ("idx_media_hidden", "media(is_hidden)"),                    # Ocultos manualmente
+        ("idx_duplicate_group", "duplicate_candidates(group_key)"),  # Grupos de revisión
+        ("idx_duplicate_media", "duplicate_candidates(media_id)"),  # Distintivos en biblioteca
     ]
     
     for idx_name, idx_def in indexes:

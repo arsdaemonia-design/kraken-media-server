@@ -29,6 +29,7 @@ from services.library import *
 from services.media_analyzer import *
 from services.video_tagger import *
 from services.database import get_db
+from services.duplicates import get_scan_status, start_scan
 import traceback
 
 api_bp = Blueprint("api", __name__)
@@ -1023,9 +1024,11 @@ def caratula(filename):
     try:
         if decoded.lower().endswith('.mp3'):
             tags = ID3(path)
-            apic = tags.get("APIC:") or tags.get("APIC:Cover")
+            # ID3 permite varias claves APIC descriptivas (por ejemplo APIC:Cover of ...).
+            # No debemos depender de que el etiquetador use exactamente "APIC:Cover".
+            apic = next((frame for key, frame in tags.items() if str(key).startswith('APIC')), None)
             if apic:
-                resp = Response(apic.data, mimetype=apic.mime)
+                resp = Response(apic.data, mimetype=apic.mime or 'image/jpeg')
                 resp.headers['Cache-Control'] = 'public, max-age=31536000'
                 return resp
 
@@ -1377,6 +1380,114 @@ def _analizar_single_url(url, hist):
 BIB_CACHE_BY_OWNER = {}
 BIB_CACHE_TIME = 0
 
+
+def _clear_library_caches():
+    global BIB_CACHE_BY_OWNER, BIB_CACHE_TIME
+    BIB_CACHE_BY_OWNER = {}
+    BIB_CACHE_TIME = 0
+    try:
+        state.MIXES_CACHE = None
+    except Exception:
+        pass
+
+
+@api_bp.route('/api/duplicates/scan', methods=['POST'])
+def scan_duplicates_api():
+    data = request.get_json(silent=True) or {}
+    if data.get('pin') != get_master_pin():
+        return jsonify({'error': 'PIN incorrecto'}), 401
+    started = start_scan()
+    return jsonify({'ok': True, 'started': started, 'status': get_scan_status()})
+
+
+@api_bp.route('/api/duplicates/status')
+def duplicates_status_api():
+    return jsonify({'ok': True, 'status': get_scan_status()})
+
+
+@api_bp.route('/api/duplicates')
+def duplicates_api():
+    try:
+        offset = max(0, int(request.args.get('offset', 0)))
+        limit = min(100, max(10, int(request.args.get('limit', 60))))
+    except ValueError:
+        offset, limit = 0, 60
+    conn = get_db()
+    rows = conn.execute('''
+        SELECT d.group_key, d.kind, d.confidence, d.reason, d.decision,
+               m.id, m.rel_path, m.filename, m.title, m.artist, m.album,
+               m.duration_sec, m.size_bytes, m.media_type, m.is_hidden
+        FROM duplicate_candidates d
+        JOIN media m ON m.id = d.media_id
+        WHERE d.decision IS NULL
+        ORDER BY d.kind, d.group_key, m.artist, m.title
+    ''').fetchall()
+    conn.close()
+
+    groups = {}
+    for row in rows:
+        group = groups.setdefault(row['group_key'], {
+            'key': row['group_key'],
+            'kind': row['kind'],
+            'confidence': row['confidence'],
+            'reason': row['reason'],
+            'items': []
+        })
+        group['items'].append({
+            'id': row['id'],
+            'path': row['rel_path'],
+            'filename': row['filename'],
+            'title': row['title'],
+            'artist': row['artist'],
+            'album': row['album'],
+            'duration_sec': row['duration_sec'],
+            'size_bytes': row['size_bytes'],
+            'type': row['media_type'],
+            'is_hidden': bool(row['is_hidden']),
+        })
+    all_groups = list(groups.values())
+    result = all_groups[offset:offset + limit]
+    return jsonify({'ok': True, 'groups': result,
+                    'group_count': len(all_groups),
+                    'item_count': sum(len(group['items']) for group in all_groups),
+                    'offset': offset,
+                    'has_more': offset + len(result) < len(all_groups)})
+
+
+@api_bp.route('/api/duplicates/decision', methods=['POST'])
+def duplicate_decision_api():
+    data = request.get_json(silent=True) or {}
+    media_id = data.get('media_id')
+    decision = data.get('decision')
+    if not media_id or decision not in ('keep', 'dismiss'):
+        return jsonify({'error': 'Decision invalida'}), 400
+    conn = get_db()
+    conn.execute("UPDATE duplicate_candidates SET decision = ? WHERE media_id = ?",
+                 (decision, media_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
+@api_bp.route('/api/duplicates/hide', methods=['POST'])
+def duplicate_hide_api():
+    data = request.get_json(silent=True) or {}
+    if data.get('pin') != get_master_pin():
+        return jsonify({'error': 'PIN incorrecto'}), 401
+    media_id = data.get('media_id')
+    hidden = 1 if data.get('hidden', True) else 0
+    if not media_id:
+        return jsonify({'error': 'Archivo invalido'}), 400
+    conn = get_db()
+    conn.execute("UPDATE media SET is_hidden = ? WHERE id = ?", (hidden, media_id))
+    # Keep the candidate visible in the review panel so it can be restored.
+    conn.execute("UPDATE duplicate_candidates SET decision = NULL WHERE media_id = ?",
+                 (media_id,))
+    conn.commit()
+    conn.close()
+    _clear_library_caches()
+    return jsonify({'ok': True, 'hidden': bool(hidden)})
+
 def filtrar_contenido_kid_mode(data):
     """Filtra el contenido de la biblioteca para modo niños.
     
@@ -1513,11 +1624,13 @@ def obtener_similares(filepath):
                 score += 60
         if ref.get('album') and cand.get('album'):
             if ref['album'].lower() == cand['album'].lower():
-                score += 40
+                score += 25
         if ref.get('genre') and cand.get('genre'):
             if (ref['genre'].lower() == cand['genre'].lower()
                     and ref['genre'].lower() not in ['otros', 'unknown', '']):
-                score += 20
+                # El genero debe pesar lo suficiente para mantener una radio coherente
+                # aunque no haya coincidencia de artista o album.
+                score += 50
         r1 = ref.get('rating', 0) or 0
         r2 = cand.get('rating', 0) or 0
         if abs(r1 - r2) <= 1:
@@ -1531,11 +1644,34 @@ def obtener_similares(filepath):
             if (c.get('path') or '').replace('\\', '/') == ref_path:
                 continue
             candidatas.append({'cancion': c, 'score': _calcular_similitud(referencia, c)})
-        candidatas.sort(key=lambda x: x['score'], reverse=True)
+
+        # Si la referencia tiene un genero confiable, priorizar coincidencias del
+        # mismo genero y dejar los estilos distintos como ultimo recurso.
+        generic_genres = {'', 'otros', 'unknown', 'desconocido', 'generos'}
+        reference_genre = str(referencia.get('genre') or '').strip().casefold()
+        if reference_genre not in generic_genres:
+            same_genre = []
+            unknown_genre = []
+            other_genre = []
+            for candidate in candidatas:
+                candidate_genre = str(candidate['cancion'].get('genre') or '').strip().casefold()
+                if candidate_genre == reference_genre:
+                    same_genre.append(candidate)
+                elif candidate_genre in generic_genres:
+                    unknown_genre.append(candidate)
+                else:
+                    other_genre.append(candidate)
+            candidatas = (
+                sorted(same_genre, key=lambda x: x['score'], reverse=True)
+                + sorted(unknown_genre, key=lambda x: x['score'], reverse=True)
+                + sorted(other_genre, key=lambda x: x['score'], reverse=True)
+            )
+        else:
+            candidatas.sort(key=lambda x: x['score'], reverse=True)
         resultado = []
-        muy = [c for c in candidatas if c['score'] >= 60]
+        muy = [c for c in candidatas if c['score'] >= 50]
         resultado.extend([c['cancion'] for c in muy[:30]])
-        medio = [c for c in candidatas if 20 <= c['score'] < 60]
+        medio = [c for c in candidatas if 25 <= c['score'] < 50]
         _random.shuffle(medio)
         resultado.extend([c['cancion'] for c in medio[:10]])
         poco = [c for c in candidatas if c['score'] < 20]
@@ -1662,7 +1798,7 @@ def crear_carpeta():
         return jsonify({"error": "Nombre de carpeta invÃ¡lido"}), 400
 
 @api_bp.route('/borrar', methods=['POST'])
-def borrar(): 
+def borrar():
     try:
         data = request.json
         rel_path = data.get('file')
@@ -1712,6 +1848,26 @@ def borrar():
         from services.database import get_db
         conn = get_db()
         c = conn.cursor()
+        media_row = c.execute("SELECT id FROM media WHERE rel_path = ?", (rel_path,)).fetchone()
+        # Older installs used media_path in playlist tables; clean both shapes.
+        for query, params in [
+            ("DELETE FROM playlist_items WHERE rel_path = ?", (rel_path,)),
+            ("DELETE FROM playlist_items WHERE media_path = ?", (rel_path,)),
+            ("DELETE FROM play_history WHERE media_path = ?", (rel_path,)),
+        ]:
+            try:
+                c.execute(query, params)
+            except Exception:
+                pass
+        if media_row:
+            try:
+                c.execute("DELETE FROM user_progress WHERE media_id = ?", (media_row['id'],))
+            except Exception:
+                pass
+            try:
+                c.execute("DELETE FROM duplicate_candidates WHERE media_id = ?", (media_row['id'],))
+            except Exception:
+                pass
         c.execute("DELETE FROM media WHERE rel_path = ?", (rel_path,))
         conn.commit()
         conn.close()
@@ -1720,6 +1876,7 @@ def borrar():
         try:
             import services.library
             services.library.BIB_CACHE = None
+            _clear_library_caches()
         except:
             pass
 
@@ -2158,9 +2315,9 @@ def autotag_library():
 	data = request.json or {}
 	pin = data.get('pin')
 	import config
-	if pin != config.MASTER_PIN: return jsonify({'error': 'PIN incorrecto'}), 401
+	if pin != get_master_pin(): return jsonify({'error': 'PIN incorrecto'}), 401
 	from services.database import get_db
-	from services.lastfm import get_lastfm_data
+	from services.lastfm import get_lastfm_data, normalize_genre, get_deezer_artist_genre, get_musicbrainz_genres
 	from services.metadata import write_genre_to_file, clean_artist_name
 	
 	print("\n" + "="*60)
@@ -2172,7 +2329,7 @@ def autotag_library():
 	
 	# 1. Obtener archivos que necesitan gÃ©nero de la base de datos
 	c.execute('''
-		SELECT id, rel_path, artist, genre 
+		SELECT id, rel_path, title, artist, genre
 		FROM media 
 		WHERE media_type = 'audio' 
 		  AND (genre IS NULL 
@@ -2212,21 +2369,13 @@ def autotag_library():
 		conn.close()
 		return jsonify({'ok': False, 'msg': 'No hay artistas vÃ¡lidos para buscar'})
 
-	# FunciÃ³n interna de normalizaciÃ³n rÃ¡pida
-	def normalize_genre(tags_list):
-		ignore_tags = ['seen live', 'favorites', 'awesome', 'good', 'my favorites', 'love at first listen']
-		for t in tags_list:
-			t_lower = t.lower()
-			if t_lower not in ignore_tags and len(t) > 2:
-				return t.title()
-		return 'Otros'
-		
 	# 3. Procesar Artistas
 	tagged = 0
 	failed = 0
 	skipped = 0
 	files_updated = 0
 	total = len(artists_to_process)
+	musicbrainz_cache = {}
 	
 	print(f"\nðŸš€ Procesando {total} artistas...")
 	print("-" * 60)
@@ -2239,29 +2388,43 @@ def autotag_library():
 				
 			print(f"  ðŸ” [{idx}/{total}] {artist[:40]} ({len(artist_files)} archivos)")
 			
-			# Consultar Last.fm
-			data = get_lastfm_data('artist.gettoptags', {
-				'artist': artist,
-				'autocorrect': 1
-			})
+			representative = artist_files[0] if artist_files else None
+			track_title = representative['title'] if representative else ''
+			cache_key = (artist.casefold(), (track_title or '').casefold())
+			if cache_key not in musicbrainz_cache:
+				musicbrainz_cache[cache_key] = get_musicbrainz_genres(artist, track_title)
+			mb_tags = musicbrainz_cache[cache_key]
+			genre = normalize_genre(mb_tags)
+			genre_source = 'MusicBrainz' if genre != 'Otros' else ''
+
+			# Last.fm aporta tags comunitarios cuando MusicBrainz no tiene un match util.
+			if genre == 'Otros':
+				data = get_lastfm_data('artist.gettoptags', {
+					'artist': artist,
+					'autocorrect': 1
+				})
+				tags_raw = (data or {}).get('toptags', {}).get('tag', [])
+				genre = normalize_genre([t['name'] for t in tags_raw[:10] if t.get('name')])
+				genre_source = 'Last.fm' if genre != 'Otros' else genre_source
+
+			# Si el artista es demasiado generico, probar la cancion concreta.
+			if genre == 'Otros' and representative:
+				track_data = get_lastfm_data('track.gettoptags', {
+					'artist': artist,
+					'track': representative['title'] or '',
+					'autocorrect': 1
+				})
+				track_tags = (track_data or {}).get('toptags', {}).get('tag', [])
+				genre = normalize_genre([t['name'] for t in track_tags[:10] if t.get('name')])
+				genre_source = 'Last.fm canción' if genre != 'Otros' else genre_source
+
+			# Deezer queda como respaldo final y normalmente mas general.
+			if genre == 'Otros':
+				deezer_genre = get_deezer_artist_genre(artist)
+				genre = normalize_genre([deezer_genre] if deezer_genre else [])
+				genre_source = 'Deezer' if genre != 'Otros' else 'sin fuente confiable'
 			
-			if not data or 'toptags' not in data:
-				print(f"     âš ï¸ Sin respuesta de Last.fm")
-				failed += 1
-				time.sleep(0.3)
-				continue
-				
-			tags_raw = data['toptags'].get('tag', [])
-			if not tags_raw:
-				print(f"     âš ï¸ Sin tags disponibles en Last.fm")
-				skipped += 1
-				time.sleep(0.3)
-				continue
-				
-			tag_names = [t['name'] for t in tags_raw[:10]]
-			genre = normalize_genre(tag_names)
-			
-			print(f"     ðŸ“Œ GÃ©nero detectado: {genre}")
+			print(f"     ðŸ“Œ GÃ©nero detectado: {genre} ({genre_source})")
 			
 			if genre == 'Otros':
 				skipped += 1
@@ -2295,12 +2458,12 @@ def autotag_library():
 			else:
 				failed += 1
 				
-			time.sleep(0.5) # Respetar API LastFM
+			time.sleep(1.1) # Respetar el limite de MusicBrainz y Last.fm
 				
 		except Exception as e:
 			print(f"     âŒ ERROR en artista {artist}: {e}")
 			failed += 1
-			time.sleep(0.5)
+			time.sleep(1.1)
 
 	conn.close()
 	
@@ -2316,8 +2479,8 @@ def autotag_library():
 	try:
 	    # Invalidar cachÃ© en memoria principal si es posible
 	    import services.library
-	    from state import MIXES_CACHE
 	    services.library.BIB_CACHE = None
+	    state.MIXES_CACHE = None
 	except:
 	    pass
 	

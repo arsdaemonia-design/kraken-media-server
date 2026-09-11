@@ -434,21 +434,41 @@ def generar_biblioteca_viva(owner_email='public'):
         SELECT id, rel_path, filename, folder, full_folder, media_type,
                title, artist, album, genre, duration_sec, size_bytes, date_added,
                rating, play_count, last_played, language, folder_type, tmdb_id,
-               tmdb_title, tmdb_year, tmdb_genres, tmdb_poster, tmdb_rating, is_adult
+               tmdb_title, tmdb_year, tmdb_genres, tmdb_poster, tmdb_rating, is_adult, is_hidden
         FROM media
         ORDER BY folder, title
     ''')
     rows = c.fetchall()
     
     # Obtenemos playlist information map: { rel_path: [pl_name1, pl_name2] }
-    c.execute('''
-        SELECT p.name AS playlist_name, pi.rel_path
-        FROM playlists p
-        LEFT JOIN playlist_items pi ON pi.playlist_id = p.id
-        WHERE p.owner_email = ?
-        ORDER BY p.name, pi.position
-    ''', (owner_email,))
+    try:
+        c.execute('''
+            SELECT p.name AS playlist_name, pi.rel_path
+            FROM playlists p
+            LEFT JOIN playlist_items pi ON pi.playlist_id = p.id
+            WHERE p.owner_email = ?
+            ORDER BY p.name, pi.position
+        ''', (owner_email,))
+    except Exception:
+        # Fresh/older databases used media_path; expose the same API shape.
+        c.execute('''
+            SELECT p.name AS playlist_name, pi.media_path AS rel_path
+            FROM playlists p
+            LEFT JOIN playlist_items pi ON pi.playlist_id = p.id
+            WHERE p.owner_email = ?
+            ORDER BY p.name, pi.position
+        ''', (owner_email,))
     playlist_rows = c.fetchall()
+
+    # Duplicate metadata is advisory and only affects the visual badge.
+    c.execute('''
+        SELECT media_id, MIN(kind) AS duplicate_kind, MAX(confidence) AS duplicate_confidence
+        FROM duplicate_candidates
+        WHERE decision IS NULL
+        GROUP BY media_id
+    ''')
+    duplicate_rows = c.fetchall()
+    duplicate_map = {r['media_id']: r for r in duplicate_rows}
     
     # Obtenemos la información raw de playlists para mandarla al cliente como formato clásico json
     playlists_dict = {}
@@ -478,6 +498,10 @@ def generar_biblioteca_viva(owner_email='public'):
     final_files = []
 
     for row in rows:
+        # Hidden files remain indexed for recovery and duplicate review, but are
+        # not exposed in the normal library views.
+        if row['is_hidden']:
+            continue
         # Reconstruir el diccionario que el cliente espera
         f = {
             'id': row['id'],
@@ -504,8 +528,13 @@ def generar_biblioteca_viva(owner_email='public'):
         'tmdb_genres': row['tmdb_genres'],
         'tmdb_poster': row['tmdb_poster'],
         'tmdb_rating': row['tmdb_rating'],
-        'is_adult': row['is_adult']
+        'is_adult': row['is_adult'],
+        'is_hidden': bool(row['is_hidden'])
     }
+        duplicate = duplicate_map.get(row['id'])
+        if duplicate:
+            f['duplicate_kind'] = duplicate['duplicate_kind']
+            f['duplicate_confidence'] = duplicate['duplicate_confidence']
         
         rel_path = f['path']
         f['playlists'] = playlist_map.get(rel_path, [])

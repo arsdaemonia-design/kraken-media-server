@@ -1,6 +1,7 @@
 import requests
 import json
 import time
+import re
 import config
 from services.database import get_db
 
@@ -85,6 +86,100 @@ def get_artist_image_deezer(artist_name):
     except Exception as e:
         print(f"⚠️ Error Deezer image ({artist_name}): {e}")
     return None
+
+
+def get_deezer_artist_genre(artist_name):
+    """Obtiene el genero principal de Deezer sin requerir una API key."""
+    if not artist_name or artist_name == 'Desconocido':
+        return None
+    try:
+        search = requests.get(
+            'https://api.deezer.com/search/artist',
+            params={'q': artist_name, 'limit': 5},
+            timeout=config.LASTFM_TIMEOUT
+        ).json()
+        candidates = search.get('data') or []
+        if not candidates:
+            return None
+        wanted = artist_name.strip().casefold()
+        exact = next((item for item in candidates if item.get('name', '').strip().casefold() == wanted), candidates[0])
+        artist_id = exact.get('id')
+        if not artist_id:
+            return None
+        details = requests.get(
+            f'https://api.deezer.com/artist/{artist_id}',
+            timeout=config.LASTFM_TIMEOUT
+        ).json()
+        genre = (details.get('genre') or {}).get('name')
+        return genre.strip() if genre else None
+    except Exception as e:
+        print(f"⚠️ Error Deezer genre ({artist_name}): {e}")
+        return None
+
+
+def get_musicbrainz_genres(artist_name, track_title=None):
+    """Obtiene tags/generos de MusicBrainz para una grabacion o artista."""
+    if not artist_name or artist_name == 'Desconocido':
+        return []
+
+    headers = {
+        'User-Agent': 'KrakenMediaServer/4.98 (genre metadata lookup)'
+    }
+
+    def clean(value):
+        return re.sub(r'[^a-z0-9]+', ' ', str(value or '').casefold()).strip()
+
+    def collect(entity):
+        values = []
+        for item in entity.get('genres') or []:
+            if item.get('name'):
+                values.append(item['name'])
+        for item in entity.get('tags') or []:
+            if item.get('name'):
+                values.append(item['name'])
+        return values
+
+    try:
+        params = {
+            'query': f'artist:"{artist_name}"',
+            'fmt': 'json',
+            'limit': 5,
+        }
+        if track_title:
+            params['query'] = f'artist:"{artist_name}" AND recording:"{track_title}"'
+            recording_data = requests.get(
+                'https://musicbrainz.org/ws/2/recording/',
+                params={**params, 'inc': 'genres+tags'},
+                headers=headers,
+                timeout=config.LASTFM_TIMEOUT,
+            ).json()
+            recordings = recording_data.get('recordings') or []
+            wanted_artist = clean(artist_name)
+            wanted_title = clean(track_title)
+            recordings.sort(key=lambda item: (
+                clean(item.get('title')) == wanted_title,
+                any(clean(credit.get('artist', {}).get('name')) == wanted_artist for credit in item.get('artist-credit') or []),
+                item.get('score', 0),
+            ), reverse=True)
+            if recordings:
+                genres = collect(recordings[0])
+                if genres:
+                    return genres
+
+        artist_data = requests.get(
+            'https://musicbrainz.org/ws/2/artist/',
+            params={**params, 'query': f'artist:"{artist_name}"', 'inc': 'genres+tags'},
+            headers=headers,
+            timeout=config.LASTFM_TIMEOUT,
+        ).json()
+        artists = artist_data.get('artists') or []
+        if artists:
+            wanted = clean(artist_name)
+            artists.sort(key=lambda item: (clean(item.get('name')) == wanted, item.get('score', 0)), reverse=True)
+            return collect(artists[0])
+    except Exception as e:
+        print(f"⚠️ Error MusicBrainz genre ({artist_name}): {e}")
+    return []
 
 def get_lastfm_data(method, params):
     """Función genérica para Last.fm"""
