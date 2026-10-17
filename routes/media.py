@@ -8,6 +8,8 @@ import config
 
 media_bp = Blueprint("media", __name__)
 
+CHUNK_SIZE = 1024 * 1024  # 1 MB por bloque para streaming constante en RAM
+
 @media_bp.route('/')
 def index():
     # Carga el template desde el archivo extraído
@@ -29,10 +31,28 @@ def serve_file(filename):
         if not requested.exists():
             return "No encontrado", 404
 
+        if requested.suffix.lower() in ('.srt', '.vtt'):
+            raw = requested.read_bytes()
+            if raw.startswith(b'\xef\xbb\xbf'):
+                raw = raw[3:]
+            try:
+                text_utf8 = raw.decode('utf-8')
+            except UnicodeDecodeError:
+                try:
+                    text_utf8 = raw.decode('cp1252')
+                except UnicodeDecodeError:
+                    text_utf8 = raw.decode('latin-1', errors='replace')
+            sub_mime = 'text/vtt; charset=utf-8' if requested.suffix.lower() == '.vtt' else 'text/plain; charset=utf-8'
+            resp = Response(text_utf8.encode('utf-8'), mimetype=sub_mime)
+            resp.headers['Access-Control-Allow-Origin'] = '*'
+            resp.headers['Cache-Control'] = 'public, max-age=3600'
+            return resp
+
         range_header = request.headers.get('Range')
         if not range_header:
             response = send_file(str(requested), conditional=True)
             response.headers['Accept-Ranges'] = 'bytes'
+            response.headers['Access-Control-Allow-Origin'] = '*'
             return response
 
         match = re.match(r'bytes=(\d+)-(\d*)', range_header)
@@ -43,17 +63,30 @@ def serve_file(filename):
         start = int(match.group(1))
         end = int(match.group(2)) if match.group(2) else size - 1
         end = min(end, size - 1)
-        if start > end:
+        if start > end or start >= size:
             return "Invalid Range", 416
 
         length = end - start + 1
         mime_type = mimetypes.guess_type(str(requested))[0] or 'application/octet-stream'
 
-        with open(requested, 'rb') as f:
-            f.seek(start)
-            data = f.read(length)
+        def generate_chunks(file_path, offset, total_bytes):
+            remaining = total_bytes
+            with open(file_path, 'rb') as f:
+                f.seek(offset)
+                while remaining > 0:
+                    read_size = min(CHUNK_SIZE, remaining)
+                    chunk = f.read(read_size)
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
 
-        response = Response(data, 206, mimetype=mime_type, direct_passthrough=True)
+        response = Response(
+            generate_chunks(requested, start, length),
+            206,
+            mimetype=mime_type,
+            direct_passthrough=True
+        )
         response.headers['Content-Range'] = f'bytes {start}-{end}/{size}'
         response.headers['Accept-Ranges'] = 'bytes'
         response.headers['Content-Length'] = str(length)

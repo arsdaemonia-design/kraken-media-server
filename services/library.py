@@ -117,6 +117,10 @@ def detect_folder_type(file_path):
 def escanear_archivos_fisicos():
     """PASO 1 (DELTA): Lee disco y solo reprocesa archivos nuevos/modificados."""
     import state
+
+    if state.RESCAN_STATUS.get("active"):
+        print(f"⚠️ Escaneo físico omitido: ya hay un proceso activo ({state.RESCAN_STATUS.get('stage')})")
+        return []
     
     # Inicializar estado de escaneo
     state.RESCAN_STATUS = {
@@ -357,17 +361,45 @@ def escanear_archivos_fisicos():
 
 
 def recalcular_mixes(files):
-    """Regenera los mixes inteligentes basados en la biblioteca actual."""
+    """Regenera los mixes inteligentes basados en la biblioteca actual, historial y análisis Librosa (BPM/Energía)."""
     audio_only = [f for f in files if f.get('type') == 'audio']
     
     if not audio_only:
         return []
     
     smart_mixes = []
-    
-    # Top 50 más escuchadas
-    top = sorted([f for f in audio_only if f.get('play_count', 0) > 0], 
-                 key=lambda x: x.get('play_count', 0), reverse=True)[:50]
+    now_ts = time.time()
+
+    # 1. Para Ti Hoy (Recomendaciones basadas en artistas/géneros más escuchados y pistas afines aún poco exploradas)
+    top_played = sorted([f for f in audio_only if f.get('play_count', 0) > 0],
+                        key=lambda x: (x.get('rating', 0), x.get('play_count', 0)), reverse=True)
+    if top_played:
+        fav_artists = {f.get('artist', '').strip().lower() for f in top_played[:25]
+                       if f.get('artist') and f.get('artist').strip().lower() not in ('desconocido', 'unknown', '')}
+        fav_genres = {f.get('genre', '').strip().lower() for f in top_played[:25]
+                      if f.get('genre') and f.get('genre').strip().lower() not in ('otros', 'unknown', 'desconocido', '')}
+        discover_candidates = [
+            f for f in audio_only
+            if f.get('play_count', 0) <= 2 and (
+                (f.get('artist', '').strip().lower() in fav_artists) or
+                (f.get('genre', '').strip().lower() in fav_genres)
+            )
+        ]
+        if len(discover_candidates) >= 10:
+            random.shuffle(discover_candidates)
+            discover_mix = (discover_candidates[:35] + random.sample(top_played[:min(len(top_played), 30)], min(15, len(top_played))))[:50]
+            random.shuffle(discover_mix)
+            smart_mixes.append({
+                'id': 'smart_discover',
+                'name': 'Para Ti Hoy',
+                'icon': 'fa-wand-magic-sparkles',
+                'color': 'text-pink-400',
+                'files': [x['path'] for x in discover_mix],
+                'cover': discover_mix[0]['path']
+            })
+
+    # 2. Top 50 Más Escuchadas
+    top = top_played[:50]
     if top:
         smart_mixes.append({
             'id': 'smart_top50',
@@ -377,10 +409,62 @@ def recalcular_mixes(files):
             'files': [x['path'] for x in top],
             'cover': top[0]['path']
         })
+
+    # 3. Alta Energía & Ritmo (Librosa BPM >= 118 o Energy >= 55 + respaldo por géneros intensos)
+    high_energy_genres = {'rock', 'metal', 'electronic', 'electrónica', 'dance', 'edm', 'hip-hop', 'rap', 'pop', 'punk', 'industrial', 'synthwave'}
+    upbeat = [
+        f for f in audio_only
+        if (f.get('bpm', 0) >= 118 and f.get('energy', 0) >= 40)
+        or (f.get('energy', 0) >= 60)
+        or (f.get('bpm', 0) == 0 and any(g in (f.get('genre') or '').lower() for g in high_energy_genres))
+    ]
+    if len(upbeat) >= 10:
+        upbeat_analyzed = [f for f in upbeat if f.get('bpm', 0) > 0]
+        upbeat_fallback = [f for f in upbeat if f.get('bpm', 0) == 0]
+        random.shuffle(upbeat_analyzed)
+        random.shuffle(upbeat_fallback)
+        upbeat_sel = (upbeat_analyzed + upbeat_fallback)[:50]
+        smart_mixes.append({
+            'id': 'smart_energy',
+            'name': 'Alta Energía & Ritmo',
+            'icon': 'fa-bolt',
+            'color': 'text-amber-400',
+            'files': [x['path'] for x in upbeat_sel],
+            'cover': upbeat_sel[0]['path']
+        })
+
+    # 4. Chill & Noche (Librosa BPM 60-108 y energía suave + respaldo acústico/ambient/ost)
+    chill_genres = {'ambient', 'chill', 'acoustic', 'jazz', 'classical', 'clásica', 'lo-fi', 'lofi', 'soundtrack', 'ost', 'soul', 'r&b', 'indie', 'folk'}
+    chill = [
+        f for f in audio_only
+        if (0 < f.get('bpm', 0) <= 108 and 0 < f.get('energy', 0) <= 55)
+        or (f.get('bpm', 0) == 0 and any(g in (f.get('genre') or '').lower() for g in chill_genres))
+    ]
+    if len(chill) >= 10:
+        chill_analyzed = [f for f in chill if f.get('bpm', 0) > 0]
+        chill_fallback = [f for f in chill if f.get('bpm', 0) == 0]
+        random.shuffle(chill_analyzed)
+        random.shuffle(chill_fallback)
+        chill_sel = (chill_analyzed + chill_fallback)[:50]
+        smart_mixes.append({
+            'id': 'smart_chill',
+            'name': 'Chill & Noche',
+            'icon': 'fa-moon',
+            'color': 'text-indigo-400',
+            'files': [x['path'] for x in chill_sel],
+            'cover': chill_sel[0]['path']
+        })
     
-    # Joyas olvidadas (rating >= 4, no escuchadas en 30 días)
-    month_ago = time.time() - (30 * 86400)
-    gems = [f for f in audio_only if f.get('rating', 0) >= 4 and f.get('last_played', 0) < month_ago]
+    # 5. Joyas Olvidadas (canciones con play_count >= 2 o favoritas rating >= 1, no escuchadas en 21 días)
+    three_weeks_ago = now_ts - (21 * 86400)
+    gems = [
+        f for f in audio_only
+        if (f.get('rating', 0) >= 1 or f.get('play_count', 0) >= 2)
+        and (f.get('last_played', 0) < three_weeks_ago)
+    ]
+    if not gems:
+        two_weeks_ago = now_ts - (14 * 86400)
+        gems = [f for f in audio_only if f.get('play_count', 0) >= 1 and f.get('last_played', 0) < two_weeks_ago]
     if gems:
         random.shuffle(gems)
         smart_mixes.append({
@@ -392,10 +476,12 @@ def recalcular_mixes(files):
             'cover': gems[0]['path']
         })
     
-    # Radar de novedades (última semana)
-    week_ago = time.time() - (7 * 86400)
-    new_f = sorted([f for f in audio_only if f['date'] > week_ago],
-                   key=lambda x: x['date'], reverse=True)[:50]
+    # 6. Radar de Novedades (últimos 14 días o las 50 más recientes agregadas)
+    two_weeks_ago = now_ts - (14 * 86400)
+    new_f = sorted([f for f in audio_only if f.get('date', 0) > two_weeks_ago],
+                   key=lambda x: x.get('date', 0), reverse=True)[:50]
+    if not new_f:
+        new_f = sorted(audio_only, key=lambda x: x.get('date', 0), reverse=True)[:50]
     if new_f:
         smart_mixes.append({
             'id': 'smart_new',
@@ -406,7 +492,7 @@ def recalcular_mixes(files):
             'cover': new_f[0]['path']
         })
     
-    # Radio Kraken (aleatorio)
+    # 7. Radio Kraken (aleatorio)
     rnd = list(audio_only)
     random.shuffle(rnd)
     rnd = rnd[:50]
@@ -434,7 +520,8 @@ def generar_biblioteca_viva(owner_email='public'):
         SELECT id, rel_path, filename, folder, full_folder, media_type,
                title, artist, album, genre, duration_sec, size_bytes, date_added,
                rating, play_count, last_played, language, folder_type, tmdb_id,
-               tmdb_title, tmdb_year, tmdb_genres, tmdb_poster, tmdb_rating, is_adult, is_hidden
+               tmdb_title, tmdb_year, tmdb_overview, tmdb_genres, tmdb_poster, tmdb_rating, is_adult, is_hidden,
+               bpm, energy
         FROM media
         ORDER BY folder, title
     ''')
@@ -503,6 +590,7 @@ def generar_biblioteca_viva(owner_email='public'):
         if row['is_hidden']:
             continue
         # Reconstruir el diccionario que el cliente espera
+        is_video = (row['media_type'] == 'video')
         f = {
             'id': row['id'],
             'path': row['rel_path'],
@@ -513,7 +601,7 @@ def generar_biblioteca_viva(owner_email='public'):
             'title': row['title'],
             'artist': row['artist'],
             'album': row['album'],
-            'genre': row['tmdb_genres'] if row['media_type'] == 'video' and row['tmdb_genres'] else row['genre'],
+            'genre': row['tmdb_genres'] if is_video and row['tmdb_genres'] else row['genre'],
             'duration_sec': row['duration_sec'],
             'size_bytes': row['size_bytes'],
             'date': row['date_added'],
@@ -521,16 +609,20 @@ def generar_biblioteca_viva(owner_email='public'):
             'play_count': row['play_count'],
             'last_played': row['last_played'],
             'language': row['language'],
-            'folder_type': row['folder_type'],
-        'tmdb_id': row['tmdb_id'],
-        'tmdb_title': row['tmdb_title'],
-        'tmdb_year': row['tmdb_year'],
-        'tmdb_genres': row['tmdb_genres'],
-        'tmdb_poster': row['tmdb_poster'],
-        'tmdb_rating': row['tmdb_rating'],
-        'is_adult': row['is_adult'],
-        'is_hidden': bool(row['is_hidden'])
-    }
+        }
+        if is_video:
+            f['folder_type'] = row['folder_type']
+            if row['tmdb_id'] is not None: f['tmdb_id'] = row['tmdb_id']
+            if row['tmdb_title']: f['tmdb_title'] = row['tmdb_title']
+            if row['tmdb_year']: f['tmdb_year'] = row['tmdb_year']
+            if row['tmdb_overview']: f['tmdb_overview'] = row['tmdb_overview']
+            if row['tmdb_genres']: f['tmdb_genres'] = row['tmdb_genres']
+            if row['tmdb_poster']: f['tmdb_poster'] = row['tmdb_poster']
+            if row['tmdb_rating']: f['tmdb_rating'] = row['tmdb_rating']
+            if row['is_adult']: f['is_adult'] = row['is_adult']
+        else:
+            f['bpm'] = round(float(row['bpm'] or 0.0), 1)
+            f['energy'] = round(float(row['energy'] or 0.0), 1)
         duplicate = duplicate_map.get(row['id'])
         if duplicate:
             f['duplicate_kind'] = duplicate['duplicate_kind']

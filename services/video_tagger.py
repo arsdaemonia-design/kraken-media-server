@@ -532,3 +532,98 @@ def extract_tmdb_id_from_filename(filename):
     if match:
         return match.group(1)
     return None
+
+
+# ============================================================
+# EXTRACCIÓN DE SUBTÍTULOS EMBEBIDOS (integración subti.py)
+# ============================================================
+
+TEXT_SUBTITLE_CODECS = {'subrip', 'srt', 'ass', 'ssa', 'webvtt', 'mov_text', 'text'}
+
+
+def _clean_sub_lang(val: str) -> str:
+    val = (val or "").strip() or "unknown"
+    return re.sub(r'[\\/:*?"<>|.\s]+', "_", val)
+
+
+def extract_embedded_subtitles_for_video(full_video_path: str) -> int:
+    """
+    Inspecciona las pistas de subtítulos de texto embebidas en `full_video_path`
+    y extrae en una sola pasada de FFmpeg los archivos `{stem}.{lang}.{stream_index}.srt`
+    que aún no existan en disco.
+    Retorna la cantidad de archivos .srt nuevos creados.
+    """
+    import subprocess
+    import json
+    import config
+
+    if not full_video_path or not os.path.isfile(full_video_path):
+        return 0
+
+    ffprobe_bin = getattr(config, 'FFPROBE_PATH', 'ffprobe') or 'ffprobe'
+    ffmpeg_bin = getattr(config, 'FFMPEG_PATH', 'ffmpeg') or 'ffmpeg'
+    kwargs = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
+
+    probe_cmd = [
+        ffprobe_bin, "-v", "error",
+        "-select_streams", "s",
+        "-show_entries", "stream=index,codec_name:stream_tags=language",
+        "-of", "json",
+        full_video_path
+    ]
+    try:
+        res = subprocess.run(probe_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20, **kwargs)
+        data = json.loads(res.stdout or "{}")
+    except Exception as e:
+        print(f"[Subti] Error ffprobe en {os.path.basename(full_video_path)}: {e}")
+        return 0
+
+    streams = data.get("streams") or []
+    if not streams:
+        return 0
+
+    video_dir = os.path.dirname(full_video_path)
+    video_stem = os.path.splitext(os.path.basename(full_video_path))[0]
+
+    missing_targets = []
+    for s in streams:
+        codec = (s.get("codec_name") or "").lower()
+        if codec not in TEXT_SUBTITLE_CODECS:
+            continue
+        idx = s.get("index")
+        if idx is None:
+            continue
+        tags = s.get("tags") or {}
+        lang = _clean_sub_lang(tags.get("language") or "unknown")
+        out_srt = os.path.join(video_dir, f"{video_stem}.{lang}.{idx}.srt")
+        if os.path.isfile(out_srt) and os.path.getsize(out_srt) > 0:
+            continue
+        missing_targets.append((idx, lang, out_srt))
+
+    if not missing_targets:
+        return 0
+
+    # Extraer todas las pistas faltantes en una sola pasada de FFmpeg
+    cmd = [ffmpeg_bin, "-y", "-hide_banner", "-loglevel", "error", "-i", full_video_path]
+    for idx, _lang, out_srt in missing_targets:
+        cmd += ["-map", f"0:{idx}", "-c:s", "srt", out_srt]
+
+    try:
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=180, **kwargs)
+    except Exception as e:
+        print(f"[Subti] Error extrayendo subtítulos en {os.path.basename(full_video_path)}: {e}")
+
+    created = 0
+    for idx, lang, out_srt in missing_targets:
+        if os.path.isfile(out_srt):
+            if os.path.getsize(out_srt) > 0:
+                created += 1
+            else:
+                try:
+                    os.remove(out_srt)
+                except OSError:
+                    pass
+    if created > 0:
+        print(f"[Subti] Extraídos {created} subtítulos .srt para {os.path.basename(full_video_path)}")
+    return created
+

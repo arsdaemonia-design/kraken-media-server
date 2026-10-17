@@ -958,6 +958,9 @@ def delete_playlist():
         return jsonify({"ok": True})
     return jsonify({"error": "Error"})
 
+# Caché en memoria de rutas sin carátula para no reabrir el archivo de audio en cada scroll
+_NO_COVER_CACHE = set()
+
 @api_bp.route('/caratula/<path:filename>')
 def caratula(filename):
     decoded = unquote(filename).lstrip('/\\')
@@ -965,6 +968,7 @@ def caratula(filename):
     # [FIX TMDB] Servir poster descargado de TMDB u otra metadata
     import os
     import re
+    import hashlib
     from flask import send_file
     direct_thumb_path = os.path.join(THUMBNAILS_FOLDER, os.path.basename(decoded))
     if os.path.exists(direct_thumb_path) and os.path.isfile(direct_thumb_path):
@@ -974,7 +978,27 @@ def caratula(filename):
             max_age=31536000,
             conditional=True
         )
-        resp.headers['Cache-Control'] = 'public, max-age=31536000'
+        resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+        return resp
+
+    # Fast-path para carátulas de audio cacheadas en disco (por hash único de ruta relativa)
+    norm_rel = decoded.replace('\\', '/').lower()
+    if norm_rel in _NO_COVER_CACHE:
+        resp = Response(b'', status=404, mimetype='text/plain')
+        resp.headers['Cache-Control'] = 'public, max-age=3600'
+        return resp
+
+    audio_cache_dir = os.path.join(THUMBNAILS_FOLDER, 'audio_cache')
+    path_hash = hashlib.md5(norm_rel.encode('utf-8', errors='ignore')).hexdigest()
+    cached_audio_thumb = os.path.join(audio_cache_dir, f"{path_hash}.jpg")
+    if os.path.isfile(cached_audio_thumb):
+        resp = send_file(
+            cached_audio_thumb,
+            mimetype='image/jpeg',
+            max_age=31536000,
+            conditional=True
+        )
+        resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
         return resp
 
     # Fallback: intentar con variaciones del nombre (tmdb-ID vs _ID)
@@ -997,52 +1021,82 @@ def caratula(filename):
                         max_age=31536000,
                         conditional=True
                     )
-                    resp.headers['Cache-Control'] = 'public, max-age=31536000'
+                    resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
                     return resp
 
     try:
         path = validar_path(decoded)
     except ValueError:
-        return "Ruta invÃ¡lida", 400
+        return "Ruta inválida", 400
     base = os.path.splitext(os.path.basename(decoded))[0]
 
-    # 1ï¸âƒ£ Thumbnail ya generada (RÃPIDO + CACHEABLE)
+    # 1️⃣ Thumbnail ya generada (RÁPIDO + CACHEABLE)
     for ext in ['.jpg', '.webp', '.png']:
         thumb = os.path.join(THUMBNAILS_FOLDER, base + ext)
         if os.path.exists(thumb):
-            # âœ… AQUÃ VA EL CAMBIO:
             response = send_file(
                 thumb,
                 mimetype='image/jpeg',
                 max_age=31536000,
                 conditional=True
             )
-            response.headers['Cache-Control'] = 'public, max-age=31536000'
+            response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
             return response
 
-    # 2ï¸âƒ£ Fallback: carÃ¡tula embebida en el archivo (LENTO, pero seguro)
-    try:
-        if decoded.lower().endswith('.mp3'):
-            tags = ID3(path)
-            # ID3 permite varias claves APIC descriptivas (por ejemplo APIC:Cover of ...).
-            # No debemos depender de que el etiquetador use exactamente "APIC:Cover".
-            apic = next((frame for key, frame in tags.items() if str(key).startswith('APIC')), None)
-            if apic:
-                resp = Response(apic.data, mimetype=apic.mime or 'image/jpeg')
-                resp.headers['Cache-Control'] = 'public, max-age=31536000'
-                return resp
+    # Helper para redimensionar y guardar carátula de audio en audio_cache
+    def _cache_and_serve_audio_cover(raw_bytes, mime_fallback='image/jpeg'):
+        try:
+            os.makedirs(audio_cache_dir, exist_ok=True)
+            with Image.open(io.BytesIO(raw_bytes)) as img:
+                img = img.convert('RGB')
+                img.thumbnail((360, 360), Image.Resampling.LANCZOS)
+                img.save(cached_audio_thumb, format='JPEG', quality=82, optimize=True)
+            resp = send_file(
+                cached_audio_thumb,
+                mimetype='image/jpeg',
+                max_age=31536000,
+                conditional=True
+            )
+            resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+            return resp
+        except Exception:
+            resp = Response(raw_bytes, mimetype=mime_fallback)
+            resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+            return resp
 
-        elif decoded.lower().endswith(('.m4a', '.mp4')):
-            tags = MP4(path)
-            if 'covr' in tags:
-                resp = Response(bytes(tags['covr'][0]), mimetype='image/jpeg')
-                resp.headers['Cache-Control'] = 'public, max-age=31536000'
-                return resp
+    # 2️⃣ Fallback: carátula embebida en el archivo de audio o cover en su carpeta (ahora se cachea en disco a 360x360)
+    AUDIO_EXTS = ('.mp3', '.m4a', '.flac', '.ogg', '.wav', '.aac', '.opus')
+    if decoded.lower().endswith(AUDIO_EXTS):
+        try:
+            if decoded.lower().endswith('.mp3'):
+                tags = ID3(path)
+                apic = next((frame for key, frame in tags.items() if str(key).startswith('APIC')), None)
+                if apic and apic.data:
+                    return _cache_and_serve_audio_cover(apic.data, apic.mime or 'image/jpeg')
 
-    except Exception as e:
-        print(f"Error leyendo carÃ¡tula embebida: {e}")
+            elif decoded.lower().endswith(('.m4a', '.mp4')):
+                tags = MP4(path)
+                if 'covr' in tags and tags['covr']:
+                    return _cache_and_serve_audio_cover(bytes(tags['covr'][0]), 'image/jpeg')
 
-    # 3ï¸âƒ£ Fallback para VIDEO: generar thumbnail con FFmpeg
+            # Fallback adicional: buscar cover.jpg / folder.jpg en la carpeta del álbum
+            song_dir = os.path.dirname(str(path))
+            for cover_name in ('cover.jpg', 'cover.png', 'folder.jpg', 'folder.png', 'front.jpg', 'album.jpg'):
+                album_cover = os.path.join(song_dir, cover_name)
+                if os.path.isfile(album_cover):
+                    with open(album_cover, 'rb') as cf:
+                        return _cache_and_serve_audio_cover(cf.read(), 'image/jpeg')
+        except Exception as e:
+            print(f"Error leyendo carátula embebida: {e}")
+
+        # Si el archivo de audio no tiene carátula, registrar en caché negativa para respuesta instantánea
+        if len(_NO_COVER_CACHE) < 25000:
+            _NO_COVER_CACHE.add(norm_rel)
+        resp = Response(b'No image', status=404, mimetype='text/plain')
+        resp.headers['Cache-Control'] = 'public, max-age=3600'
+        return resp
+
+    # 3️⃣ Fallback para VIDEO: generar thumbnail con FFmpeg
     VIDEO_EXTS = ('.mp4', '.mkv', '.avi', '.webm', '.mov', '.flv', '.wmv', '.m4v')
     if decoded.lower().endswith(VIDEO_EXTS):
         try:
@@ -1089,7 +1143,9 @@ def caratula(filename):
         except Exception as e:
             print(f"Error generando thumbnail de video con FFmpeg: {e}")
 
-    return "No image", 404
+    resp = Response(b'No image', status=404, mimetype='text/plain')
+    resp.headers['Cache-Control'] = 'public, max-age=3600'
+    return resp
 
 @api_bp.route('/descargar', methods=['POST'])
 def descargar():
@@ -1563,24 +1619,25 @@ def biblioteca():
         BIB_CACHE_BY_OWNER[owner_email] = data
         BIB_CACHE_TIME = time.time()
 
-    # Agregar totales
-    all_files = data.get('files', [])
-    data['total_files'] = len(all_files)
-    data['total_videos'] = sum(1 for f in all_files if f.get('type') == 'video')
-    data['total_folders'] = len(data.get('folders', []))
-    
-    # Agregar info de modo niños a la respuesta
-    data['is_kid_mode'] = is_kid_mode
-
-    # Adult Vault - Filtrar si no hay PIN válido
+    # Adult Vault - Filtrar en una copia superficial para no mutar BIB_CACHE_BY_OWNER en memoria
     import config
     pin_header = request.headers.get('X-Master-Pin')
     has_valid_pin = pin_header == get_master_pin()
-    
-    if not has_valid_pin:
-        data['files'] = [f for f in data['files'] if not f.get('is_adult')]
 
-    return jsonify(data)
+    all_files = data.get('files', [])
+    has_adult_vault = (not is_kid_mode) and any(bool(f.get('is_adult')) for f in all_files)
+    visible_files = all_files if has_valid_pin else [f for f in all_files if not f.get('is_adult')]
+
+    resp_data = dict(data)
+    resp_data['files'] = visible_files
+    resp_data['has_adult_vault'] = has_adult_vault
+    resp_data['adult_unlocked'] = bool(has_valid_pin)
+    resp_data['total_files'] = len(visible_files)
+    resp_data['total_videos'] = sum(1 for f in visible_files if f.get('type') == 'video')
+    resp_data['total_folders'] = len(resp_data.get('folders', []))
+    resp_data['is_kid_mode'] = is_kid_mode
+
+    return jsonify(resp_data)
 
 @api_bp.route('/radio/artist/<path:artist_name>')
 def search_similar_artists_radio(artist_name):
@@ -1635,6 +1692,25 @@ def obtener_similares(filepath):
         r2 = cand.get('rating', 0) or 0
         if abs(r1 - r2) <= 1:
             score += 10
+
+        # Similitud acústica por Librosa (BPM y Energía)
+        bpm1 = float(ref.get('bpm') or 0.0)
+        bpm2 = float(cand.get('bpm') or 0.0)
+        if bpm1 > 0 and bpm2 > 0:
+            bpm_diff = min(abs(bpm1 - bpm2), abs(bpm1 * 2 - bpm2), abs(bpm1 - bpm2 * 2))
+            if bpm_diff <= 6:
+                score += 25
+            elif bpm_diff <= 15:
+                score += 15
+
+        en1 = float(ref.get('energy') or 0.0)
+        en2 = float(cand.get('energy') or 0.0)
+        if en1 > 0 and en2 > 0:
+            en_diff = abs(en1 - en2)
+            if en_diff <= 15:
+                score += 20
+            elif en_diff <= 28:
+                score += 10
         return score
 
     def _generar_similares(referencia, biblioteca, limite=50):
@@ -1781,8 +1857,10 @@ def actualizar_cache():
     pin = request.args.get('pin')
     import config
     if pin != get_master_pin(): return jsonify({'error': 'PIN incorrecto'}), 401
+    if state.RESCAN_STATUS.get("active"):
+        return jsonify({'error': 'Ya hay un proceso de sincronización o auto-tag en curso'}), 409
     
-    # escaneo fÃ­sico
+    # escaneo físico
     escanear_archivos_fisicos()
     return jsonify({"ok": True})
 
@@ -2208,72 +2286,29 @@ def import_playlist():
 def stop(): global stop_download; stop_download = True; return jsonify({"ok": True})
 
 def _infer_subtitle_language(video_base, subtitle_name):
-    name_no_ext = os.path.splitext(subtitle_name)[0]
-    suffix = name_no_ext[len(video_base):].strip(" ._-").lower() if name_no_ext.lower().startswith(video_base.lower()) else ''
-    token = suffix.split('.')[-1] if suffix else ''
-    mapping = {
-        'es': 'spa', 'spa': 'spa', 'esla': 'spa', 'lat': 'spa', 'la': 'spa',
-        'en': 'eng', 'eng': 'eng',
-        'jp': 'jpn', 'jpn': 'jpn',
-        'pt': 'por', 'por': 'por',
-        'fr': 'fra', 'fra': 'fra',
-        'de': 'deu', 'deu': 'deu',
-        'it': 'ita', 'ita': 'ita',
-    }
-    return mapping.get(token, 'und')
+    from routes.hls import _parse_subtitle_suffix
+    lang, _ = _parse_subtitle_suffix(video_base, subtitle_name)
+    return lang
 
-def _subtitle_matches_video_base(video_base, subtitle_name):
-    subtitle_base = os.path.splitext(subtitle_name)[0].lower()
-    video_base_l = video_base.lower()
-    if subtitle_base == video_base_l:
-        return True
-
-    escaped = re.escape(video_base_l)
-    return re.match(rf"^{escaped}([._\- ].+)$", subtitle_base) is not None
+def _subtitle_matches_video_base(video_base, subtitle_name, single_video_in_dir=False):
+    from routes.hls import _subtitle_matches_video_base as _hls_match
+    return _hls_match(video_base, subtitle_name, single_video_in_dir=single_video_in_dir)
 
 def _find_external_subtitles(full_video_path):
-    video_dir = os.path.dirname(full_video_path)
-    video_filename = os.path.basename(full_video_path)
-    video_base = os.path.splitext(video_filename)[0]
-    sub_dirs = [video_dir, os.path.join(video_dir, 'subs'), os.path.join(video_dir, 'subtitles')]
-    supported_exts = {'.srt', '.vtt'}
+    from routes.hls import _find_external_subtitles as _hls_find_ext
+    raw_subs = _hls_find_ext(full_video_path)
     found = []
-    seen = set()
-
-    for sub_dir in sub_dirs:
-        if not os.path.isdir(sub_dir):
-            continue
-
-        for entry in os.listdir(sub_dir):
-            ext = os.path.splitext(entry)[1].lower()
-            if ext not in supported_exts:
-                continue
-
-            if not _subtitle_matches_video_base(video_base, entry):
-                continue
-
-            full_sub_path = os.path.join(sub_dir, entry)
-            rel_sub_path = os.path.relpath(full_sub_path, DOWNLOAD_FOLDER).replace('\\', '/')
-            if rel_sub_path in seen:
-                continue
-            seen.add(rel_sub_path)
-
-            language = _infer_subtitle_language(video_base, entry)
-            label = f"Externo {len(found) + 1}"
-            if language == 'spa':
-                label = "Externo Español"
-            elif language == 'eng':
-                label = "Externo Inglés"
-
-            found.append({
-                'index': -(len(found) + 1),
-                'language': language,
-                'title': label,
-                'codec': ext[1:],
-                'url': f'/descargas/{rel_sub_path}',
-                'external': True
-            })
-
+    for i, s in enumerate(raw_subs):
+        ext = os.path.splitext(s.get('url', ''))[1].lstrip('.').lower() or 'srt'
+        found.append({
+            'index': -(i + 1),
+            'stream_index': s.get('stream_index'),
+            'language': s.get('language', 'und'),
+            'title': s.get('title', f'Subtítulo {i + 1}'),
+            'codec': ext,
+            'url': s.get('url'),
+            'external': True
+        })
     return found
 
 @api_bp.route('/api/video/streams', methods=['POST'])
@@ -2621,7 +2656,7 @@ def analyze_status():
 def auto_tag_video_endpoint():
     """
     Auto-tag de videos usando TMDB
-    Busca metadata y descarga carátulas automáticamente
+    Busca metadata, descarga carátulas y extrae subtítulos .srt embebidos automáticamente
     """
     data = request.json or {}
     pin = data.get('pin')
@@ -2639,8 +2674,13 @@ def auto_tag_video_endpoint():
             auto_tag_video, 
             detect_video_type, 
             download_poster,
-            clean_title_for_search
+            clean_title_for_search,
+            extract_embedded_subtitles_for_video
         )
+
+        # Extraer subtítulos .srt embebidos si aún no existen en disco
+        full_video_path = os.path.join(config.DOWNLOAD_FOLDER, path.lstrip('/\\'))
+        subtitles_extracted = extract_embedded_subtitles_for_video(full_video_path)
         
         # Detectar tipo de video
         video_type = detect_video_type(path)
@@ -2649,7 +2689,11 @@ def auto_tag_video_endpoint():
         result = auto_tag_video(path, video_type)
         
         if not result:
-            return jsonify({'found': False, 'message': 'No se encontró en TMDB'}), 404
+            return jsonify({
+                'found': False,
+                'subtitles_extracted': subtitles_extracted,
+                'message': 'No se encontró en TMDB'
+            }), 404
         
         # Preparar respuesta
         title = result.get('title') or result.get('name')
@@ -2706,7 +2750,8 @@ def auto_tag_video_endpoint():
             'overview': overview[:200] + '...' if overview and len(overview) > 200 else overview,
             'genres': genres,
             'poster': poster_filename,
-            'type': result.get('media_type')
+            'type': result.get('media_type'),
+            'subtitles_extracted': subtitles_extracted
         })
         
     except Exception as e:
@@ -2718,8 +2763,10 @@ def auto_tag_video_endpoint():
 def auto_tag_library_videos():
     import time
     """
-    Auto-tag de TODOS los videos de la biblioteca
-    Procesa videos sin metadata de TMDB
+    Auto-tag de TODOS los videos de la biblioteca:
+    - Fase 1: Busca metadata y posters en TMDB para videos sin etiquetar
+    - Fase 2: Actualiza clasificaciones de edad (tmdb_rating) pendientes
+    - Fase 3: Extrae subtítulos de texto embebidos a archivos .srt (estilo subti.py)
     """
     data = request.json or {}
     pin = data.get('pin')
@@ -2727,6 +2774,9 @@ def auto_tag_library_videos():
     import config
     if pin != get_master_pin():
         return jsonify({'error': 'PIN incorrecto'}), 401
+
+    if state.RESCAN_STATUS.get("active"):
+        return jsonify({'error': 'Ya hay un proceso de sincronización o auto-tag en curso'}), 409
     
     try:
         from services.database import get_db
@@ -2737,44 +2787,33 @@ def auto_tag_library_videos():
             clean_title_for_search,
             is_series_episode,
             extract_series_name_from_path,
-            get_series_folder_name
+            get_series_folder_name,
+            extract_embedded_subtitles_for_video,
+            TEXT_SUBTITLE_CODECS
         )
         
         conn = get_db()
         c = conn.cursor()
         
         # Obtener videos sin metadata TMDB (primero agregar columnas si no existen)
-        try:
-            c.execute("ALTER TABLE media ADD COLUMN tmdb_id INTEGER DEFAULT 0")
-        except:
-            pass
-        try:
-            c.execute("ALTER TABLE media ADD COLUMN tmdb_title TEXT")
-        except:
-            pass
-        try:
-            c.execute("ALTER TABLE media ADD COLUMN tmdb_year TEXT")
-        except:
-            pass
-        try:
-            c.execute("ALTER TABLE media ADD COLUMN tmdb_overview TEXT")
-        except:
-            pass
-        try:
-            c.execute("ALTER TABLE media ADD COLUMN tmdb_genres TEXT")
-        except:
-            pass
-        try:
-            c.execute("ALTER TABLE media ADD COLUMN tmdb_poster TEXT")
-        except:
-            pass
+        for col_sql in (
+            "ALTER TABLE media ADD COLUMN tmdb_id INTEGER DEFAULT 0",
+            "ALTER TABLE media ADD COLUMN tmdb_title TEXT",
+            "ALTER TABLE media ADD COLUMN tmdb_year TEXT",
+            "ALTER TABLE media ADD COLUMN tmdb_overview TEXT",
+            "ALTER TABLE media ADD COLUMN tmdb_genres TEXT",
+            "ALTER TABLE media ADD COLUMN tmdb_poster TEXT",
+        ):
+            try:
+                c.execute(col_sql)
+            except Exception:
+                pass
         
         c.execute('''
             SELECT rel_path, title, folder_type FROM media 
             WHERE media_type = 'video' 
             AND (tmdb_title IS NULL OR tmdb_title = '')
         ''')
-        
         videos = c.fetchall()
         
         # Paso 2: Encontrar carpetas de series que NO tienen poster
@@ -2788,7 +2827,6 @@ def auto_tag_library_videos():
         for folder in series_folders:
             poster_exists = os.path.exists(os.path.join(config.THUMBNAILS_FOLDER, f"{folder}.jpg"))
             if not poster_exists:
-                # Obtener UN episodio de esta carpeta para hacer auto-tag
                 c.execute('SELECT rel_path FROM media WHERE folder = ? AND media_type = ? LIMIT 1', (folder, 'video'))
                 ep = c.fetchone()
                 if ep:
@@ -2796,38 +2834,81 @@ def auto_tag_library_videos():
         
         # Combinar: videos sin metadata + 1 episodio por carpeta sin poster
         all_to_process = list(set([v[0] for v in videos] + folders_without_poster))
-        
-        # Re-fetch full data for combined list
-        placeholders = ','.join('?' for _ in all_to_process)
-        c.execute(f'SELECT rel_path, title, folder_type FROM media WHERE rel_path IN ({placeholders})', all_to_process)
-        videos = c.fetchall()
-        
-        if not videos:
-            return jsonify({'message': 'No hay videos para procesar', 'processed': 0})
+        if all_to_process:
+            placeholders = ','.join('?' for _ in all_to_process)
+            c.execute(f'SELECT rel_path, title, folder_type FROM media WHERE rel_path IN ({placeholders})', all_to_process)
+            videos = c.fetchall()
+        else:
+            videos = []
+
+        # Detectar candidatos para Fase 3 (videos con subtítulos de texto embebidos que aún no tienen todos sus .srt en disco)
+        c.execute("""
+            SELECT rel_path, subtitle_tracks FROM media
+            WHERE media_type = 'video'
+              AND subtitle_tracks IS NOT NULL
+              AND subtitle_tracks != ''
+              AND subtitle_tracks != '[]'
+        """)
+        sub_rows = c.fetchall()
+        dir_listing_cache = {}
+        subtitle_candidates = []
+        for srow in sub_rows:
+            rel_p = srow[0]
+            raw_tracks = srow[1]
+            try:
+                tracks_list = json.loads(raw_tracks) if isinstance(raw_tracks, str) else (raw_tracks or [])
+            except Exception:
+                continue
+            text_tracks_count = sum(
+                1 for t in tracks_list
+                if isinstance(t, dict) and (t.get('codec') or '').lower() in TEXT_SUBTITLE_CODECS
+            )
+            if text_tracks_count == 0:
+                continue
+            full_vpath = os.path.join(config.DOWNLOAD_FOLDER, rel_p.lstrip('/\\'))
+            vdir = os.path.dirname(full_vpath)
+            vstem = os.path.splitext(os.path.basename(full_vpath))[0].lower()
+            if vdir not in dir_listing_cache:
+                try:
+                    dir_listing_cache[vdir] = [f.lower() for f in os.listdir(vdir) if f.lower().endswith('.srt')]
+                except OSError:
+                    dir_listing_cache[vdir] = []
+            prefix = vstem + "."
+            existing_srt_count = sum(1 for f in dir_listing_cache[vdir] if f.startswith(prefix))
+            if existing_srt_count < text_tracks_count and os.path.isfile(full_vpath):
+                subtitle_candidates.append(full_vpath)
+
+        c.execute("SELECT COUNT(*) FROM media WHERE tmdb_id IS NOT NULL AND tmdb_id > 0 AND (tmdb_rating IS NULL OR tmdb_rating = '') AND media_type = 'video'")
+        pending_ratings_count = (c.fetchone() or [0])[0]
+
+        if not videos and pending_ratings_count == 0 and not subtitle_candidates:
+            conn.close()
+            return jsonify({
+                'message': 'No hay videos pendientes de auto-tag ni subtítulos por extraer',
+                'processed': 0,
+                'subtitles_extracted': 0
+            })
         
         # Inicializar barra de progreso para auto-tag
         state.RESCAN_STATUS = {
             "active": True,
             "stage": "auto_tag",
-            "total": len(videos),
+            "total": len(videos) or len(subtitle_candidates),
             "processed": 0,
             "percent": 0,
-            "message": f"Preparando auto-tag de {len(videos)} videos...",
+            "message": f"Preparando auto-tag ({len(videos)} videos TMDB, {len(subtitle_candidates)} por extraer SRT)...",
             "start_time": time.time()
         }
         
         processed = 0
         found = 0
         posters_downloaded = 0
-        skipped_existing = 0
-        
-        # Track de posters de carpetas ya descargados
         folder_posters_cache = {}
         
         for video in videos:
             video_path = video[0]  # rel_path
             video_title = video[1] if len(video) > 1 else ''
-            video_folder_type = video[2] if len(video) > 2 else 'movie'  # folder_type de la DB
+            video_folder_type = video[2] if len(video) > 2 else 'movie'
             try:
                 result = auto_tag_video(video_path, video_folder_type)
 
@@ -2840,21 +2921,16 @@ def auto_tag_library_videos():
                     poster_path = result.get('poster_path')
                     poster_filename = None
 
-                    # Detectar si es episodio de serie
                     is_episode = is_series_episode(os.path.basename(video_path))
 
                     if is_episode:
-                        # Episodio: NO guardar poster en DB
-                        # Solo descargar el poster de la carpeta si no existe
                         series_name = extract_series_name_from_path(video_path)
                         folder_name = get_series_folder_name(video_path)
 
                         if folder_name:
-                            # Nombre del poster de la carpeta
                             folder_poster_name = f"{folder_name}.jpg"
                             folder_poster_path = os.path.join(config.THUMBNAILS_FOLDER, folder_poster_name)
 
-                            # Solo descargar si no existe y no está en cache
                             if folder_name not in folder_posters_cache:
                                 if poster_path and not os.path.exists(folder_poster_path):
                                     folder_poster_filename = download_poster(
@@ -2870,15 +2946,10 @@ def auto_tag_library_videos():
                                         print(f"  Poster de serie descargado: {folder_poster_name}")
 
                                 folder_posters_cache[folder_name] = folder_poster_name
-
-                        # NO asignar poster_filename - ya es None de la línea 2380
-                        # Los episodios mostrarán thumbnail del video
                     else:
-                        # Es película: descargar poster normalmente
                         if poster_path:
                             tmdb_id_val = result.get('id')
                             filename_base = clean_title_for_search(title or video_title or video_path)
-                            # Incluir TMDB ID para evitar colisiones entre secuelas
                             if tmdb_id_val:
                                 filename_base = f"{filename_base}_{tmdb_id_val}"
                             poster_filename = download_poster(
@@ -2887,7 +2958,6 @@ def auto_tag_library_videos():
                                 filename_base
                             )
 
-                    # Guardar en la tabla media directamente
                     c.execute('''
                         UPDATE media SET
                         tmdb_id = ?,
@@ -2913,9 +2983,8 @@ def auto_tag_library_videos():
 
                 processed += 1
 
-                # Actualizar barra de progreso cada 5 videos
                 if processed % 5 == 0 or processed == len(videos):
-                    percent = int((processed / len(videos)) * 100)
+                    percent = int((processed / max(1, len(videos))) * 45)
                     state.RESCAN_STATUS["processed"] = processed
                     state.RESCAN_STATUS["percent"] = percent
                     state.RESCAN_STATUS["message"] = f"Auto-tag {processed}/{len(videos)} ({percent}%) - {posters_downloaded} posters serie"
@@ -2946,25 +3015,63 @@ def auto_tag_library_videos():
                         conn.commit()
                         updated_ratings += 1
                         
-                    if i % 3 == 0 or i == len(rating_videos):
-                        if len(rating_videos) > 0:
-                            pct = 50 + int((i / len(rating_videos)) * 50)
-                            state.RESCAN_STATUS["percent"] = pct
-                            state.RESCAN_STATUS["message"] = f"Clasificando: {i+1}/{len(rating_videos)} ({pct}%)"
-                except: pass
+                    if i % 3 == 0 or i == len(rating_videos) - 1:
+                        pct = 45 + int(((i + 1) / len(rating_videos)) * 20)
+                        state.RESCAN_STATUS["percent"] = pct
+                        state.RESCAN_STATUS["message"] = f"Clasificando: {i+1}/{len(rating_videos)} ({pct}%)"
+                except Exception:
+                    pass
+
+        conn.close()
+
+        # FASE 3: Extracción incremental de subtítulos embebidos (.srt estilo subti.py)
+        subtitles_extracted = 0
+        videos_with_new_subs = 0
+        if subtitle_candidates:
+            state.RESCAN_STATUS["stage"] = "subtitles"
+            state.RESCAN_STATUS["total"] = len(subtitle_candidates)
+            for idx_s, full_vpath in enumerate(subtitle_candidates, 1):
+                try:
+                    pct = 65 + int((idx_s / len(subtitle_candidates)) * 35)
+                    state.RESCAN_STATUS["processed"] = idx_s
+                    state.RESCAN_STATUS["percent"] = min(99, pct)
+                    state.RESCAN_STATUS["message"] = (
+                        f"Subtítulos SRT: {idx_s}/{len(subtitle_candidates)} "
+                        f"({subtitles_extracted} extraídos) · {os.path.basename(full_vpath)[:35]}"
+                    )
+                    created_count = extract_embedded_subtitles_for_video(full_vpath)
+                    if created_count > 0:
+                        subtitles_extracted += created_count
+                        videos_with_new_subs += 1
+                except Exception as e:
+                    print(f"[Subti] Error en Fase 3 ({full_vpath}): {e}")
 
         elapsed = time.time() - state.RESCAN_STATUS.get("start_time", time.time())
         state.RESCAN_STATUS["active"] = False
         state.RESCAN_STATUS["stage"] = "done"
         state.RESCAN_STATUS["percent"] = 100
-        state.RESCAN_STATUS["message"] = f"Auto-tag completado en {elapsed:.1f}s - {posters_downloaded} posters y {updated_ratings} clasificaciones actualizadas"
+        state.RESCAN_STATUS["message"] = (
+            f"Auto-tag completado en {elapsed:.1f}s - {posters_downloaded} posters, "
+            f"{updated_ratings} clasificaciones y {subtitles_extracted} subtítulos .srt extraídos"
+        )
         
         return jsonify({
-            'message': f'Procesados {processed} videos, {posters_downloaded} posters descargados y {updated_ratings} clasificaciones actualizadas',
-            'found': found, 'processed': processed, 'series_posters': posters_downloaded, 'ratings_updated': updated_ratings
+            'message': (
+                f'Procesados {processed} videos TMDB, {posters_downloaded} posters descargados, '
+                f'{updated_ratings} clasificaciones actualizadas y {subtitles_extracted} subtítulos .srt extraídos '
+                f'({videos_with_new_subs} videos)'
+            ),
+            'found': found,
+            'processed': processed,
+            'series_posters': posters_downloaded,
+            'ratings_updated': updated_ratings,
+            'subtitles_extracted': subtitles_extracted,
+            'videos_with_new_subs': videos_with_new_subs
         })
         
     except Exception as e:
+        state.RESCAN_STATUS["active"] = False
+        state.RESCAN_STATUS["stage"] = "error"
         print(f"Error en auto_tag_library_videos: {e}")
         return jsonify({'error': str(e)}), 500
 
@@ -4072,7 +4179,7 @@ def tmdb_extended_details():
 
 @api_bp.route('/library/update_video_meta', methods=['POST'])
 def update_video_meta():
-    data = request.json
+    data = request.json or {}
     pin = data.get('pin', '')
     path = data.get('path')
     is_virtual = data.get('is_virtual', False)
@@ -4100,9 +4207,16 @@ def update_video_meta():
         if tmdb_rating == 'VACIO':
             tmdb_rating = None
 
+        import config
+        adult_ratings = set(getattr(config, 'ADULT_RATINGS', ['18', '18+']) or ['18', '18+'])
+        is_adult = 1 if (tmdb_rating in adult_ratings or tmdb_rating in ('18', '18+', 'R18+', 'NC-17')) else 0
+
         if paths_array and len(paths_array) > 0:
             # Modo BATCH Video
             for p in paths_array:
+                clean_p = str(p or '').replace('\\', '/').rstrip('/')
+                if not clean_p:
+                    continue
                 fields_to_set = []
                 values = []
                 if tmdb_title:
@@ -4111,6 +4225,8 @@ def update_video_meta():
                 if tmdb_rating is not None or data.get('tmdb_rating') == 'VACIO':
                     fields_to_set.append("tmdb_rating = ?")
                     values.append(tmdb_rating)
+                    fields_to_set.append("is_adult = ?")
+                    values.append(is_adult)
                 if tmdb_year:
                     fields_to_set.append("tmdb_year = ?")
                     values.append(tmdb_year)
@@ -4122,43 +4238,33 @@ def update_video_meta():
                     values.append(tmdb_overview)
                     
                 if fields_to_set:
-                    import config
-                    adult_ratings = getattr(config, 'ADULT_RATINGS', [])
-                    is_adult = 1 if tmdb_rating in adult_ratings else 0
-                    fields_to_set.append("is_adult = ?")
-                    values.append(is_adult)
-                    
-                    values.append(p)
-                    query = f"UPDATE media SET {', '.join(fields_to_set)} WHERE rel_path = ?"
+                    values.extend([clean_p, f"{clean_p}/%"])
+                    query = f"UPDATE media SET {', '.join(fields_to_set)} WHERE rel_path = ? OR rel_path LIKE ?"
                     c.execute(query, tuple(values))
-        elif is_virtual:
-            # Actualiza todos los hijos (Single Click on Series)
-            import config
-            is_adult = 1 if tmdb_rating in getattr(config, 'ADULT_RATINGS', []) else 0
-            c.execute("""
-                UPDATE media SET 
-                tmdb_title = ?, 
-                tmdb_rating = ?, 
-                tmdb_year = ?, 
-                tmdb_genres = ?, 
-                tmdb_overview = ?,
-                is_adult = ?
-                WHERE rel_path LIKE ?
-            """, (tmdb_title, tmdb_rating, tmdb_year, tmdb_genres, tmdb_overview, is_adult, f"{path}/%"))
         elif path:
-            # Archivo unico
-            import config
-            is_adult = 1 if tmdb_rating in getattr(config, 'ADULT_RATINGS', []) else 0
-            c.execute("""
-                UPDATE media SET 
-                tmdb_title = ?, 
-                tmdb_rating = ?, 
-                tmdb_year = ?, 
-                tmdb_genres = ?, 
-                tmdb_overview = ?,
-                is_adult = ?
-                WHERE rel_path = ?
-            """, (tmdb_title, tmdb_rating, tmdb_year, tmdb_genres, tmdb_overview, is_adult, path))
+            clean_path = str(path).replace('\\', '/').rstrip('/')
+            if is_virtual:
+                c.execute("""
+                    UPDATE media SET 
+                    tmdb_title = ?, 
+                    tmdb_rating = ?, 
+                    tmdb_year = ?, 
+                    tmdb_genres = ?, 
+                    tmdb_overview = ?,
+                    is_adult = ?
+                    WHERE rel_path = ? OR rel_path LIKE ?
+                """, (tmdb_title, tmdb_rating, tmdb_year, tmdb_genres, tmdb_overview, is_adult, clean_path, f"{clean_path}/%"))
+            else:
+                c.execute("""
+                    UPDATE media SET 
+                    tmdb_title = ?, 
+                    tmdb_rating = ?, 
+                    tmdb_year = ?, 
+                    tmdb_genres = ?, 
+                    tmdb_overview = ?,
+                    is_adult = ?
+                    WHERE rel_path = ? OR rel_path LIKE ?
+                """, (tmdb_title, tmdb_rating, tmdb_year, tmdb_genres, tmdb_overview, is_adult, clean_path, f"{clean_path}/%"))
             
         conn.commit()
         
@@ -4171,3 +4277,155 @@ def update_video_meta():
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
+
+
+# ============= BÚSQUEDA Y DESCARGA DE SUBTÍTULOS ONLINE =============
+@api_bp.route('/api/subtitles/search', methods=['GET'])
+def search_online_subtitles():
+    """Busca subtítulos en línea (Podnapisi JSON API sin API key + Subdl opcional)."""
+    query = (request.args.get('query') or '').strip()
+    year = (request.args.get('year') or '').strip()
+    langs = (request.args.get('lang') or 'es,en').strip()
+
+    if not query:
+        return jsonify({'ok': False, 'error': 'Ingresa un título para buscar'}), 400
+
+    # Limpiar tags tipo (1999) o [1080p] del query si vienen pegados
+    clean_query = re.sub(r'[\(\[\{].*?[\)\]\}]', ' ', query).strip()
+    clean_query = re.sub(r'\s+', ' ', clean_query) or query
+
+    results = []
+    headers = {
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) KrakenMediaServer/4.99'
+    }
+
+    def _fetch_podnapisi(q, y=''):
+        params = {'keywords': q, 'language': langs}
+        if y and y.isdigit():
+            params['year'] = y
+        r = requests.get(
+            'https://www.podnapisi.net/subtitles/search/advanced',
+            params=params,
+            headers=headers,
+            timeout=10
+        )
+        if r.status_code == 200:
+            return r.json().get('data', [])
+        return []
+
+    try:
+        data = _fetch_podnapisi(clean_query, year)
+        # Si con año exacto no hubo resultados, reintentar sin año
+        if not data and year:
+            data = _fetch_podnapisi(clean_query, '')
+
+        for item in data[:30]:
+            movie_info = item.get('movie') or {}
+            releases = item.get('custom_releases') or []
+            lang_code = (item.get('language') or 'es').lower()
+            dl_path = item.get('download') or ''
+            if not dl_path:
+                continue
+            dl_url = f"https://www.podnapisi.net{dl_path}" if dl_path.startswith('/') else dl_path
+            stats = item.get('stats') or {}
+            release_label = releases[0] if releases else (movie_info.get('title') or clean_query)
+            results.append({
+                'id': item.get('id', ''),
+                'title': movie_info.get('title') or clean_query,
+                'year': movie_info.get('year') or year or '',
+                'release': release_label,
+                'lang': lang_code,
+                'downloads': stats.get('downloads', 0),
+                'provider': 'Podnapisi',
+                'download_url': dl_url
+            })
+    except Exception as e:
+        print(f"⚠️ Error buscando subtítulos en Podnapisi: {e}")
+
+    # Ordenar priorizando Español ('es') primero y luego mayor número de descargas
+    results.sort(key=lambda x: (0 if x['lang'].startswith('es') else 1, -(x.get('downloads') or 0)))
+
+    return jsonify({'ok': True, 'results': results[:25], 'query_used': clean_query})
+
+
+@api_bp.route('/api/subtitles/download', methods=['POST'])
+def download_online_subtitle():
+    """Descarga un archivo ZIP/SRT de subtítulos, lo convierte a UTF-8 y lo guarda junto al video."""
+    import zipfile
+    data = request.get_json(silent=True) or {}
+    video_path = (data.get('video_path') or '').strip()
+    download_url = (data.get('download_url') or '').strip()
+    lang = (data.get('lang') or 'es').strip().lower()
+
+    if not video_path or not download_url:
+        return jsonify({'ok': False, 'error': 'Faltan parámetros video_path o download_url'}), 400
+
+    # Validar URL permitida
+    if not (download_url.startswith('https://www.podnapisi.net/') or download_url.startswith('https://dl.subdl.com/')):
+        return jsonify({'ok': False, 'error': 'Proveedor de subtítulos no permitido'}), 400
+
+    try:
+        base_dir = Path(config.DOWNLOAD_FOLDER).resolve()
+        target = (base_dir / unquote(video_path).lstrip('/\\')).resolve()
+        target.relative_to(base_dir)
+
+        # Si el usuario abrió el editor sobre una carpeta virtual de película, buscar el primer video dentro
+        if target.is_dir():
+            video_exts = {'.mkv', '.mp4', '.avi', '.mov', '.webm', '.m4v'}
+            vids = sorted([p for p in target.iterdir() if p.is_file() and p.suffix.lower() in video_exts])
+            if not vids:
+                return jsonify({'ok': False, 'error': 'No se encontró archivo de video en la carpeta'}), 404
+            target = vids[0]
+        elif not target.is_file():
+            return jsonify({'ok': False, 'error': 'El archivo de video no existe en disco'}), 404
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) KrakenMediaServer/4.99'
+        }
+        resp = requests.get(download_url, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            return jsonify({'ok': False, 'error': f'Error HTTP {resp.status_code} al descargar subtítulo'}), 502
+
+        raw_bytes = resp.content
+        srt_bytes = None
+
+        # Extraer .srt si viene en archivo .zip
+        if zipfile.is_zipfile(io.BytesIO(raw_bytes)):
+            with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
+                srt_names = [n for n in zf.namelist() if n.lower().endswith(('.srt', '.vtt', '.ass')) and not n.startswith('__MACOSX')]
+                if not srt_names:
+                    return jsonify({'ok': False, 'error': 'El ZIP descargado no contiene archivos .srt'}), 422
+                # Preferir .srt
+                srt_names.sort(key=lambda n: (0 if n.lower().endswith('.srt') else 1, len(n)))
+                srt_bytes = zf.read(srt_names[0])
+        else:
+            srt_bytes = raw_bytes
+
+        # Normalizar codificación a UTF-8 limpio
+        if srt_bytes.startswith(b'\xef\xbb\xbf'):
+            srt_bytes = srt_bytes[3:]
+        try:
+            text_utf8 = srt_bytes.decode('utf-8')
+        except UnicodeDecodeError:
+            try:
+                text_utf8 = srt_bytes.decode('cp1252')
+            except UnicodeDecodeError:
+                text_utf8 = srt_bytes.decode('latin-1', errors='replace')
+
+        lang_tag = 'es' if lang.startswith('es') else ('en' if lang.startswith('en') else lang[:3])
+        out_filename = f"{target.stem}.{lang_tag}.srt"
+        out_path = target.parent / out_filename
+        out_path.write_text(text_utf8, encoding='utf-8')
+
+        global BIB_CACHE_BY_OWNER
+        BIB_CACHE_BY_OWNER.clear()
+
+        return jsonify({
+            'ok': True,
+            'filename': out_filename,
+            'saved_to': str(out_path.relative_to(base_dir)).replace('\\', '/')
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+

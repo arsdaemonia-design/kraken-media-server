@@ -102,7 +102,7 @@ self.addEventListener('fetch', event => {
         if (res.ok) cache.put(event.request, res.clone());
         return res;
       }).catch(() => null);
-      if (cached) return cached;
+      if (offlineMode && cached) return cached;
       const netRes = await fetchPromise;
       if (netRes) return netRes;
       return cached || fetch(event.request);
