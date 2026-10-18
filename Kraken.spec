@@ -2,10 +2,10 @@
 
 
 a = Analysis(
-    ['kraken_switch.py'],
+    ['app.py'],
     pathex=[],
     binaries=[],
-    datas=[('templates', 'templates'), ('assets', 'assets'), ('routes', 'routes'), ('services', 'services'), ('sw.js', '.'), ('config.py', '.'), ('state.py', '.'), ('utils.py', '.'), ('app.py', '.'), ('app_offline.py', '.'), ('app_logic.py', '.'), ('app_tail.py', '.'), ('alexa_handlers.py', '.'), ('alexa_tail.py', '.'), ('ffmpeg.exe', '.'), ('ffprobe.exe', '.'), ('cloudflared-windows-amd64.exe', '.')],
+    datas=[('templates', 'templates'), ('assets', 'assets'), ('routes', 'routes'), ('services', 'services'), ('sw.js', '.'), ('config.py', '.'), ('state.py', '.'), ('utils.py', '.'), ('app.py', '.'), ('app_offline.py', '.'), ('alexa_handlers.py', '.'), ('ffmpeg.exe', '.'), ('ffprobe.exe', '.'), ('cloudflared-windows-amd64.exe', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

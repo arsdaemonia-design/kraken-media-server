@@ -5,6 +5,7 @@ import mimetypes
 from pathlib import Path
 from urllib.parse import unquote
 import config
+from services.subtitles import normalize_srt
 
 media_bp = Blueprint("media", __name__)
 
@@ -42,10 +43,12 @@ def serve_file(filename):
                     text_utf8 = raw.decode('cp1252')
                 except UnicodeDecodeError:
                     text_utf8 = raw.decode('latin-1', errors='replace')
+            if requested.suffix.lower() == '.srt':
+                text_utf8 = normalize_srt(text_utf8)
             sub_mime = 'text/vtt; charset=utf-8' if requested.suffix.lower() == '.vtt' else 'text/plain; charset=utf-8'
             resp = Response(text_utf8.encode('utf-8'), mimetype=sub_mime)
             resp.headers['Access-Control-Allow-Origin'] = '*'
-            resp.headers['Cache-Control'] = 'public, max-age=3600'
+            resp.headers['Cache-Control'] = 'no-cache'
             return resp
 
         range_header = request.headers.get('Range')

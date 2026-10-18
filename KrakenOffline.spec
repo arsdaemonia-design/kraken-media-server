@@ -5,7 +5,7 @@ a = Analysis(
     ['app_offline.py'],
     pathex=[],
     binaries=[],
-    datas=[('templates', 'templates'), ('assets', 'assets'), ('routes', 'routes'), ('services', 'services'), ('sw.js', '.'), ('config.py', '.'), ('state.py', '.'), ('utils.py', '.'), ('app.py', '.'), ('app_logic.py', '.'), ('app_tail.py', '.'), ('alexa_handlers.py', '.'), ('alexa_tail.py', '.'), ('ffmpeg.exe', '.'), ('ffprobe.exe', '.'), ('cloudflared-windows-amd64.exe', '.')],
+    datas=[('templates', 'templates'), ('assets', 'assets'), ('routes', 'routes'), ('services', 'services'), ('sw.js', '.'), ('config.py', '.'), ('state.py', '.'), ('utils.py', '.'), ('app.py', '.'), ('alexa_handlers.py', '.'), ('ffmpeg.exe', '.'), ('ffprobe.exe', '.'), ('cloudflared-windows-amd64.exe', '.')],
     hiddenimports=[
         'flask', 'flask_compress', 'flask_ask_sdk',
         'yt_dlp', 'yt_dlp.YoutubeDL',
@@ -15,7 +15,7 @@ a = Analysis(
         'langdetect', 'langdetect.lang_detect_exception',
         'librosa', 'numpy',
         'ask_sdk_core', 'ask_sdk_core.skill_builder', 'ask_sdk_core.dispatch_components', 'ask_sdk_core.utils',
-        'io', 'collections', 'collections.deque'
+        'io', 'collections'
     ],
     hookspath=[],
     hooksconfig={},

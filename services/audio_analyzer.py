@@ -19,22 +19,27 @@ def analyze_track(file_path):
     Returns (bpm, energy) or (0.0, 0.0) on failure.
     """
     try:
-        # Load audio (mono, 22050 Hz by default for speed)
-        # We load only the first 60 seconds to save CPU, as energy/bpm usually stabilize
-        y, sr = librosa.load(file_path, duration=60, sr=22050)
-        
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            # Sample 35s starting at 15s to skip quiet intros and speed up analysis
+            y, sr = librosa.load(file_path, offset=15.0, duration=35.0, sr=22050)
+            if y is None or len(y) < sr * 3:
+                y, sr = librosa.load(file_path, offset=0.0, duration=35.0, sr=22050)
+
+        if y is None or len(y) == 0:
+            return 0.0, 0.0
+
         # Calculate BPM
         tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
         bpm = float(tempo[0]) if isinstance(tempo, np.ndarray) else float(tempo)
-        
-        # Calculate Energy (RMS)
+
+        # Calculate Energy (RMS) calibrated on a realistic 0-100 scale
+        # Typical music RMS is 0.04 (ambient/acoustic) to 0.26+ (loud rock/dance)
         rms = librosa.feature.rms(y=y)
         energy = float(np.mean(rms))
-        
-        # Normalize energy to a 0-1 or 0-100 scale if desired. 
-        # Typically RMS is between 0 and 1, we multiply by 100 for better readability
-        energy_score = min(energy * 1000, 100.0) # Heuristic multiplier
-        
+        energy_score = min(max((energy / 0.26) * 100.0, 1.0), 100.0)
+
         return round(bpm, 2), round(energy_score, 2)
     except Exception as e:
         print(f"Error analizando audio {file_path}: {e}")
@@ -61,6 +66,7 @@ def _process_library_background():
     
     try:
         import config
+        import state
         # Resolve DB_PATH properly inside thread to catch config overrides
         DB_PATH = os.path.join(config.DOWNLOAD_FOLDER, 'kraken.db')
         
@@ -68,8 +74,13 @@ def _process_library_background():
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
         
-        # Fetch all audio tracks that haven't been analyzed yet (bpm = 0 or null)
-        c.execute("SELECT id, rel_path FROM media WHERE media_type = 'audio' AND (bpm IS NULL OR bpm = 0.0)")
+        # Prioritize favorite and most played tracks first so mixes benefit immediately
+        c.execute("""
+            SELECT id, rel_path
+            FROM media
+            WHERE media_type = 'audio' AND (bpm IS NULL OR bpm = 0.0)
+            ORDER BY rating DESC, play_count DESC, date_added DESC
+        """)
         tracks = c.fetchall()
         
         ANALYSIS_STATUS['total'] = len(tracks)
@@ -78,6 +89,7 @@ def _process_library_background():
             ANALYSIS_STATUS['active'] = False
             return
             
+        updated_since_commit = 0
         for i, track in enumerate(tracks):
             track_id = track['id']
             rel_path = track['rel_path']
@@ -92,7 +104,17 @@ def _process_library_background():
                 
                 if bpm > 0:
                     c.execute("UPDATE media SET bpm = ?, energy = ? WHERE id = ?", (bpm, energy, track_id))
-                    conn.commit()
+                    updated_since_commit += 1
+                    if updated_since_commit >= 10:
+                        conn.commit()
+                        state.MIXES_CACHE = []
+                        state.BIB_CACHE = None
+                        updated_since_commit = 0
+
+        if updated_since_commit > 0:
+            conn.commit()
+            state.MIXES_CACHE = []
+            state.BIB_CACHE = None
             
     except Exception as e:
         print(f"Error procesando libreria con Librosa: {e}")

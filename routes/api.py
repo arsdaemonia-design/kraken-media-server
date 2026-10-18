@@ -30,6 +30,7 @@ from services.media_analyzer import *
 from services.video_tagger import *
 from services.database import get_db
 from services.duplicates import get_scan_status, start_scan
+from services.subtitles import normalize_srt
 import traceback
 
 api_bp = Blueprint("api", __name__)
@@ -2551,6 +2552,7 @@ def setup_status():
     return jsonify({
         'is_configured': not needs_setup,
         'current_media_path': runtime.get('media_path', config.DOWNLOAD_FOLDER),
+        'has_subdl_api_key': bool(os.getenv('SUBDL_API_KEY') or runtime.get('subdl_api_key')),
         'adult_ratings': getattr(config, 'ADULT_RATINGS', [])
     })
 
@@ -2605,6 +2607,7 @@ def update_settings():
     current_pin = data.get('pin', '')
     new_pin = data.get('new_pin', '')
     new_media_path = data.get('media_path', '').strip()
+    subdl_api_key = (data.get('subdl_api_key') or '').strip()
     
     runtime = _load_runtime_config()
     if current_pin != runtime.get('pin'):
@@ -2621,6 +2624,10 @@ def update_settings():
     if new_media_path:
         _save_runtime_config('media_path', new_media_path)
         changes['media_path'] = new_media_path
+
+    if subdl_api_key:
+        _save_runtime_config('subdl_api_key', subdl_api_key)
+        changes['subdl_api_key'] = 'configured'
     
     if not changes:
         return jsonify({'error': 'No hay cambios para aplicar'}), 400
@@ -4282,7 +4289,7 @@ def update_video_meta():
 # ============= BÚSQUEDA Y DESCARGA DE SUBTÍTULOS ONLINE =============
 @api_bp.route('/api/subtitles/search', methods=['GET'])
 def search_online_subtitles():
-    """Busca subtítulos en línea (Podnapisi JSON API sin API key + Subdl opcional)."""
+    """Search SubDL first and retain Podnapisi as a best-effort fallback."""
     query = (request.args.get('query') or '').strip()
     year = (request.args.get('year') or '').strip()
     langs = (request.args.get('lang') or 'es,en').strip()
@@ -4295,10 +4302,70 @@ def search_online_subtitles():
     clean_query = re.sub(r'\s+', ' ', clean_query) or query
 
     results = []
+    provider_errors = []
     headers = {
         'Accept': 'application/json',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) KrakenMediaServer/4.99'
     }
+
+    runtime = _load_runtime_config()
+    subdl_key = (os.getenv('SUBDL_API_KEY') or runtime.get('subdl_api_key') or '').strip()
+
+    if subdl_key:
+        try:
+            subdl_response = requests.get(
+                'https://api.subdl.com/api/v2/subtitles/search',
+                params={'film_name': clean_query, 'languages': langs, 'unpack': 1},
+                headers={**headers, 'Authorization': f'Bearer {subdl_key}'},
+                timeout=15
+            )
+            if subdl_response.status_code == 200:
+                payload = subdl_response.json()
+                for item in payload.get('subtitles', [])[:30]:
+                    lang_code = str(item.get('lang') or item.get('language') or '').strip().lower().replace('_', '-')
+                    if lang_code in {'spanish', 'español', 'castilian', 'spa', 'esp'} or lang_code.startswith(('es-', 'spa-')):
+                        lang_code = 'es'
+                    elif lang_code in {'english', 'inglés', 'eng', 'en-us', 'en-gb'}:
+                        lang_code = 'en'
+
+                    subtitle_id = item.get('n_id') or item.get('id')
+                    direct_url = item.get('url') or item.get('download_url')
+                    if isinstance(direct_url, str) and direct_url.startswith('/'):
+                        direct_url = f'https://dl.subdl.com{direct_url}'
+                    download_url = direct_url or (
+                        f'https://api.subdl.com/api/v2/subtitles/{subtitle_id}/download?format=zip'
+                        if subtitle_id else ''
+                    )
+                    if not download_url:
+                        continue
+
+                    results.append({
+                        'id': str(subtitle_id or ''),
+                        'title': clean_query,
+                        'year': year,
+                        'release': item.get('release_name') or item.get('name') or clean_query,
+                        'lang': lang_code,
+                        'downloads': item.get('downloads') or item.get('download_count') or 0,
+                        'provider': 'SubDL',
+                        'download_url': download_url
+                    })
+            else:
+                detail = ''
+                try:
+                    detail = (subdl_response.json().get('error') or {}).get('message', '')
+                except (ValueError, AttributeError):
+                    pass
+                provider_errors.append({
+                    'provider': 'SubDL',
+                    'message': detail or f'HTTP {subdl_response.status_code}'
+                })
+        except Exception as e:
+            provider_errors.append({'provider': 'SubDL', 'message': str(e)})
+    else:
+        provider_errors.append({
+            'provider': 'SubDL',
+            'message': 'Falta configurar la API key de SubDL en Configuración > General.'
+        })
 
     def _fetch_podnapisi(q, y=''):
         params = {'keywords': q, 'language': langs}
@@ -4310,15 +4377,20 @@ def search_online_subtitles():
             headers=headers,
             timeout=10
         )
-        if r.status_code == 200:
-            return r.json().get('data', [])
-        return []
+        r.raise_for_status()
+        return r.json().get('data', [])
+
+    def _needs_podnapisi_fallback():
+        requested_languages = {code.strip().lower() for code in langs.split(',') if code.strip()}
+        if requested_languages.intersection({'es', 'spa', 'spanish'}):
+            return not any(str(item.get('lang') or '').lower().startswith(('es', 'spa')) for item in results)
+        return not results
 
     try:
-        data = _fetch_podnapisi(clean_query, year)
-        # Si con año exacto no hubo resultados, reintentar sin año
+        # An English-only SubDL response is not complete for Kraken's default es,en search.
+        data = _fetch_podnapisi(clean_query, year) if _needs_podnapisi_fallback() else []
         if not data and year:
-            data = _fetch_podnapisi(clean_query, '')
+            data = _fetch_podnapisi(clean_query, '') if _needs_podnapisi_fallback() else []
 
         for item in data[:30]:
             movie_info = item.get('movie') or {}
@@ -4341,12 +4413,18 @@ def search_online_subtitles():
                 'download_url': dl_url
             })
     except Exception as e:
+        provider_errors.append({'provider': 'Podnapisi', 'message': str(e)})
         print(f"⚠️ Error buscando subtítulos en Podnapisi: {e}")
 
     # Ordenar priorizando Español ('es') primero y luego mayor número de descargas
     results.sort(key=lambda x: (0 if x['lang'].startswith('es') else 1, -(x.get('downloads') or 0)))
 
-    return jsonify({'ok': True, 'results': results[:25], 'query_used': clean_query})
+    return jsonify({
+        'ok': True,
+        'results': results[:40],
+        'query_used': clean_query,
+        'provider_errors': provider_errors
+    })
 
 
 @api_bp.route('/api/subtitles/download', methods=['POST'])
@@ -4362,7 +4440,9 @@ def download_online_subtitle():
         return jsonify({'ok': False, 'error': 'Faltan parámetros video_path o download_url'}), 400
 
     # Validar URL permitida
-    if not (download_url.startswith('https://www.podnapisi.net/') or download_url.startswith('https://dl.subdl.com/')):
+    parsed_download_url = urllib.parse.urlparse(download_url)
+    allowed_hosts = {'www.podnapisi.net', 'dl.subdl.com', 'api.subdl.com'}
+    if parsed_download_url.scheme != 'https' or parsed_download_url.hostname not in allowed_hosts:
         return jsonify({'ok': False, 'error': 'Proveedor de subtítulos no permitido'}), 400
 
     try:
@@ -4383,11 +4463,31 @@ def download_online_subtitle():
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) KrakenMediaServer/4.99'
         }
+        if parsed_download_url.hostname == 'api.subdl.com':
+            runtime = _load_runtime_config()
+            subdl_key = (os.getenv('SUBDL_API_KEY') or runtime.get('subdl_api_key') or '').strip()
+            if not subdl_key:
+                return jsonify({'ok': False, 'error': 'Falta configurar la API key de SubDL en Kraken'}), 503
+            headers['Authorization'] = f'Bearer {subdl_key}'
         resp = requests.get(download_url, headers=headers, timeout=15)
         if resp.status_code != 200:
             return jsonify({'ok': False, 'error': f'Error HTTP {resp.status_code} al descargar subtítulo'}), 502
 
         raw_bytes = resp.content
+        if 'json' in (resp.headers.get('Content-Type') or '').lower():
+            try:
+                download_payload = resp.json()
+                resolved_url = download_payload.get('url') or download_payload.get('download_url')
+                if not resolved_url:
+                    return jsonify({'ok': False, 'error': download_payload.get('error', {}).get('message', 'SubDL no devolvió el archivo de subtítulos')}), 502
+                parsed_resolved = urllib.parse.urlparse(resolved_url)
+                if parsed_resolved.scheme != 'https' or parsed_resolved.hostname not in {'dl.subdl.com', 'api.subdl.com'}:
+                    return jsonify({'ok': False, 'error': 'SubDL devolvió un enlace de descarga no permitido'}), 502
+                file_response = requests.get(resolved_url, headers={'User-Agent': headers['User-Agent']}, timeout=20)
+                file_response.raise_for_status()
+                raw_bytes = file_response.content
+            except (ValueError, requests.RequestException) as exc:
+                return jsonify({'ok': False, 'error': f'No se pudo obtener el archivo de SubDL: {exc}'}), 502
         srt_bytes = None
 
         # Extraer .srt si viene en archivo .zip
@@ -4412,6 +4512,7 @@ def download_online_subtitle():
                 text_utf8 = srt_bytes.decode('cp1252')
             except UnicodeDecodeError:
                 text_utf8 = srt_bytes.decode('latin-1', errors='replace')
+        text_utf8 = normalize_srt(text_utf8)
 
         lang_tag = 'es' if lang.startswith('es') else ('en' if lang.startswith('en') else lang[:3])
         out_filename = f"{target.stem}.{lang_tag}.srt"

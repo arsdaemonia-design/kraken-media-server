@@ -3604,7 +3604,7 @@
                 activeCategory: '',
                 genreFilter: null,
                 gridRenderLimit: 84,
-                recommendationsOpen: false,
+                recommendationsOpen: true,
                 search: '',
                 pathDepth: 0,
                 detailView: false
@@ -3654,6 +3654,7 @@
                 window.filterByGenre = function (genre) {
                     window.netflixGenreFilter = (window.netflixGenreFilter === genre) ? null : genre;
                     window.netflixGridRenderLimit = 84;
+                    if (window.netflixGenreFilter) videoUIState.recommendationsOpen = false;
                     renderLib();
                 };
 
@@ -3698,7 +3699,7 @@
                     window.netflixActiveCategory = newCat;
                     window.netflixGenreFilter = null;
                     window.netflixGridRenderLimit = 84;
-                    videoUIState.recommendationsOpen = false;
+                    videoUIState.recommendationsOpen = true;
                     const mobileInput = document.getElementById('lib-search-mobile');
                     const desktopInput = document.getElementById('lib-search-desktop');
                     if (mobileInput) mobileInput.value = '';
@@ -3756,14 +3757,14 @@
                         if (isHidden) {
                             section.classList.remove('hidden');
                             videoUIState.recommendationsOpen = true;
-                            if (btn) btn.classList.add('bg-emerald-500/40', 'border-emerald-500/60');
+                            if (btn) btn.classList.add('ring-2', 'ring-emerald-400/50');
                             setTimeout(() => {
                                 section.scrollIntoView({ behavior: 'smooth', block: 'start' });
                             }, 100);
                         } else {
                             section.classList.add('hidden');
                             videoUIState.recommendationsOpen = false;
-                            if (btn) btn.classList.remove('bg-emerald-500/40', 'border-emerald-500/60');
+                            if (btn) btn.classList.remove('ring-2', 'ring-emerald-400/50');
                         }
                     }
                 };
@@ -3794,6 +3795,7 @@
             function appendNetflixRecommendationsSection(container, uniqueShows) {
                 function createRecommendationsRow(title, items, rowId) {
                     if (items.length < 2) return '';
+                    const encodedGenre = encodeURIComponent(title.replace(/^Explora\s+/i, '')).replace(/'/g, '%27');
                     const cardsHtml = items.slice(0, 20).map(item => `
                         <div class="flex-none w-[140px] md:w-[170px] lg:w-[190px] xl:w-[200px]">
                             ${createCard(item)}
@@ -3807,8 +3809,9 @@
                         <div class="mb-8 relative group/row">
                             <h3 class="text-sm font-bold text-white mb-3 px-2 md:px-0 flex items-center gap-2">
                                 <i class="fa-solid fa-film text-emerald-500"></i>
-                                ${title}
+                                ${escapeHtml(title)}
                                 <span class="text-[10px] text-zinc-500 font-normal">(${items.length})</span>
+                                <button onclick="openVideoGenreFromRail('${encodedGenre}')" class="ml-auto text-[10px] font-semibold text-emerald-400 hover:text-white transition">Ver todo <i class="fa-solid fa-chevron-right ml-1"></i></button>
                             </h3>
                             <div class="relative">
                                 <button onclick="${scrollLeft}"
@@ -3842,6 +3845,14 @@
                     if (row) row.scrollBy({ left: 400, behavior: 'smooth' });
                 };
 
+                window.openVideoGenreFromRail = function (encodedGenre) {
+                    window.netflixGenreFilter = decodeURIComponent(encodedGenre || '');
+                    window.netflixGridRenderLimit = 84;
+                    videoUIState.recommendationsOpen = false;
+                    renderLib();
+                    setTimeout(() => document.getElementById('netflix-catalog-grid')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+                };
+
                 const genreGroups = {};
                 uniqueShows.forEach(show => {
                     const src = show.sample ? show.sample : show;
@@ -3852,29 +3863,43 @@
                     });
                 });
 
-                const sortedGenres = Object.keys(genreGroups)
+                const eligibleGenres = Object.keys(genreGroups)
                     .filter(g => genreGroups[g].length >= 3)
-                    .sort((a, b) => genreGroups[b].length - genreGroups[a].length)
-                    .slice(0, 8);
+                    .sort((a, b) => genreGroups[b].length - genreGroups[a].length || a.localeCompare(b));
+
+                // Keep today's recommendations stable across re-renders, then rotate them tomorrow.
+                const today = new Date();
+                const dayKey = `${today.getFullYear()}-${today.getMonth() + 1}-${today.getDate()}`;
+                const seedText = `${dayKey}|${window.netflixActiveCategory || 'Todo'}`;
+                let seed = Array.from(seedText).reduce((value, char) => ((value * 31) + char.charCodeAt(0)) >>> 0, 2166136261);
+                const seededShuffle = (items) => {
+                    const shuffled = [...items];
+                    for (let i = shuffled.length - 1; i > 0; i--) {
+                        seed = (seed * 1664525 + 1013904223) >>> 0;
+                        const j = seed % (i + 1);
+                        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                    }
+                    return shuffled;
+                };
+                const selectedGenres = seededShuffle(eligibleGenres.slice(0, 10)).slice(0, 4);
 
                 let recommendationsHtml = '';
                 let rowIndex = 0;
-                sortedGenres.forEach(genre => {
+                selectedGenres.forEach(genre => {
                     const items = genreGroups[genre];
-                    const shuffled = [...items].sort(() => Math.random() - 0.5);
-                    recommendationsHtml += createRecommendationsRow(genre, shuffled, 'rec-row-' + rowIndex);
+                    recommendationsHtml += createRecommendationsRow(`Explora ${genre}`, seededShuffle(items), 'rec-row-' + rowIndex);
                     rowIndex++;
                 });
 
                 if (recommendationsHtml) {
                     container.innerHTML += `
-                        <div id="recommendations-section" class="hidden mt-8 pt-6 border-t border-white/10">
+                        <div id="recommendations-section" class="${videoUIState.recommendationsOpen ? '' : 'hidden'} mt-2 pt-5 border-t border-white/10">
                             <div class="px-2 md:px-0 mb-6">
                                 <h2 class="text-lg font-bold text-white flex items-center gap-2">
-                                    <i class="fa-solid fa-thumbs-up text-emerald-500"></i>
-                                    Recomendadas
+                                    <i class="fa-solid fa-wand-magic-sparkles text-emerald-500"></i>
+                                    Descubre hoy
                                 </h2>
-                                <p class="text-xs text-zinc-500 mt-1">Desliza para explorar por género</p>
+                                <p class="text-xs text-zinc-500 mt-1">Una selección diaria de tu biblioteca. El catálogo completo está abajo.</p>
                             </div>
                             ${recommendationsHtml}
                         </div>
@@ -3941,7 +3966,7 @@
 
                 const gridSizeClass = videoZoomLevels[currentVideoZoomIndex] || videoZoomLevels[1];
                 container.innerHTML += `
-                    <div class="grid ${gridSizeClass} gap-3 md:gap-4 px-1 md:px-0 pb-4">
+                    <div id="netflix-catalog-grid" class="grid ${gridSizeClass} gap-3 md:gap-4 px-1 md:px-0 pb-4">
                         ${allCardsHtml}
                     </div>
                 `;
@@ -5133,6 +5158,14 @@
                                                 <input type="password" id="settings-secret-word" placeholder="*****"
                                                        class="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition">
                                             </div>
+
+                                            <div>
+                                                <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">API key de SubDL</label>
+                                                <input type="password" id="settings-subdl-api-key" autocomplete="new-password"
+                                                       placeholder="${d.has_subdl_api_key ? 'Ya configurada; escribe otra solo para reemplazarla' : 'Pega aquí tu API key gratuita de SubDL'}"
+                                                       class="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition">
+                                                <p class="text-[10px] text-zinc-500 mt-1">Se guarda en este servidor y no se envía al navegador durante las búsquedas.</p>
+                                            </div>
                                             
                                             <button onclick="saveSettings('${pin}')" id="settings-save-btn"
                                                     class="w-full bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-bold py-3 rounded-xl transition-all hover:scale-[1.02] flex items-center justify-center gap-2">
@@ -5777,13 +5810,14 @@
             async function saveSettings(currentPin) {
                 const newPin = document.getElementById('settings-new-pin').value;
                 const newMediaPath = document.getElementById('settings-media-path')?.value.trim();
+                const subdlApiKey = document.getElementById('settings-subdl-api-key')?.value.trim();
                 const btn = document.getElementById('settings-save-btn');
 
                 if (newPin && newPin.length < 4) {
                     showToast('PIN debe tener al menos 4 digitos', 'error');
                     return;
                 }
-                if (!newPin && !newMediaPath) {
+                if (!newPin && !newMediaPath && !subdlApiKey) {
                     showToast('No hay cambios para guardar', 'error');
                     return;
                 }
@@ -5795,6 +5829,7 @@
                     const payload = { pin: currentPin };
                     if (newPin) payload.new_pin = newPin;
                     if (newMediaPath) payload.media_path = newMediaPath;
+                    if (subdlApiKey) payload.subdl_api_key = subdlApiKey;
 
                     const res = await fetch('/api/settings', {
                         method: 'POST',
@@ -6195,7 +6230,7 @@
                 currentPath = "";
                 if (currentLibrary === 'video') {
                     videoUIState.genreFilter = null;
-                    videoUIState.recommendationsOpen = false;
+                    videoUIState.recommendationsOpen = true;
                     videoUIState.gridRenderLimit = 84;
                 }
 
@@ -6869,11 +6904,15 @@
                     const res = await fetch(`/api/subtitles/search?query=${encodeURIComponent(q)}&year=${encodeURIComponent(y)}`);
                     const data = await res.json();
                     if (!data.ok || !data.results || data.results.length === 0) {
-                        resultsBox.innerHTML = '<div class="text-zinc-400 py-2 text-center">No se encontraron subtítulos para este título. Prueba simplificando el título arriba.</div>';
+                        const errors = (data.provider_errors || []).map(e => `${e.provider}: ${e.message}`).join(' · ');
+                        const safeErrors = errors.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                        resultsBox.innerHTML = `<div class="text-zinc-300 py-2 text-center">No se encontraron subtítulos para este título. Prueba simplificando el título arriba.${safeErrors ? `<div class="text-amber-300 text-[10px] mt-2">Estado: ${safeErrors}</div>` : ''}</div>`;
                         return;
                     }
                     window._lastOnlineSubResults = data.results;
-                    resultsBox.innerHTML = data.results.map((item, idx) => {
+                    const providerNotice = (data.provider_errors || []).map(e => `${e.provider}: ${e.message}`).join(' · ');
+                    const safeNotice = providerNotice.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    resultsBox.innerHTML = (safeNotice ? `<div class="text-amber-300 text-[10px] px-1 pb-1">Aviso: ${safeNotice}</div>` : '') + data.results.map((item, idx) => {
                         const isEs = (item.lang || '').startsWith('es');
                         const badgeColor = isEs ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-blue-500/20 text-blue-300 border-blue-500/40';
                         const flag = isEs ? '🇪🇸 ES' : '🇺🇸 EN';
@@ -6885,7 +6924,7 @@
                                         <span class="px-1.5 py-0.5 rounded text-[9px] font-bold border ${badgeColor}">${flag}</span>
                                         <span class="text-white font-medium truncate text-[11px]" title="${safeRel}">${safeRel}</span>
                                     </div>
-                                    <div class="text-[9px] text-zinc-400 mt-0.5">${item.year ? item.year + ' • ' : ''}⬇️ ${item.downloads || 0} descargas</div>
+                                    <div class="text-[9px] text-zinc-400 mt-0.5">${item.provider || 'Proveedor'} • ${item.year ? item.year + ' • ' : ''}⬇️ ${item.downloads || 0} descargas</div>
                                 </div>
                                 <button type="button" onclick="descargarSubtituloOnline(${idx}, this)"
                                         class="px-2 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500 hover:text-black text-emerald-300 font-bold text-[10px] shrink-0 transition">
@@ -10501,9 +10540,9 @@ document.addEventListener('fullscreenchange', () => {
                                 bg-gradient-to-r from-violet-600 to-violet-700 
                                 text-white shadow-lg shadow-violet-600/30
                                 hover:from-violet-500 hover:to-violet-600 
-                                active:scale-95 transition-all duration-200 border border-transparent">
-                                <i class="fa-solid fa-thumbs-up"></i>
-                                <span>Recomendaciones</span>
+                                active:scale-95 transition-all duration-200 border border-transparent ${videoUIState.recommendationsOpen ? 'ring-2 ring-emerald-400/50' : ''}">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                                <span>Descubre hoy</span>
                             </button>
                         </div>
                     `;
@@ -10592,9 +10631,8 @@ document.addEventListener('fullscreenchange', () => {
 
                         // 8. GRID PLANO CON TODOS LOS SHOWS (render por lotes para evitar congelamientos)
                         showsToDisplay.sort((a, b) => ((a.name || a.title) || '').localeCompare((b.name || b.title) || '', undefined, { sensitivity: 'base' }));
-                        appendNetflixGrid(container, showsToDisplay);
-
                         appendNetflixRecommendationsSection(container, uniqueShows);
+                        appendNetflixGrid(container, showsToDisplay);
 
                             observeLazyImages(container);
                             return; // Terminar aquí, ya no procesa el Grid viejo!
