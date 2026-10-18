@@ -53,3 +53,11 @@ Documento resumen de las mejoras, correcciones y optimizaciones implementadas en
   - Las canciones de audio omiten campos exclusivos de video (`tmdb_*`, `is_hidden`) y los videos omiten campos exclusivos de audio (`bpm`, `energy`), eliminando más de **130,000 llaves nulas/redundantes** en cada carga de biblioteca sin alterar ninguna función de la app.
 - **Service Worker ([`sw.js`](sw.js)):**
   - Estrategia **Network-First** para el `APP_SHELL` cuando la app está conectada, garantizando que las actualizaciones de interfaz se reflejen de inmediato sin requerir borrar caché manualmente.
+
+---
+
+## 5. Reproductor (v4.99.1)
+- Pantalla completa: barra inferior, titulo y boton volver se ocultan solos (tactil y mouse); se desactivo fullscreenWeb; corregido isHover pegado en tablet.
+- Titulo limpio (sin extension ni tmdb-id).
+- Gestos tactiles estilo YouTube: doble toque izq/der = -10s/+10s acumulable, centro = pausa/play, con animacion.
+

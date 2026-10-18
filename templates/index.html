@@ -1292,22 +1292,35 @@
 
         /* En fullscreen, controles más grandes pero no exagerados */
         @media (max-width: 1024px) {
-            #artplayer-container .art-video-player.art-fullscreen {
-                --art-control-height: 64px;
-                --art-control-icon-size: 50px;
+            .art-video-player.art-fullscreen,
+            .art-video-player.art-fullscreen-web {
+                --art-control-height: 58px;
+                --art-control-icon-size: 46px;
                 --art-progress-height: 8px;
             }
         }
 
-        #artplayer-container .art-controls-center {
+        .art-video-player {
+            width: 100% !important;
+            height: 100% !important;
+            background: #000 !important;
+        }
+
+        .art-video-player .art-video {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: contain !important;
+        }
+
+        .art-video-player .art-controls-center {
             display: flex !important;
             justify-content: center;
             align-items: center;
             min-width: 0;
         }
 
-        #artplayer-container .krk-art-now-title {
-            max-width: 44vw;
+        .art-video-player .krk-art-now-title {
+            max-width: 40vw;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -1321,14 +1334,47 @@
             pointer-events: none;
         }
 
-        #artplayer-container .art-video-player.art-fullscreen .art-bottom {
-            opacity: 0 !important;
+        /* Feedback de gestos de doble toque (estilo YouTube) */
+        .art-video-player .krk-tap-feedback {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 35%;
+            z-index: 65;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            color: #fff;
+            font-weight: 700;
+            font-size: 14px;
+            background: rgba(255, 255, 255, 0.18);
+            opacity: 0;
             pointer-events: none;
         }
+        .art-video-player .krk-tap-feedback i { font-size: 28px; }
+        .art-video-player .krk-tap-feedback.left { left: 0; border-radius: 0 60% 60% 0; }
+        .art-video-player .krk-tap-feedback.right { right: 0; border-radius: 60% 0 0 60%; }
+        .art-video-player .krk-tap-feedback.center {
+            left: 50%; top: 50%; bottom: auto; width: 84px; height: 84px;
+            margin: -42px 0 0 -42px; border-radius: 50%; background: rgba(0, 0, 0, 0.55);
+        }
+        .art-video-player .krk-tap-feedback.show { animation: krk-tap-fade 0.7s ease-out forwards; }
+        @keyframes krk-tap-fade { 0% { opacity: 0; } 15% { opacity: 1; } 100% { opacity: 0; } }
 
-        #artplayer-container .art-video-player.art-fullscreen.art-hover .art-bottom {
-            opacity: 1 !important;
-            pointer-events: auto;
+        /* Ocultar completamente la barra inferior y degradado cuando no hay interacción */
+        .art-video-player:not(.art-control-show):not(.art-hover) .art-bottom,
+        .art-video-player.art-hide-cursor .art-bottom {
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
+
+        .art-video-player:not(.art-control-show):not(.art-hover) .art-bottom .art-progress,
+        .art-video-player:not(.art-control-show):not(.art-hover) .art-bottom .art-controls,
+        .art-video-player.art-hide-cursor .art-bottom .art-progress,
+        .art-video-player.art-hide-cursor .art-bottom .art-controls {
+            pointer-events: none !important;
         }
 
         /* ═══════ FULLSCREEN CSS DE RESPALDO (WebView) ═══════
@@ -1344,6 +1390,7 @@
             inset: 0 !important;
             width: 100vw !important;
             height: 100vh !important;
+            height: 100dvh !important;
             max-width: none !important;
             max-height: none !important;
             margin: 0 !important;
@@ -7683,7 +7730,7 @@
                 // Preparar container para ArtPlayer
                 if (screenEl) {
                     screenEl.innerHTML = `
-                        <button onclick="exitVideoMode()" class="absolute top-4 left-4 z-[9999] bg-black/50 hover:bg-black/80 text-white rounded-full w-10 h-10 flex items-center justify-center transition backdrop-blur border border-white/10 shadow-lg group">
+                        <button id="krk-video-back-btn" onclick="exitVideoMode()" class="absolute top-4 left-4 z-[9999] bg-black/50 hover:bg-black/80 text-white rounded-full w-10 h-10 flex items-center justify-center transition-all duration-300 backdrop-blur border border-white/10 shadow-lg group">
                             <i class="fa-solid fa-arrow-left transition-transform group-hover:-translate-x-1"></i>
                         </button>
                         <div id="artplayer-container" class="w-full h-full bg-black relative z-0"></div>
@@ -7739,8 +7786,13 @@
                         // Crear ArtPlayer
                         const container = document.getElementById('artplayer-container');
                         if (container && data.url) {
-                            const currentTitle = (file.title || 'Sin título').trim();
-                            const currentMeta = ((file.folder || 'Video') || '').trim();
+                            const cleanVideoTitle = (s) => String(s || '')
+                                .replace(/\.(mkv|mp4|avi|mov|webm|m4v)$/i, '')
+                                .replace(/[\s\-_]*[\(\[\{]?\s*tmdb[\-_=\s]*\d+\s*[\)\]\}]?/gi, '')
+                                .trim();
+                            const currentTitle = cleanVideoTitle(file.tmdb_title || file.title || 'Sin título');
+                            const rawMeta = cleanVideoTitle(file.folder || '');
+                            const currentMeta = (rawMeta && rawMeta.toLowerCase() !== currentTitle.toLowerCase() && rawMeta.toLowerCase() !== 'video') ? rawMeta : '';
                             let backendAudioTracks = Array.isArray(data.audio_tracks) ? data.audio_tracks : [];
                             let selectedBackendAudio = Number.isInteger(data.selected_audio_track) ? data.selected_audio_track : 0;
                             const audioLanguageMap = {
@@ -7909,7 +7961,7 @@
                                 settings: artSettings,
                                 playsInline: true,
                                 fullscreen: true,
-                                fullscreenWeb: true,
+                                fullscreenWeb: false,
                                 pip: true,
                                 playbackRate: true,
                                 fastForward: true,
@@ -7918,7 +7970,7 @@
                                 volume: Number(getVideoPrefs().defaultVolume != null ? getVideoPrefs().defaultVolume : 1),
                                 screenshot: false,
                                 airplay: true,
-                                autoHide: window.innerWidth >= 1024 ? 4000 : 0,
+                                autoHide: true,
                                 duration: data.duration || 0,
                                 plugins: castSupported ? [
                                     artplayerPluginChromecast({
@@ -8219,41 +8271,141 @@
                                 });
                             }
 
-                            // ═══════ TOUCH TOGGLE para controles en móvil ═══════
-                            // En móvil, ArtPlayer no detecta hover, así que necesitamos un listener de touch
-                            // para mostrar/ocultar los controles nativos al tocar la pantalla
-                            if (window.innerWidth < 1024 && art.template && art.template.$container) {
+                            // ═══════ CONTROL AUTO-HIDE UNIVERSAL (Móvil / Tablet / Desktop / Fullscreen) ═══════
+                            if (art.template && art.template.$player) {
+                                const playerEl = art.template.$player;
+                                const backBtn = document.getElementById('krk-video-back-btn');
                                 let _artControlsTimeout = null;
-                                const ART_CONTROLS_DURATION = 3000; // 3 segundos en móvil
+                                let _lastTouchTime = 0;
+                                const ART_CONTROLS_DURATION = 3000;
 
-                                // Toggle al tocar el contenedor
-                                art.template.$container.addEventListener('touchend', (e) => {
-                                    // Ignorar toques en botones/controles (dejar que funcionen normal)
-                                    if (e.target.closest('.art-control, .art-control-volume, .art-setting, button, input, select')) return;
-
-                                    const isShowing = art.template.$container.closest('.art-video-player')?.classList.contains('art-control-show');
-                                    if (isShowing) {
-                                        // Ocultar controles
-                                        art.template.$container.closest('.art-video-player')?.classList.remove('art-control-show', 'art-hover');
-                                        if (_artControlsTimeout) clearTimeout(_artControlsTimeout);
-                                    } else {
-                                        // Mostrar controles con timeout
-                                        art.template.$container.closest('.art-video-player')?.classList.add('art-control-show', 'art-hover');
-                                        if (_artControlsTimeout) clearTimeout(_artControlsTimeout);
-                                        _artControlsTimeout = setTimeout(() => {
-                                            art.template.$container.closest('.art-video-player')?.classList.remove('art-control-show', 'art-hover');
-                                        }, ART_CONTROLS_DURATION);
+                                const hideAllPlayerControls = () => {
+                                    if (!art || art.isDestroy) return;
+                                    if (art.setting && art.setting.show) return;
+                                    if (art.controls) {
+                                        art.controls.isHover = false;
+                                        if (art.controls.show) art.controls.show = false;
                                     }
-                                }, { passive: true });
+                                    playerEl.classList.remove('art-control-show', 'art-hover');
+                                    playerEl.classList.add('art-hide-cursor');
+                                    if (backBtn) {
+                                        backBtn.classList.add('opacity-0', 'pointer-events-none');
+                                    }
+                                };
 
-                                // Mouse fallback para desktop con ventana pequeña
-                                art.template.$container.addEventListener('mousemove', () => {
-                                    art.template.$container.closest('.art-video-player')?.classList.add('art-control-show', 'art-hover');
+                                const scheduleAutoHide = (delay = ART_CONTROLS_DURATION) => {
                                     if (_artControlsTimeout) clearTimeout(_artControlsTimeout);
                                     _artControlsTimeout = setTimeout(() => {
-                                        art.template.$container.closest('.art-video-player')?.classList.remove('art-control-show', 'art-hover');
-                                    }, ART_CONTROLS_DURATION);
+                                        if (art && art.controls) art.controls.isHover = false;
+                                        hideAllPlayerControls();
+                                    }, delay);
+                                };
+
+                                const showAllPlayerControls = (delay = ART_CONTROLS_DURATION) => {
+                                    if (!art || art.isDestroy) return;
+                                    playerEl.classList.add('art-control-show', 'art-hover');
+                                    playerEl.classList.remove('art-hide-cursor');
+                                    if (backBtn) {
+                                        backBtn.classList.remove('opacity-0', 'pointer-events-none');
+                                    }
+                                    scheduleAutoHide(delay);
+                                };
+
+                                // Sincronizar con el evento interno 'control' de ArtPlayer (evita pelear con su click/toggle nativo)
+                                art.on('control', (state) => {
+                                    if (state) {
+                                        if (backBtn) backBtn.classList.remove('opacity-0', 'pointer-events-none');
+                                        scheduleAutoHide(ART_CONTROLS_DURATION);
+                                    } else {
+                                        if (_artControlsTimeout) clearTimeout(_artControlsTimeout);
+                                        playerEl.classList.remove('art-control-show', 'art-hover');
+                                        playerEl.classList.add('art-hide-cursor');
+                                        if (backBtn) backBtn.classList.add('opacity-0', 'pointer-events-none');
+                                    }
+                                });
+
+                                // Al entrar/salir de fullscreen, limpiar isHover pegado y ocultar rápido
+                                art.on('fullscreen', () => {
+                                    if (art.controls) art.controls.isHover = false;
+                                    scheduleAutoHide(2000);
+                                });
+                                art.on('fullscreenWeb', () => {
+                                    if (art.controls) art.controls.isHover = false;
+                                    scheduleAutoHide(2000);
+                                });
+
+                                // En dispositivos táctiles (tablets/móviles), el navegador dispara un mousemove/mouseenter
+                                // sintético unos ~50ms después de touchend que deja art.controls.isHover = true para siempre.
+                                playerEl.addEventListener('touchend', () => {
+                                    _lastTouchTime = Date.now();
+                                    setTimeout(() => {
+                                        if (!art || art.isDestroy) return;
+                                        if (art.controls) art.controls.isHover = false;
+                                        if (art.controls && art.controls.show) {
+                                            scheduleAutoHide(ART_CONTROLS_DURATION);
+                                        } else {
+                                            hideAllPlayerControls();
+                                        }
+                                    }, 120);
                                 }, { passive: true });
+
+                                // Movimiento de mouse real en desktop/tablet con trackpad
+                                playerEl.addEventListener('mousemove', () => {
+                                    if (Date.now() - _lastTouchTime < 600) return;
+                                    showAllPlayerControls(ART_CONTROLS_DURATION);
+                                }, { passive: true });
+
+                                // Iniciar temporizador al abrir el video
+                                showAllPlayerControls(ART_CONTROLS_DURATION);
+
+                                // ═══════ GESTOS TÁCTILES ESTILO YOUTUBE ═══════
+                                // Doble toque izquierda = -10s, derecha = +10s (taps extra acumulan), centro = play/pausa
+                                const SEEK_STEP = 10;
+                                let _lastTapAt = 0, _lastTapZone = '', _seekAccum = 0, _seekAccumTimer = null;
+                                const showTapFeedback = (zone, text) => {
+                                    let fb = playerEl.querySelector('.krk-tap-feedback.' + zone);
+                                    if (!fb) {
+                                        fb = document.createElement('div');
+                                        fb.className = 'krk-tap-feedback ' + zone;
+                                        playerEl.appendChild(fb);
+                                    }
+                                    fb.innerHTML = text;
+                                    fb.classList.remove('show');
+                                    void fb.offsetWidth;
+                                    fb.classList.add('show');
+                                };
+                                playerEl.addEventListener('touchend', (e) => {
+                                    if (e.target.closest('.art-bottom, .art-settings, .art-contextmenus, .art-info, button, input, select')) return;
+                                    const t = e.changedTouches && e.changedTouches[0];
+                                    if (!t) return;
+                                    const rect = playerEl.getBoundingClientRect();
+                                    const x = (t.clientX - rect.left) / rect.width;
+                                    const zone = x < 0.35 ? 'left' : (x > 0.65 ? 'right' : 'center');
+                                    const now = Date.now();
+                                    const isDouble = (now - _lastTapAt < 320) && (zone === _lastTapZone || _seekAccum > 0);
+                                    _lastTapAt = now;
+                                    _lastTapZone = zone;
+                                    if (!isDouble) return;
+
+                                    if (e.cancelable) e.preventDefault(); // evita el click sintético / toggle de controles
+                                    if (zone === 'center') {
+                                        if (art.playing) art.pause(); else art.play();
+                                        showTapFeedback('center', art.playing ? '<i class="fa-solid fa-play"></i>' : '<i class="fa-solid fa-pause"></i>');
+                                        _lastTapAt = 0;
+                                        return;
+                                    }
+                                    const dir = zone === 'left' ? -1 : 1;
+                                    _seekAccum += SEEK_STEP;
+                                    const dur = art.duration || Infinity;
+                                    art.currentTime = Math.max(0, Math.min(dur - 0.5, (art.currentTime || 0) + dir * SEEK_STEP));
+                                    showTapFeedback(zone, `<i class="fa-solid fa-${dir < 0 ? 'backward' : 'forward'}"></i><span>${dir < 0 ? '-' : '+'}${_seekAccum}s</span>`);
+                                    if (_seekAccumTimer) clearTimeout(_seekAccumTimer);
+                                    _seekAccumTimer = setTimeout(() => { _seekAccum = 0; _lastTapAt = 0; }, 700);
+                                }, { passive: false });
+
+                                art.on('destroy', () => {
+                                    if (_artControlsTimeout) clearTimeout(_artControlsTimeout);
+                                });
                             }
 
                             const controlsCenter = art.template && art.template.$player

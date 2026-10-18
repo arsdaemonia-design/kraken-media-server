@@ -1,4 +1,4 @@
-import os
+﻿import os
 import threading
 import sys
 import webbrowser
@@ -26,12 +26,12 @@ from state import cleanup_inactive_users, cleanup_old_hls_sessions
 from utils import check_ffmpeg
 import alexa_handlers
 
-APP_VERSION = "4.99"
-OFFLINE_VERSION = "4.99"
+APP_VERSION = "4.99.1"
+OFFLINE_VERSION = "4.99.1"
 OFFLINE_LIMIT = 500
 GITHUB_REPO = "arsdaemonia-design/kraken-media-server"
 
-# Nota: El blueprint hls_bp ya está registrado en app.py al importar
+# Nota: El blueprint hls_bp ya estÃ¡ registrado en app.py al importar
 
 
 def _inject_template(template: str) -> str:
@@ -188,19 +188,19 @@ def main(open_browser: bool = True):
     database.init_db()
     library.generar_biblioteca_viva()
 
-    print("🐙  KRAKEN V4 - OFFLINE (Private Playlists Edition)")
-    print("🧹 Iniciando Radar de Usuarios...")
+    print("ðŸ™  KRAKEN V4 - OFFLINE (Private Playlists Edition)")
+    print("ðŸ§¹ Iniciando Radar de Usuarios...")
     radar_thread = threading.Thread(target=cleanup_inactive_users, daemon=True)
     radar_thread.start()
 
-    print("🧹 Iniciando limpiador de sesiones HLS...")
+    print("ðŸ§¹ Iniciando limpiador de sesiones HLS...")
     if os.path.exists(config.HLS_TEMP_DIR):
         try:
             shutil.rmtree(config.HLS_TEMP_DIR)
             os.makedirs(config.HLS_TEMP_DIR, exist_ok=True)
-            print("✅ Limpieza de streams temporales completada")
+            print("âœ… Limpieza de streams temporales completada")
         except Exception as e:
-            print(f"⚠️  No se pudo limpiar temp_streams: {e}")
+            print(f"âš ï¸  No se pudo limpiar temp_streams: {e}")
     hls_cleanup_thread = threading.Thread(target=cleanup_old_hls_sessions, daemon=True)
     hls_cleanup_thread.start()
 
