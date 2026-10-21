@@ -357,11 +357,15 @@ def play_hls():
             conn = sqlite3.connect(os.path.join(config.DOWNLOAD_FOLDER, 'kraken.db'))
             conn.row_factory = sqlite3.Row
             c = conn.cursor()
-            c.execute("SELECT rel_path, duration_sec FROM media WHERE id = ?", (media_id,))
+            c.execute("SELECT rel_path, duration_sec, is_adult FROM media WHERE id = ?", (media_id,))
             row = c.fetchone()
             conn.close()
             if not row:
                 return jsonify({"error": f"ID {media_id} no encontrado en DB"}), 404
+            # Revalidar contenido +18 en el inicio de HLS. El token de streaming
+            # solo autoriza contenido adulto si se emitió tras validar el PIN.
+            if bool(row['is_adult']) and not token_data.get('adult_authorized'):
+                return jsonify({"error": "Se requiere el PIN maestro para este contenido"}), 403
             video_path = row['rel_path']
             video_duration = row['duration_sec'] or 0
         except Exception as e:

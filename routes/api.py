@@ -1640,6 +1640,108 @@ def biblioteca():
 
     return jsonify(resp_data)
 
+
+@api_bp.route('/api/tv/library')
+def tv_library_page():
+    """Biblioteca de video liviana y paginada para clientes de TV nativos."""
+    try:
+        offset = max(0, int(request.args.get('offset', 0)))
+        limit = min(60, max(1, int(request.args.get('limit', 40))))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'offset/limit inválidos'}), 400
+
+    user_email = get_user_from_request(request)
+    if not user_email:
+        return jsonify({'error': 'Sesión requerida'}), 401
+    is_kid_mode = False
+    conn = get_db()
+    try:
+        if user_email:
+            user = conn.execute('SELECT is_kid_mode FROM users WHERE email = ?', (user_email,)).fetchone()
+            is_kid_mode = bool(user and user['is_kid_mode'])
+
+        has_pin = request.headers.get('X-Master-Pin') == get_master_pin()
+        adult_exists = False
+        if not is_kid_mode:
+            adult_exists = bool(conn.execute(
+                "SELECT 1 FROM media WHERE media_type = 'video' AND COALESCE(is_adult, 0) = 1 LIMIT 1"
+            ).fetchone())
+
+        where = ["media_type = 'video'", 'COALESCE(is_hidden, 0) = 0']
+        params = []
+        if is_kid_mode:
+            where.append('COALESCE(is_adult, 0) = 0')
+        elif not has_pin:
+            where.append('COALESCE(is_adult, 0) = 0')
+        if is_kid_mode:
+            where.append("UPPER(TRIM(COALESCE(tmdb_rating, ''))) NOT IN ('PG-13','R','NC-17','TV-14','TV-MA','18','16','16+','18+','MA15+','M','C','D','MA','R18+','R15+')")
+        where_sql = ' AND '.join(where)
+        total = conn.execute(f'SELECT COUNT(*) FROM media WHERE {where_sql}', params).fetchone()[0]
+        rows = conn.execute(f"""
+            SELECT id, rel_path, filename, title, tmdb_title, tmdb_year,
+                   tmdb_poster, folder_type, is_adult
+            FROM media WHERE {where_sql}
+            ORDER BY COALESCE(tmdb_title, title, filename), id
+            LIMIT ? OFFSET ?
+        """, (*params, limit, offset)).fetchall()
+        items = []
+        for row in rows:
+            items.append({
+                'id': row['id'],
+                'title': row['tmdb_title'] or row['title'] or row['filename'],
+                'path': row['rel_path'],
+                'poster': row['tmdb_poster'] or row['rel_path'],
+                'category': row['folder_type'] or 'Videos',
+                'year': row['tmdb_year'],
+                'is_adult': bool(row['is_adult'])
+            })
+        next_offset = offset + len(items)
+        return jsonify({
+            'items': items,
+            'offset': offset,
+            'limit': limit,
+            'total': total,
+            'next_offset': next_offset if next_offset < total else None,
+            'has_adult_vault': adult_exists,
+            'adult_unlocked': bool(has_pin and not is_kid_mode),
+            'is_kid_mode': is_kid_mode
+        })
+    finally:
+        conn.close()
+
+
+@api_bp.route('/api/tv/poster/<path:filename>')
+def tv_poster(filename):
+    """Serve a cached 185x278 JPEG derivative for low-memory TV clients."""
+    import hashlib
+    from flask import send_file
+
+    decoded = unquote(filename).lstrip('/\\')
+    cache_dir = os.path.join(THUMBNAILS_FOLDER, 'tv_cache')
+    cache_path = os.path.join(cache_dir, hashlib.sha256(decoded.encode('utf-8', errors='ignore')).hexdigest() + '.jpg')
+    if os.path.isfile(cache_path):
+        return send_file(cache_path, mimetype='image/jpeg', conditional=True, max_age=31536000)
+
+    source = caratula(decoded)
+    if source.status_code != 200:
+        return source
+    try:
+        source.direct_passthrough = False
+        raw_image = source.get_data()
+        source.close()
+        os.makedirs(cache_dir, exist_ok=True)
+        with Image.open(io.BytesIO(raw_image)) as image:
+            image = image.convert('RGB')
+            image.thumbnail((185, 278), Image.Resampling.LANCZOS)
+            canvas = Image.new('RGB', (185, 278), (12, 18, 17))
+            canvas.paste(image, ((185 - image.width) // 2, (278 - image.height) // 2))
+            canvas.save(cache_path, 'JPEG', quality=82, optimize=True)
+        response = send_file(cache_path, mimetype='image/jpeg', conditional=True, max_age=31536000)
+        response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+        return response
+    except Exception:
+        return source
+
 @api_bp.route('/radio/artist/<path:artist_name>')
 def search_similar_artists_radio(artist_name):
     """
@@ -3944,6 +4046,38 @@ def generate_stream_token():
     data = request.get_json() or {}
     media_id = data.get('id')
     session_id = data.get('session_id')  # Opcional: asociar sesión al token
+
+    if media_id is None:
+        return jsonify({'error': 'Media ID requerido'}), 400
+
+    # El cliente debe haber desbloqueado Adult Vault con el PIN maestro antes
+    # de solicitar un token reproducible para contenido marcado como +18.
+    conn = None
+    try:
+        conn = get_db()
+        media_row = conn.execute(
+            "SELECT is_adult, tmdb_rating FROM media WHERE id = ? AND media_type = 'video'",
+            (media_id,)
+        ).fetchone()
+    except Exception as e:
+        return jsonify({'error': f'No se pudo validar el contenido: {e}'}), 500
+    finally:
+        if conn:
+            conn.close()
+    if not media_row:
+        return jsonify({'error': 'Video no encontrado'}), 404
+    is_adult = bool(media_row['is_adult'])
+    user_email = get_user_from_request(request)
+    if user_email:
+        conn = get_db()
+        user_row = conn.execute('SELECT is_kid_mode FROM users WHERE email = ?', (user_email,)).fetchone()
+        conn.close()
+        blocked_ratings = {'PG-13', 'R', 'NC-17', 'TV-14', 'TV-MA', '18', '16', '16+', '18+', 'MA15+', 'M', 'C', 'D', 'MA', 'R18+', 'R15+'}
+        rating = str(media_row['tmdb_rating'] or '').upper().strip()
+        if user_row and bool(user_row['is_kid_mode']) and (is_adult or rating in blocked_ratings):
+            return jsonify({'error': 'Este contenido no está disponible en modo niños'}), 403
+    if is_adult and request.headers.get('X-Master-Pin') != get_master_pin():
+        return jsonify({'error': 'Se requiere el PIN maestro para este contenido'}), 403
     
     import uuid
     import time
@@ -3952,7 +4086,8 @@ def generate_stream_token():
     token_data = {
         'id': media_id,
         'expires': time.time() + (4 * 3600),  # Expira en 4 horas
-        'sessions': [session_id] if session_id else []
+        'sessions': [session_id] if session_id else [],
+        'adult_authorized': is_adult and request.headers.get('X-Master-Pin') == get_master_pin()
     }
     state.STREAM_TOKENS[token] = token_data
     
