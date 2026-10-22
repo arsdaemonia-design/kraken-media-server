@@ -1,4 +1,11 @@
-const VERSION = new URL(self.location.href).searchParams.get('v') || 'v2';
+/**
+ * ============================================================================
+ * KRAKEN MEDIA SERVER — Service Worker (sw.js)
+ * Gestiona el caché de App Shell (incluyendo los módulos CSS/JS) y archivos
+ * multimedia para reproducción en modo Offline PWA.
+ * ============================================================================
+ */
+const VERSION = new URL(self.location.href).searchParams.get('v') || 'v5.0.1';
 const CACHE_NAME = `kraken-offline-${VERSION}`;
 const APP_CACHE = `kraken-app-${VERSION}`;
 let offlineMode = false;
@@ -8,7 +15,25 @@ const APP_SHELL = [
   '/assets/kraken.ico',
   '/assets/kraken-192.png',
   '/assets/kraken-512.png',
-  '/assets/apple-touch-icon.png'
+  '/assets/apple-touch-icon.png',
+  '/assets/css/kraken.css',
+  '/assets/js/head-config.js',
+  '/assets/js/tv-lite.js',
+  '/assets/js/auth.js',
+  '/assets/js/hero_series.js',
+  '/assets/js/state.js',
+  '/assets/js/video-catalog.js',
+  '/assets/js/admin-settings.js',
+  '/assets/js/playlists-batch.js',
+  '/assets/js/tag-editor.js',
+  '/assets/js/audio-player.js',
+  '/assets/js/video-player.js',
+  '/assets/js/library-render.js',
+  '/assets/js/downloader-tools.js',
+  '/assets/js/radar-remote.js',
+  '/assets/js/lyrics-share.js',
+  '/assets/js/app-init.js',
+  '/assets/js/console.js'
 ];
 
 self.addEventListener('install', event => {
@@ -69,10 +94,8 @@ async function rangeResponse(request) {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
 
-  // ⭐ NUEVA REGLA: NUNCA interceptar /api/status
-  // Esta ruta DEBE llegar siempre al servidor para verificar Cloudflare Access
+  // Nunca interceptar /api/status para permitir verificación directa de sesión
   if (url.pathname.startsWith('/api/status')) {
-    // No hacer nada - dejar que la petición pase directamente al servidor
     return;
   }
 
@@ -97,7 +120,7 @@ self.addEventListener('fetch', event => {
   if (APP_SHELL.includes(url.pathname)) {
     event.respondWith((async () => {
       const cache = await caches.open(APP_CACHE);
-      const cached = await cache.match(event.request);
+      const cached = await cache.match(event.request, { ignoreSearch: true });
       const fetchPromise = fetch(event.request).then(res => {
         if (res.ok) cache.put(event.request, res.clone());
         return res;

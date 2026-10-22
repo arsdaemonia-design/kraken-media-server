@@ -128,13 +128,36 @@ def generate_invite_code():
     code = ''.join(secrets.choice(chars) for _ in range(4))
     return f"KRK-{code}"
 
+MEDIA_QUERY_AUTH_PREFIXES = (
+    '/api/tv/music/stream',
+    '/api/tv/music/lyrics',
+    '/api/tv/poster',
+    '/api/tv/backdrop',
+    '/api/tv/music/cover',
+    '/stream',
+    '/descargas',
+    '/caratula',
+    '/api/hls',
+    '/api/stream',
+    '/hls'
+)
+
 def get_user_from_request(request):
-    """Extract user email from request. Checks JWT only."""
+    """Extract user email from request. Checks JWT in Authorization header, or query param for media endpoints only."""
     auth = request.headers.get('Authorization', '')
     if auth.startswith('Bearer '):
         token = auth[7:]
         payload = verify_token(token)
         if payload:
             return payload.get('email', '')
+
+    # Permitir token en query parameter únicamente en endpoints multimedia/streaming
+    # donde reproductores nativos (Media3/ExoPlayer/etiquetas <audio>/<img>) no inyectan cabeceras Bearer.
+    if request.path.startswith(MEDIA_QUERY_AUTH_PREFIXES):
+        query_token = request.args.get('token')
+        if query_token:
+            payload = verify_token(query_token)
+            if payload:
+                return payload.get('email', '')
 
     return ''

@@ -1,4 +1,4 @@
-﻿import os
+import os
 import threading
 import sys
 import webbrowser
@@ -26,8 +26,8 @@ from state import cleanup_inactive_users, cleanup_old_hls_sessions
 from utils import check_ffmpeg
 import alexa_handlers
 
-APP_VERSION = "4.99.1"
-OFFLINE_VERSION = "4.99.1"
+APP_VERSION = "5.0.1"
+OFFLINE_VERSION = "5.0.1"
 OFFLINE_LIMIT = 500
 GITHUB_REPO = "arsdaemonia-design/kraken-media-server"
 
@@ -204,10 +204,12 @@ def main(open_browser: bool = True):
     hls_cleanup_thread = threading.Thread(target=cleanup_old_hls_sessions, daemon=True)
     hls_cleanup_thread.start()
 
+    port = int(os.environ.get('PORT', os.environ.get('KRAKEN_PORT', 5000)))
+
     if PYWEBVIEW_AVAILABLE:
         # Arrancar Flask en un hilo daemon
         flask_thread = threading.Thread(
-            target=lambda: app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False),
+            target=lambda: app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False),
             daemon=True
         )
         flask_thread.start()
@@ -216,7 +218,7 @@ def main(open_browser: bool = True):
         # Abrir ventana nativa pywebview
         window = webview.create_window(
             'Kraken Media Server',
-            'http://127.0.0.1:5000',
+            f'http://127.0.0.1:{port}',
             width=1400,
             height=900,
             resizable=True,
@@ -227,8 +229,8 @@ def main(open_browser: bool = True):
     else:
         # Fallback: abrir en navegador externo
         if open_browser:
-            _open_browser_soon('http://127.0.0.1:5000')
-        app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
+            _open_browser_soon(f'http://127.0.0.1:{port}')
+        app.run(host='0.0.0.0', port=port, debug=True, use_reloader=False)
 
 if __name__ == '__main__':
     main(open_browser=True)

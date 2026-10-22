@@ -1,0 +1,1785 @@
+/**
+ * ============================================================================
+ * KRAKEN MEDIA SERVER — Hoja de Estilos Principal (kraken.css)
+ * Incluye variables de sistema de diseño, componentes base, barra de
+ * reproducción, reproductor de video HLS/Cine, responsive móvil y Modo TV Lite.
+ * ============================================================================
+ */
+
+/* ========== DESIGN SYSTEM VARIABLES ========== */
+        :root {
+            /* Colors */
+            --color-bg: #050505;
+            --color-surface: #0c0c0c;
+            --color-surface-elevated: #141414;
+            --color-surface-hover: rgba(255, 255, 255, 0.05);
+            --color-border: rgba(255, 255, 255, 0.08);
+            --color-border-subtle: rgba(255, 255, 255, 0.05);
+            --color-text-primary: #f8fafc;
+            --color-text-secondary: #94a3b8;
+            --color-text-muted: #64748b;
+            --color-accent: #10b981;
+            --color-accent-hover: #34d399;
+            --color-accent-glow: rgba(16, 185, 129, 0.3);
+
+            /* Spacing */
+            --space-xs: 4px;
+            --space-sm: 8px;
+            --space-md: 12px;
+            --space-lg: 16px;
+            --space-xl: 24px;
+
+            /* Radius */
+            --radius-sm: 6px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --radius-xl: 16px;
+            --radius-full: 999px;
+
+            /* Shadows */
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+            --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+            --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+            --shadow-glow: 0 0 20px var(--color-accent-glow);
+
+            /* Transitions */
+            --transition-fast: 0.15s ease;
+            --transition-normal: 0.2s ease;
+            --transition-slow: 0.3s ease;
+        }
+
+        /* ========== BASE BUTTONS ========== */
+        .btn-primary {
+            background: var(--color-accent);
+            color: #020617;
+            font-weight: 700;
+            padding: var(--space-sm) var(--space-lg);
+            border-radius: var(--radius-lg);
+            transition: all var(--transition-fast);
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn-primary:hover {
+            background: var(--color-accent-hover);
+            box-shadow: var(--shadow-glow);
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: var(--color-surface-hover);
+            color: var(--color-text-secondary);
+            font-weight: 600;
+            padding: var(--space-sm) var(--space-lg);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--color-border);
+            transition: all var(--transition-fast);
+            cursor: pointer;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--color-text-primary);
+            border-color: var(--color-accent);
+        }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--color-text-muted);
+            padding: var(--space-sm);
+            border-radius: var(--radius-md);
+            transition: all var(--transition-fast);
+            cursor: pointer;
+        }
+
+        .btn-ghost:hover {
+            background: var(--color-surface-hover);
+            color: var(--color-text-primary);
+        }
+
+        .btn-icon {
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: var(--radius-full);
+            background: var(--color-surface-hover);
+            color: var(--color-text-secondary);
+            border: 1px solid var(--color-border-subtle);
+            transition: all var(--transition-fast);
+            cursor: pointer;
+        }
+
+        .btn-icon:hover {
+            background: var(--color-accent);
+            color: #020617;
+            border-color: var(--color-accent);
+        }
+
+        /* ========== BASE MODAL ========== */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(8px);
+        }
+
+        .modal-content {
+            background: var(--color-surface-elevated);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-lg);
+            max-width: 90vw;
+            max-height: 90vh;
+            overflow: hidden;
+        }
+
+        .modal-header {
+            padding: var(--space-lg) var(--space-xl);
+            border-bottom: 1px solid var(--color-border-subtle);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .modal-body {
+            padding: var(--space-xl);
+        }
+
+        .modal-footer {
+            padding: var(--space-lg) var(--space-xl);
+            border-top: 1px solid var(--color-border-subtle);
+            display: flex;
+            gap: var(--space-sm);
+            justify-content: flex-end;
+        }
+
+        /* ========== BASE CARD ========== */
+        .card {
+            background: var(--color-surface-elevated);
+            border: 1px solid var(--color-border-subtle);
+            border-radius: var(--radius-lg);
+            transition: all var(--transition-normal);
+        }
+
+        .card:hover {
+            border-color: var(--color-border);
+            box-shadow: var(--shadow-md);
+        }
+
+        .card-interactive {
+            cursor: pointer;
+        }
+
+        .card-interactive:hover {
+            transform: translateY(-2px);
+            border-color: var(--color-accent);
+            box-shadow: var(--shadow-glow);
+        }
+
+        /* ========== BASE INPUT ========== */
+        .input {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: var(--space-sm) var(--space-lg);
+            color: var(--color-text-primary);
+            font-size: 0.875rem;
+            transition: all var(--transition-fast);
+            outline: none;
+        }
+
+        .input:focus {
+            border-color: var(--color-accent);
+            box-shadow: 0 0 0 2px var(--color-accent-glow);
+        }
+
+        .input::placeholder {
+            color: var(--color-text-muted);
+        }
+
+        /* ========== TOAST NOTIFICATION ========== */
+        .toast {
+            position: fixed;
+            bottom: var(--space-xl);
+            left: 50%;
+            transform: translateX(-50%);
+            padding: var(--space-sm) var(--space-lg);
+            border-radius: var(--radius-full);
+            font-size: 0.8rem;
+            font-weight: 600;
+            z-index: 10000;
+            animation: toast-in 0.3s ease;
+        }
+
+        .toast-success {
+            background: var(--color-accent);
+            color: #020617;
+        }
+
+        .toast-error {
+            background: #ef4444;
+            color: white;
+        }
+
+        .toast-warning {
+            background: #f59e0b;
+            color: #020617;
+        }
+
+        .toast-info {
+            background: #3b82f6;
+            color: white;
+        }
+
+        @keyframes toast-in {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            background: var(--color-bg);
+            color: var(--color-text-primary);
+        }
+
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* ========== RESPONSIVE BREAKPOINTS ========== */
+        @media (max-width: 768px) {
+            #player-bar {
+                flex-direction: column !important;
+                height: auto !important;
+                padding: 12px 16px 88px 16px !important;
+                gap: 8px;
+            }
+
+            #player-bar>div {
+                width: 100% !important;
+            }
+
+            #main-sidebar {
+                width: 280px;
+            }
+
+            .mode-btn {
+                font-size: 10px;
+                padding: 8px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            #player-bar {
+                padding-bottom: 80px !important;
+            }
+
+            .filter-chip {
+                font-size: 9px;
+                padding: 3px 8px;
+            }
+
+            .list-row {
+                padding: 6px 8px;
+            }
+        }
+
+        /* ========== SCROLLBAR ========== */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #020617;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 3px;
+        }
+
+        /* ========== GLASS EFFECT ========== */
+        .glass {
+            background: rgba(24, 24, 27, 0.95);
+            /* Zinc-950 (Gris Puro) */
+            backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        /* Agrega esto para las tarjetas */
+        .card-carbon {
+            background: rgba(39, 39, 42, 0.4);
+            /* Zinc-800 semi-transparente */
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        /* ========== SIDEBAR ========== */
+        .sidebar-link {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 16px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: #94a3b8;
+            border-radius: 8px;
+            transition: all 0.2s;
+            cursor: pointer;
+            border-left: 3px solid transparent;
+        }
+
+        .sidebar-link:hover {
+            color: #f8fafc;
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .sidebar-link.active {
+            background: rgba(16, 185, 129, 0.1);
+            color: #34d399;
+            border-left-color: #10b981;
+        }
+
+        /* ========== LOGO VORTEX FIJO ========== */
+        .vortex-logo-fixed {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 256px;
+            background: #080808;
+            border-top: 1px solid rgba(16, 185, 129, 0.2);
+            z-index: 250;
+            padding: 16px;
+            overflow: hidden;
+        }
+
+        @media (max-width: 768px) {
+            .vortex-logo-fixed {
+                width: 100%;
+                border-right: none;
+            }
+        }
+
+        /* ========== BOTÓN HAMBURGUESA MÓVIL ========== */
+        .mobile-menu-btn {
+            position: fixed;
+            top: 16px;
+            left: 16px;
+            z-index: 199;
+            display: none;
+            width: 40px;
+            height: 40px;
+            background: rgba(16, 185, 129, 0.9);
+            border-radius: 8px;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        @media (max-width: 768px) {
+            .mobile-menu-btn {
+                display: flex;
+            }
+        }
+
+        /* ========== MODE BUTTONS ========== */
+        .mode-btn {
+            flex: 1;
+            text-align: center;
+            padding: 12px;
+            font-weight: 800;
+            font-size: 11px;
+            text-transform: uppercase;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            color: #64748b;
+            transition: 0.2s;
+            letter-spacing: 0.05em;
+        }
+
+        .mode-btn:hover {
+            color: white;
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .mode-btn.active {
+            color: #10b981;
+            border-bottom-color: #10b981;
+            background: linear-gradient(to top, rgba(16, 185, 129, 0.1), transparent);
+        }
+
+        /* ========== GLOBAL SIDEBAR DRAWER ========== */
+        #main-sidebar {
+            transform: translateX(-100%);
+            transition: transform 0.28s ease;
+            box-shadow: 8px 0 30px rgba(0, 0, 0, 0.45);
+            width: 300px;
+            max-width: calc(100vw - 48px);
+        }
+
+        #main-sidebar.sidebar-open {
+            transform: translateX(0);
+        }
+
+        #sidebar-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.55);
+            backdrop-filter: blur(2px);
+            z-index: 250;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.22s ease;
+        }
+
+        #sidebar-backdrop.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        /* ========== HEADER COMPACT LOOK ========== */
+        #desktop-header {
+            padding: 10px 12px;
+            border-radius: 14px;
+            background: linear-gradient(180deg, rgba(18, 18, 20, 0.96), rgba(13, 13, 16, 0.92));
+            border-color: rgba(255, 255, 255, 0.08);
+        }
+
+        #desktop-header h2 {
+            font-size: 1.45rem;
+            letter-spacing: -0.01em;
+        }
+
+        #video-pills-row {
+            gap: 8px;
+            padding-top: 2px;
+        }
+
+        #video-pills-row .relative>button,
+        #video-pills-row-mobile .relative>button {
+            border-radius: 999px;
+            padding: 7px 14px;
+            font-size: 12px;
+            line-height: 1;
+        }
+
+        .filter-chip {
+            padding: 3px 10px;
+            font-size: 10px;
+        }
+
+        /* ========== ACCORDION ========== */
+        .accordion-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: #64748b;
+            padding: 12px 16px 4px 16px;
+            margin-top: 0px;
+            cursor: pointer;
+            transition: color 0.2s;
+            user-select: none;
+        }
+
+        .artist-group {
+            margin-left: 8px;
+            border-left: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .album-link {
+            font-size: 0.8rem;
+            padding: 6px 12px;
+            color: #94a3b8;
+            cursor: pointer;
+            display: block;
+        }
+
+        .album-link:hover {
+            color: #34d399;
+        }
+
+        /* ========== FILTERS ========== */
+        .filter-chip {
+            padding: 4px 12px;
+            border-radius: 2px;
+            font-size: 10px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: #18181b;
+            color: #a1a1aa;
+        }
+
+        .filter-chip:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .filter-chip.active {
+            background: #10b981;
+            color: #020617;
+            border-color: #10b981;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+        }
+
+
+
+
+        /* ========== GRADIENTS ========== */
+        .rand-grad-0 {
+            background: linear-gradient(135deg, #27272a 0%, #09090b 100%);
+        }
+
+        /* ========== LIST & CARDS ========== */
+        .list-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            cursor: pointer;
+            transition: background 0.2s;
+            border-radius: 6px;
+        }
+
+        .list-row:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .list-row.selected {
+            background: rgba(16, 185, 129, 0.2);
+            border-left: 3px solid #10b981;
+        }
+
+        /* ========== QUEUE ========== */
+        .queue-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            cursor: pointer;
+            transition: background 0.2s;
+            position: relative;
+        }
+
+        .queue-item.playing {
+            background: rgba(16, 185, 129, 0.1);
+            border-left: 3px solid #10b981;
+        }
+
+        .queue-img-container {
+            width: 48px;
+            height: 48px;
+            min-width: 48px;
+            flex-shrink: 0;
+            position: relative;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #1e293b;
+        }
+
+        .queue-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .queue-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        /* ========== VIEW BUTTONS ========== */
+        .btn-view {
+            width: 36px;
+            height: 32px;
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-view.active {
+            background: #475569;
+            color: white;
+        }
+
+        /* ========== RANGE INPUTS ========== */
+        input[type=range] {
+            -webkit-appearance: none;
+            background: transparent;
+            cursor: pointer;
+        }
+
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            background: #334155;
+            border-radius: 2px;
+        }
+
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 12px;
+            width: 12px;
+            border-radius: 50%;
+            background: #10b981;
+            margin-top: -4px;
+            transition: transform 0.1s;
+        }
+
+        /* ========== VISUALIZER ========== */
+        #visualizer {
+            width: 100%;
+            height: 100%;
+            /* Ocupa todo el alto del player bar */
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            z-index: 0;
+            /* Detrás de los textos */
+            pointer-events: none;
+            opacity: 0.55;
+            /* Sutil */
+
+            /* MÁSCARA DE DEGRADADO (El truco mágico) */
+            /* Hace que se desvanezca arriba y a los lados */
+            -webkit-mask-image: linear-gradient(to top, black 0%, transparent 100%);
+            mask-image: linear-gradient(to top, black 0%, transparent 100%);
+
+            mix-blend-mode: screen;
+            /* Se mezcla con el fondo */
+        }
+
+        /* ========== TOOLTIPS ========== */
+        .tooltip {
+            position: relative;
+        }
+
+        .tooltip:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #0f172a;
+            color: #fff;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            white-space: nowrap;
+            z-index: 50;
+            border: 1px solid #334155;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            pointer-events: none;
+        }
+
+
+
+        /* ========== ANIMATIONS ========== */
+        @keyframes pulse-neon {
+
+            0%,
+            100% {
+                transform: scale(1);
+                filter: brightness(1) drop-shadow(0 0 15px rgba(16, 185, 129, 0.9));
+                opacity: 0.9;
+            }
+
+            50% {
+                transform: scale(1.08);
+                filter: brightness(1.3) drop-shadow(0 0 25px rgba(16, 185, 129, 1));
+                opacity: 1;
+            }
+        }
+
+        /* ========== PLAYER BAR RESPONSIVE ========== */
+        #player-bar {
+            height: auto;
+            min-height: 96px;
+            padding-bottom: 0;
+
+        }
+
+        #loader {
+            position: fixed;
+            inset: 0;
+            background: radial-gradient(circle at center, #0b0f1a, #000);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            transition: opacity 0.4s ease;
+        }
+
+        /* Tornado animation */
+        .tornado {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            border: 6px solid rgba(255, 255, 255, 0.15);
+            border-top-color: #6cf;
+            animation: spin 1s linear infinite;
+        }
+
+        .ghost {
+            width: 80px;
+            height: 90px;
+            background: #052e1c;
+            border-radius: 40px 40px 20px 20px;
+            position: relative;
+            animation: float 2s ease-in-out infinite;
+            box-shadow: 0 0 12px #00ff99;
+        }
+
+        /* Eyes */
+        .eyes {
+            position: absolute;
+            top: 28px;
+            left: 18px;
+            display: flex;
+            gap: 12px;
+        }
+
+        .eyes span {
+            width: 12px;
+            height: 12px;
+            background: #00ff99;
+            border-radius: 50%;
+            box-shadow: 0 0 6px #00ff99;
+        }
+
+        /* Skirt bottom */
+        .skirt {
+            position: absolute;
+            bottom: -8px;
+            left: 0;
+            width: 100%;
+            height: 18px;
+            background: inherit;
+            border-radius: 0 0 20px 20px;
+            clip-path: polygon(0% 0%,
+                    12% 100%,
+                    25% 40%,
+                    37% 100%,
+                    50% 40%,
+                    62% 100%,
+                    75% 40%,
+                    87% 100%,
+                    100% 0%);
+        }
+
+        /* Animation */
+        @keyframes float {
+
+            0%,
+            100% {
+                transform: translateY(0);
+            }
+
+            50% {
+                transform: translateY(-12px);
+            }
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .loader-text {
+            margin-top: 22px;
+            font-size: 15px;
+            font-weight: 500;
+            letter-spacing: 1.8px;
+            color: rgba(180, 255, 240, 0.85);
+            text-transform: uppercase;
+            text-shadow:
+                0 0 8px rgba(100, 255, 255, 0.25),
+                0 0 16px rgba(0, 255, 200, 0.15);
+            opacity: 0.9;
+        }
+
+        .krk-spin {
+            animation: spin 1s linear infinite;
+            transform-origin: 50% 50%;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                scroll-behavior: auto !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+
+        .krk-video-card-progress {
+            position: absolute;
+            left: 0.65rem;
+            right: 0.65rem;
+            bottom: 0.55rem;
+            height: 3px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.22);
+            z-index: 30;
+        }
+
+        .krk-video-card-progress > span {
+            display: block;
+            height: 100%;
+            border-radius: inherit;
+            background: #10b981;
+        }
+
+        .krk-video-hover-preview {
+            display: none;
+            position: absolute;
+            left: 50%;
+            bottom: calc(100% - 0.5rem);
+            width: min(22rem, 30vw);
+            min-width: 18rem;
+            aspect-ratio: 16 / 9;
+            transform: translateX(-50%) translateY(0.5rem);
+            background: #111 center / cover no-repeat;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 0.75rem;
+            overflow: hidden;
+            box-shadow: 0 18px 50px rgba(0, 0, 0, 0.65);
+            pointer-events: none;
+            z-index: 300;
+        }
+
+        .krk-video-hover-preview::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0.05) 70%);
+        }
+
+        .krk-video-card:hover .krk-video-hover-preview {
+            display: block;
+            animation: krk-preview-in 0.18s ease-out both;
+        }
+
+        @keyframes krk-preview-in {
+            from { opacity: 0; transform: translateX(-50%) translateY(0.8rem) scale(0.98); }
+            to { opacity: 1; transform: translateX(-50%) translateY(0.5rem) scale(1); }
+        }
+
+        @media (max-width: 767px), (hover: none) {
+            .krk-video-hover-preview { display: none !important; }
+        }
+
+        .lazy-img:not(.loaded) {
+            background: linear-gradient(110deg, #151515 8%, #242424 18%, #151515 33%);
+            background-size: 200% 100%;
+            animation: krk-skeleton 1.35s linear infinite;
+        }
+
+        .lazy-img.loaded {
+            animation: none;
+            background: transparent;
+        }
+
+        @keyframes krk-skeleton {
+            to { background-position-x: -200%; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .lazy-img:not(.loaded) { animation: none; }
+        }
+
+        /* Hide animation */
+        #loader.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .dots {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+            overflow: hidden;
+        }
+
+        .dots span {
+            width: 8px;
+            height: 8px;
+            background: #9fd;
+            border-radius: 50%;
+            opacity: 0;
+            animation: dotMove 1.4s infinite;
+        }
+
+        .dots span:nth-child(1) {
+            animation-delay: 0s;
+        }
+
+        .dots span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .dots span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        .dots span:nth-child(4) {
+            animation-delay: 0.6s;
+        }
+
+        .dots span:nth-child(5) {
+            animation-delay: 0.8s;
+        }
+
+        @keyframes dotMove {
+            0% {
+                opacity: 0;
+                transform: translateX(0);
+            }
+
+            30% {
+                opacity: 1;
+            }
+
+            60% {
+                opacity: 1;
+            }
+
+            100% {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+        }
+
+        /* ========== LOADER DE VIDEO ========== */
+        .kraken-loading-filter {
+            filter: invert(66%) sepia(58%) saturate(486%) hue-rotate(107deg) brightness(93%) contrast(89%) drop-shadow(0 0 20px rgba(16, 185, 129, 0.8));
+            animation: kraken-breathe 2s infinite ease-in-out;
+        }
+
+        @keyframes kraken-breathe {
+
+            0%,
+            100% {
+                transform: scale(1);
+                filter: invert(66%) sepia(58%) saturate(486%) hue-rotate(107deg) brightness(93%) contrast(89%) drop-shadow(0 0 20px rgba(16, 185, 129, 0.8));
+            }
+
+            50% {
+                transform: scale(1.1);
+                filter: invert(66%) sepia(58%) saturate(486%) hue-rotate(107deg) brightness(120%) contrast(89%) drop-shadow(0 0 35px rgba(16, 185, 129, 1));
+            }
+        }
+
+        #video-loader.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* ========== SELECTORES DE AUDIO/SUBTÍTULOS ========== */
+        .video-settings-btn {
+            position: relative;
+        }
+
+        .video-settings-menu {
+            position: absolute;
+            bottom: 100%;
+            right: 0;
+            margin-bottom: 0.5rem;
+            background: rgba(0, 0, 0, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 0.5rem;
+            padding: 0.5rem;
+            min-width: 200px;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.2s ease;
+            pointer-events: none;
+            z-index: 200;
+        }
+
+        .video-settings-menu.show {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+
+        .video-settings-menu button {
+            width: 100%;
+            text-align: left;
+            padding: 0.5rem 0.75rem;
+            color: rgba(255, 255, 255, 0.8);
+            border-radius: 0.375rem;
+            transition: all 0.2s;
+            font-size: 0.75rem;
+        }
+
+        .video-settings-menu button:hover {
+            background: rgba(16, 185, 129, 0.2);
+            color: white;
+        }
+
+        .video-settings-menu button.active {
+            background: rgba(16, 185, 129, 0.3);
+            color: #10b981;
+            font-weight: bold;
+        }
+
+        .video-settings-menu .menu-section {
+            padding: 0.25rem 0;
+        }
+
+        .video-settings-menu .menu-label {
+            font-size: 0.625rem;
+            color: rgba(16, 185, 129, 0.6);
+            text-transform: uppercase;
+            font-weight: bold;
+            letter-spacing: 0.05em;
+            padding: 0.25rem 0.75rem;
+            margin-top: 0.5rem;
+        }
+
+        .video-settings-menu .menu-label:first-child {
+            margin-top: 0;
+        }
+
+        /* ========== REPRODUCTOR DE VIDEO MEJORADO ========== */
+        #view-player {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh;
+            overflow: hidden;
+            z-index: 9999;
+            background: #000;
+        }
+
+        #cine-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #cine-screen {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1;
+        }
+
+        #main-video {
+            max-width: 100vw;
+            max-height: 100vh;
+            width: auto;
+            height: auto;
+            box-shadow: 0 0 100px rgba(16, 185, 129, 0.1);
+            outline: none;
+        }
+
+        /* Video responsivo en móvil */
+        @media (max-width: 768px) {
+            #main-video {
+                width: 100vw !important;
+                height: 100vh !important;
+                object-fit: contain;
+            }
+        }
+
+        /* HEADER siempre arriba */
+        .cine-header {
+            position: fixed !important;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100 !important;
+        }
+
+        /* CONTROLES siempre abajo */
+        .cine-controls {
+            position: fixed !important;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 100 !important;
+            padding-bottom: max(1rem, env(safe-area-inset-bottom));
+        }
+
+        /* Mostrar controles al hacer hover O al tener clase visible */
+        #cine-container:hover .cine-controls,
+        #cine-container:hover .cine-header,
+        #cine-container.controls-visible .cine-controls,
+        #cine-container.controls-visible .cine-header {
+            opacity: 1;
+        }
+
+        /* Ocultar controles por defecto */
+        .cine-controls,
+        .cine-header {
+            opacity: 0;
+            transition: opacity 0.4s ease;
+            pointer-events: auto;
+            /* Permitir clics incluso cuando están ocultos */
+        }
+
+        /* En móvil, hacer área clicable más grande */
+        @media (max-width: 768px) {
+            .cine-controls {
+                padding: 1.5rem 1rem;
+                min-height: 140px;
+                /* Área táctil más grande */
+            }
+
+            .cine-header {
+                padding: 1rem;
+                min-height: 64px;
+            }
+        }
+
+        /* ═══════ CONTROLES ARTPLAYER MÁS GRANDES EN TABLET / MÓVIL ═══════ */
+        /* Usando las CSS custom properties nativas de ArtPlayer */
+        @media (max-width: 1024px) {
+            #artplayer-container .art-video-player {
+                --art-control-height: 56px;
+                --art-control-icon-size: 44px;
+                --art-control-icon-scale: 1.3;
+                --art-padding: 12px;
+            }
+
+            /* Botones en cine-controls (header y barra inferior) */
+            .cine-controls button,
+            .cine-controls [role="button"],
+            .cine-header button,
+            .cine-header [role="button"] {
+                font-size: 24px !important;
+                min-height: 48px;
+                min-width: 48px;
+                padding: 12px !important;
+            }
+
+            /* Volumen slider más fácil de tocar */
+            #artplayer-container .art-volume-panel {
+                min-width: 50px;
+            }
+        }
+
+        /* En móvil pequeño, controles aún más accesibles */
+        @media (max-width: 480px) {
+            #artplayer-container .art-video-player {
+                --art-control-height: 52px;
+                --art-control-icon-size: 40px;
+                --art-control-icon-scale: 1.4;
+                --art-padding: 10px;
+            }
+
+            .cine-controls button,
+            .cine-controls [role="button"],
+            .cine-header button,
+            .cine-header [role="button"] {
+                font-size: 28px !important;
+                min-height: 52px;
+                min-width: 52px;
+                padding: 14px !important;
+            }
+        }
+
+        /* En fullscreen, controles más grandes pero no exagerados */
+        @media (max-width: 1024px) {
+            .art-video-player.art-fullscreen,
+            .art-video-player.art-fullscreen-web {
+                --art-control-height: 58px;
+                --art-control-icon-size: 46px;
+                --art-progress-height: 8px;
+            }
+        }
+
+        .art-video-player {
+            width: 100% !important;
+            height: 100% !important;
+            background: #000 !important;
+        }
+
+        .art-video-player .art-video {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: contain !important;
+        }
+
+        .art-video-player .art-controls-center {
+            display: flex !important;
+            justify-content: center;
+            align-items: center;
+            min-width: 0;
+        }
+
+        .art-video-player .krk-art-now-title {
+            max-width: 40vw;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 12px;
+            line-height: 1.2;
+            font-weight: 700;
+            color: rgba(255, 255, 255, 0.95);
+            text-shadow: 0 2px 6px rgba(0, 0, 0, 0.75);
+            letter-spacing: 0.02em;
+            padding: 0 8px;
+            pointer-events: none;
+        }
+
+        /* Feedback de gestos de doble toque (estilo YouTube) */
+        .art-video-player .krk-tap-feedback {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 35%;
+            z-index: 65;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            color: #fff;
+            font-weight: 700;
+            font-size: 14px;
+            background: rgba(255, 255, 255, 0.18);
+            opacity: 0;
+            pointer-events: none;
+        }
+        .art-video-player .krk-tap-feedback i { font-size: 28px; }
+        .art-video-player .krk-tap-feedback.left { left: 0; border-radius: 0 60% 60% 0; }
+        .art-video-player .krk-tap-feedback.right { right: 0; border-radius: 60% 0 0 60%; }
+        .art-video-player .krk-tap-feedback.center {
+            left: 50%; top: 50%; bottom: auto; width: 84px; height: 84px;
+            margin: -42px 0 0 -42px; border-radius: 50%; background: rgba(0, 0, 0, 0.55);
+        }
+        .art-video-player .krk-tap-feedback.show { animation: krk-tap-fade 0.7s ease-out forwards; }
+        @keyframes krk-tap-fade { 0% { opacity: 0; } 15% { opacity: 1; } 100% { opacity: 0; } }
+
+        /* Ocultar completamente la barra inferior y degradado cuando no hay interacción */
+        .art-video-player:not(.art-control-show):not(.art-hover) .art-bottom,
+        .art-video-player.art-hide-cursor .art-bottom {
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
+
+        .art-video-player:not(.art-control-show):not(.art-hover) .art-bottom .art-progress,
+        .art-video-player:not(.art-control-show):not(.art-hover) .art-bottom .art-controls,
+        .art-video-player.art-hide-cursor .art-bottom .art-progress,
+        .art-video-player.art-hide-cursor .art-bottom .art-controls {
+            pointer-events: none !important;
+        }
+
+        /* ═══════ FULLSCREEN CSS DE RESPALDO (WebView) ═══════
+           El Fullscreen API nativo (requestFullscreen) no es fiable en el WebView.
+           Esta clase fuerza que el contenedor llene toda la ventana con position:fixed,
+           como fallback cuando requestFullscreen falla o no esta soportado. */
+        .krk-fullscreen,
+        #cine-container.krk-fullscreen,
+        #cine-screen.krk-fullscreen,
+        #artplayer-container.krk-fullscreen,
+        #view-player.krk-fullscreen {
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            height: 100dvh !important;
+            max-width: none !important;
+            max-height: none !important;
+            margin: 0 !important;
+            border-radius: 0 !important;
+            z-index: 999999 !important;
+            background: #000 !important;
+        }
+        body.krk-fs-lock {
+            overflow: hidden !important;
+        }
+
+        /* Barra de progreso personalizada */
+        #video-progress::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 2px;
+        }
+
+        #video-progress::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 14px;
+            width: 14px;
+            border-radius: 50%;
+            background: #10b981;
+            margin-top: -5px;
+            transition: transform 0.1s;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+        }
+
+        #video-progress:hover::-webkit-slider-thumb {
+            transform: scale(1.3);
+        }
+
+        /* Sugerencia de rotación en móvil vertical */
+        @media (max-width: 768px) and (orientation: portrait) {
+            #view-player::before {
+                content: '';
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 60px;
+                height: 60px;
+                background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M16.48 2.52c3.27 1.55 5.61 4.72 5.97 8.48h1.5C23.44 4.84 18.29 0 12 0l-.66.03 3.81 3.81 1.33-1.32zm-6.25-.77c-.59-.59-1.54-.59-2.12 0L1.75 8.11c-.59.59-.59 1.54 0 2.12l12.02 12.02c.59.59 1.54.59 2.12 0l6.36-6.36c.59-.59.59-1.54 0-2.12L10.23 1.75zm4.6 19.44L2.81 9.17l6.36-6.36 12.02 12.02-6.36 6.36zm-7.31.29C4.25 19.94 1.91 16.76 1.55 13H.05C.56 19.16 5.71 24 12 24l.66-.03-3.81-3.81-1.33 1.32z"/></svg>') center / contain no-repeat;
+                opacity: 0.3;
+                pointer-events: none;
+                z-index: 10000;
+                animation: rotate-hint 2s ease-in-out infinite;
+            }
+
+            @keyframes rotate-hint {
+
+                0%,
+                100% {
+                    transform: translate(-50%, -50%) rotate(0deg);
+                }
+
+                50% {
+                    transform: translate(-50%, -50%) rotate(90deg);
+                }
+            }
+        }
+
+        @keyframes rotate-hint {
+
+            0%,
+            100% {
+                transform: translate(-50%, -50%) rotate(0deg);
+            }
+
+            50% {
+                transform: translate(-50%, -50%) rotate(90deg);
+            }
+        }
+        }
+
+        .animate-slide-in {
+            animation: slide-in 0.2s ease-out forwards;
+        }
+
+        /* Nueva transición suave para la biblioteca */
+        .content-transition {
+            animation: content-entry 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+        }
+
+        @keyframes content-entry {
+            0% {
+                opacity: 0;
+                transform: translateY(10px) scale(0.99);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        /* Efecto de carga suave para cards */
+        .card-entry {
+            animation: card-pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        @keyframes card-pop {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        #main-scroll {
+            padding-bottom: 200px;
+            /* ← Espacio para el player */
+        }
+
+        @media (max-width: 768px) {
+            #main-scroll {
+                padding-bottom: 250px;
+                /* ← Más espacio en móvil */
+            }
+        }
+
+        .bg-noise {
+            position: relative;
+            background-color: #050505;
+            /* Base negra */
+        }
+
+        .bg-noise::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            opacity: 0.03;
+            /* Muy sutil */
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .relative-z {
+            position: relative;
+            z-index: 1;
+        }
+
+        .bg-grid-pattern {
+            background-color: #050505;
+            background-image:
+                linear-gradient(rgba(16, 185, 129, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(16, 185, 129, 0.03) 1px, transparent 1px);
+            background-size: 20px 20px;
+            /* Tamaño de los cuadritos */
+        }
+
+        .player-bg {
+            background-color: #0c0c0c;
+            /* Gris casi negro, más suave */
+            /* Patrón de puntos o rejilla muy sutil */
+            background-image: radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+            background-size: 20px 20px;
+
+            /* Borde superior brillante sutil */
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+
+            /* Sombra hacia arriba para separarlo del contenido */
+            box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        /* ========== KRAKEN NEON STYLE ========== */
+
+        /* Convierte el SVG negro en Verde Neón Brillante */
+        .kraken-neon-filter {
+            /* Esta combinación mágica vuelve lo negro -> Verde Esmeralda Brillante */
+            filter: invert(66%) sepia(58%) saturate(486%) hue-rotate(107deg) brightness(93%) contrast(89%) drop-shadow(0 0 8px rgba(16, 185, 129, 0.6));
+
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            animation: neon-breathe 4s infinite ease-in-out;
+        }
+
+        /* Al pasar el mouse: Brillo Nuclear */
+        .group:hover .kraken-neon-filter {
+            filter: invert(66%) sepia(58%) saturate(486%) hue-rotate(107deg) brightness(120%) contrast(89%) drop-shadow(0 0 25px rgba(16, 185, 129, 1));
+            transform: scale(1.05) translateY(-2px);
+        }
+
+        @keyframes neon-breathe {
+
+            0%,
+            100% {
+                opacity: 0.9;
+            }
+
+            50% {
+                opacity: 1;
+                drop-shadow(0 0 15px rgba(16, 185, 129, 0.8));
+            }
+        }
+
+        /* Shimmer animation for progress bar */
+        @keyframes shimmer {
+            0% {
+                transform: translateX(-100%);
+            }
+
+            100% {
+                transform: translateX(100%);
+            }
+        }
+
+        .animate-shimmer {
+            animation: shimmer 2s infinite;
+        }
+
+        50% {
+            opacity: 1;
+            drop-shadow(0 0 15px rgba(16, 185, 129, 0.8));
+        }
+        }
+
+        /* Texto Metálico (Plata) */
+        .text-metal {
+            background: linear-gradient(180deg, #ffffff 0%, #94a3b8 45%, #475569 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.8));
+        }
+
+        /* La "E" estilizada */
+        .kraken-xi {
+            background: none;
+            -webkit-text-fill-color: #10b981;
+            text-shadow: 0 0 15px rgba(16, 185, 129, 0.8);
+        }
+
+        /* Robusto Switch CSS */
+        #offline-pill-checkbox:checked + .pill-bg {
+            background-color: #450a0a !important;
+            border-color: #ef4444 !important;
+        }
+        #offline-pill-checkbox:checked + .pill-bg .pill-dot {
+            transform: translateX(16px);
+            background-color: #ef4444 !important;
+        }
+        #offline-pill-checkbox:checked ~ .pill-text .pill-status {
+            color: #ef4444 !important;
+        }
+
+        .clip-kraken-full {
+            clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+        }
+
+        /* Convertir SVG negro en “neón verde” */
+        .kraken-neon {
+            filter:
+                brightness(0) invert(1) sepia(1) saturate(600%) hue-rotate(90deg) drop-shadow(0 0 6px rgba(16, 185, 129, 0.9)) drop-shadow(0 0 14px rgba(16, 185, 129, 0.6));
+        }
+
+
+
+        /* ==================== FIX MÓVIL ====================
+   SOLUCIONA:
+   1. Orientación: se maneja por JS (landscape al ver video)
+   2. Botones flotantes NO se enciman con reproductor
+   3. Reducir espacio vacío inferior
+*/
+
+        /* Orientación móvil: solo mostrar aviso si NO hay video activo */
+        @media screen and (max-width: 768px) {
+            html {
+                transform-origin: left top;
+            }
+        }
+
+        /* 2. AJUSTAR BOTONES FLOTANTES PARA QUE NO SE ENCIMEN CON REPRODUCTOR */
+        @media screen and (max-width: 768px) {
+
+            /* Botones flotantes (usuario, carpeta, etc.) */
+            .fixed.bottom-6.right-6 {
+                /* Moverlos más arriba cuando el reproductor está visible */
+                bottom: 10rem !important;
+                /* Espacio para el reproductor */
+                transition: bottom 0.3s ease;
+            }
+
+            /* Si el reproductor NO está visible, bajarlos */
+            body:not(.player-active) .fixed.bottom-6.right-6 {
+                bottom: 1.5rem !important;
+            }
+
+            /* Ajustar z-index para que estén DEBAJO del reproductor */
+            .fixed.bottom-6.right-6 {
+                z-index: 40 !important;
+                /* Reproductor es z-200 */
+            }
+        }
+
+        /* 3. REDUCIR ESPACIO VACÍO EN LA PARTE INFERIOR */
+        @media screen and (max-width: 768px) {
+
+            /* Reducir padding inferior del contenido principal */
+            #view-library {
+                padding-bottom: 8rem !important;
+                /* Antes era pb-32 = 8rem */
+            }
+
+            /* Cuando el reproductor está activo, agregar más espacio */
+            body.player-active #view-library {
+                padding-bottom: 12rem !important;
+            }
+
+            /* Reducir padding de las tarjetas de contenido */
+            .animate-fade-in {
+                padding-bottom: 6rem !important;
+            }
+        }
+
+        /* 4. AJUSTAR REPRODUCTOR EN MÓVIL (HACERLO MÁS COMPACTO) */
+        @media screen and (max-width: 768px) {
+            #player-bar {
+                /* Hacerlo más delgado */
+                padding: 0.75rem 1rem !important;
+
+                /* Asegurar que esté arriba de todo */
+                z-index: 200 !important;
+            }
+
+            /* Reducir tamaño de controles */
+            #player-bar button {
+                width: 2.5rem !important;
+                height: 2.5rem !important;
+            }
+
+            /* Botón de play/pause más grande */
+            #player-bar .play-pause-btn {
+                width: 3rem !important;
+                height: 3rem !important;
+            }
+
+            /* Reducir tamaño de la portada */
+            #player-bar img {
+                max-width: 3rem !important;
+                max-height: 3rem !important;
+            }
+
+            /* Ajustar barra de progreso */
+            #player-bar input[type="range"] {
+                height: 0.25rem !important;
+            }
+        }
+
+
+        /* En tu JavaScript, cuando muestres el reproductor: */
+        /* document.body.classList.add('player-active'); */
+        /* Cuando lo ocultes: */
+        /* document.body.classList.remove('player-active'); */
+
+        /* 6. AJUSTE ADICIONAL: Sidebar en móvil no debe tapar reproductor */
+        @media screen and (max-width: 768px) {
+            #sidebar {
+                /* Cuando el reproductor está activo, el sidebar debe ser más corto */
+                bottom: 0 !important;
+                padding-bottom: 0 !important;
+            }
+
+            body.player-active #sidebar {
+                bottom: 6rem !important;
+                /* Altura del reproductor */
+            }
+        }
+
+        /* 7. PROTECCIÓN: Safe area para iPhones con notch */
+        @supports (padding: max(0px)) {
+            @media screen and (max-width: 768px) {
+                #player-bar {
+                    padding-bottom: max(0.75rem, env(safe-area-inset-bottom)) !important;
+                }
+
+                .fixed.bottom-6.right-6 {
+                    bottom: max(10rem, calc(10rem + env(safe-area-inset-bottom))) !important;
+                }
+            }
+        }
+        /* ========== MODO TV: MÁXIMO RENDIMIENTO (LITE) ========== */
+        body.tv-mode *,
+        body.tv-mode *::before,
+        body.tv-mode *::after {
+            animation: none !important;
+            transition: none !important;
+            box-shadow: none !important;
+            text-shadow: none !important;
+            backdrop-filter: none !important;
+            filter: none !important;
+        }
+
+        body.tv-mode .bg-noise::before,
+        body.tv-mode .bg-grid-pattern,
+        body.tv-mode #visualizer,
+        body.tv-mode .kraken-neon-filter,
+        body.tv-mode .vortex-logo-fixed,
+        body.tv-mode #loader,
+        body.tv-mode .group:hover .kraken-neon-filter {
+            display: none !important;
+            animation: none !important;
+            filter: none !important;
+        }
+
+        /* Tailwind CDN overrides para TV */
+        body.tv-mode .animate-fade-in,
+        body.tv-mode .animate-slide-in,
+        body.tv-mode .animate-float,
+        body.tv-mode .animate-shimmer,
+        body.tv-mode .content-transition,
+        body.tv-mode .card-entry,
+        body.tv-mode [class*="animate-"] {
+            animation: none !important;
+            transition: none !important;
+        }
+
+        /* Elementos interactivos simplificados */
+        body.tv-mode button,
+        body.tv-mode .card-interactive,
+        body.tv-mode .list-row,
+        body.tv-mode .sidebar-link,
+        body.tv-mode input {
+            min-height: 52px !important;
+            font-size: 14px !important;
+            border-radius: 8px !important;
+        }
+
+        body.tv-mode button:focus,
+        body.tv-mode .card-interactive:focus,
+        body.tv-mode .list-row:focus,
+        body.tv-mode .sidebar-link:focus,
+        body.tv-mode input:focus {
+            outline: 4px solid #10b981 !important;
+            outline-offset: 2px;
+            border-color: #10b981 !important;
+            transform: none !important;
+            background: #064e3b !important; /* Esmeralda oscuro sólido */
+        }
+
+        body.tv-mode {
+            cursor: none !important;
+            background: #000000 !important; /* Negro absoluto */
+        }
+        .duplicates-group-lists {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        @media (max-width: 640px) {
+            .duplicates-group-lists {
+                grid-template-columns: 1fr;
+            }
+
+            .duplicates-group-lists > div:first-child {
+                border-right: 0 !important;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+            }
+        }

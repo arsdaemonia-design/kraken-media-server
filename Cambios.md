@@ -10,7 +10,7 @@ Kraken es un servidor multimedia local con modo online/offline. Permite:
 - Acceso via LAN o Cloudflare tunnel
 
 ## VersiÃ³n Actual
-- **v4.92** (2026-04-17)
+- **v5.0.1** (2026-10-22)
 
 ---
 
@@ -1799,8 +1799,51 @@ Tercera y Ãºltima etapa de la unificaciÃ³n del render de video. AdemÃ¡s, s
 - **Auto-ocultado de controles en pantalla completa**: la barra inferior de controles, el titulo y el boton volver ahora se ocultan automaticamente tras 4 segundos de inactividad, evitando que se queden visibles en dispositivos tactiles y tabletas debido a estados de hover residuales.
 - **Limpieza de titulos en reproductor**: se eliminaron extensiones de archivo y sufijos de identificadores TMDB de la barra superior del reproductor.
 - **Compilacion de instalador v4.99.1**: actualizado `kraken_installer.iss` a version 4.99.1 y generado `dist/Kraken_Media_Server_Installer_v4.99.1.exe`.
-- **API liviana para Android TV (`GET /api/tv/library`)**: implementado en `routes/api.py` con paginacion compacta (1 a 60 elementos), requerimiento estricto de sesion Bearer o cookie, soporte de modo ninos y proteccion de contenido para adultos mediante cabecera `X-Master-Pin`.
-- **Cache de miniaturas para TV (`GET /api/tv/poster/<path>`)**: implementado en `routes/api.py`. Redimensiona caratulas a 185x278 JPEG (calidad 82, ~18 KB) y las cachea en `THUMBNAILS_FOLDER/tv_cache` con cabeceras `Cache-Control: public, max-age=31536000, immutable`. Se corrigio el manejo de passthrough de Flask (`source.direct_passthrough = False`).
+- **API liviana para Android TV (`GET /api/tv/library`)**: implementado en `routes/api.py` con paginacion compacta (1 a 60 elementos), validacion JWT Bearer en `Authorization` (sin cookie en `get_user_from_request()`), soporte de modo ninos y proteccion de contenido para adultos mediante cabecera `X-Master-Pin`.
+- **Cache de miniaturas para TV (`GET /api/tv/poster/<path>`)**: implementado en `routes/api.py`. Redimensiona caratulas a 185x278 JPEG (calidad 82; ~18 KB fue una muestra, no un tamaño garantizado) y las cachea en `THUMBNAILS_FOLDER/tv_cache` con cabeceras `Cache-Control: public, max-age=31536000, immutable`. Se corrigio el manejo de passthrough de Flask (`source.direct_passthrough = False`). La conversión actual es síncrona dentro de la petición y esta ruta no valida Bearer explícitamente.
 - **Seguridad en tokens de reproduccion (+18)**: en `POST /api/stream/token` y `routes/hls.py`, los videos marcados como adultos validan el PIN maestro antes de emitir el token y al iniciar el streaming HLS (`adult_authorized`), devolviendo 403 Forbidden si no esta autorizado.
-- **Cliente nativo Android TV (`KrakenTV`)**: creado en `../KrakenTV` con Kotlin, AndroidX Leanback y Media3 (ExoPlayer), arquitectura solo armeabi-v7a para bajo consumo (<80 MB RAM), manifiesto LEANBACK_LAUNCHER y navegacion 100% por D-Pad.
+- **Cliente nativo Android TV (`KrakenTV`)**: creado en `../KrakenTV` con Kotlin, AndroidX Leanback y Media3 (ExoPlayer), arquitectura solo armeabi-v7a y manifiesto LEANBACK_LAUNCHER, navegacion por D-Pad; <80 MB queda como meta de diseno pendiente de medir.
 - **Limpieza y orden documental**: se archivaron documentos antiguos de diagnostico, analisis y notas de versiones previas a v4.99 en `_archive/docs_historicos/`, y se actualizo el `README.md` central con la documentacion del tunel Cloudflare, arquitectura de TV y estado del proyecto.
+
+#### Auditoria y ampliacion documental (20-Oct-2026)
+- Se reemplazo el README raiz por una guia de usuario ampliada con instalacion, primera configuracion, funciones de biblioteca, Cloudflare Tunnel, dominio propio, Google Cast, privacidad y resolucion de problemas.
+- Se agrego HISTORIAL_TECNICO.md con arquitectura, cronologia de avances, fallos y correcciones HLS, limites de la auditoria y una lista de validaciones recomendadas antes de distribuir.
+- Se corrigieron afirmaciones no respaldadas: autenticacion Bearer de /api/tv/library, procesamiento sincrono de miniaturas, ausencia del smoke script en Git y cifras de memoria/tamano como objetivos o muestras, no garantias.
+- KrakenTV incluye Gradle Wrapper 9.8.2; se instaló Android SDK 37/Build Tools 36.0.0 y se generó el APK debug. La validación visual sigue pendiente porque el AVD de teléfono quedó offline y no hay AVD Android TV configurado.
+
+#### Acceso Android TV por usuario o correo (20-Oct-2026)
+- La pantalla KrakenTV ofrece el campo `Usuario o correo` y conserva la entrada original. El endpoint `/api/auth/login` mantiene el acceso por email y busca también por `username` sin distinguir mayúsculas/minúsculas.
+- Si el usuario coincide con varias cuentas, el endpoint devuelve 409 y pide iniciar con correo para evitar elegir una cuenta ambigua.
+- La base local confirma que `Skaso` tiene asociado `arsdaemonia@gmail.com`; la dirección `skaso@kraken.local` no coincide con ese registro y provocaba el 404 `Usuario no encontrado`.
+
+#### Android TV: cierre del reproductor y catálogo de series (20-Oct-2026)
+- Se corrigió el tema de `PlayerActivity`: `AppCompatActivity` estaba heredando `Theme.Leanback`, por lo que Android lanzaba `IllegalStateException: You need to use a Theme.AppCompat theme` al iniciar el video. El reproductor ahora usa un tema `Theme.AppCompat.NoActionBar` dedicado.
+- `/api/tv/library` ahora agrupa los episodios por la ruta de la serie, conserva paginación sobre las tarjetas únicas y prioriza la carátula TMDB guardada; cuando no existe usa la miniatura nombrada como la carpeta de la serie si está disponible.
+- Se agregó `GET /api/tv/episodes?path=...` para mostrar los episodios de una serie al abrir su tarjeta, conservando filtros de contenido oculto, modo niños y PIN maestro.
+- Kraken TV muestra la serie como una sola tarjeta; al seleccionarla obtiene sus episodios y permite iniciar el reproductor. El servidor que atiende al cliente debe ejecutar este backend actualizado para ofrecer el nuevo contrato.
+- El APK debug se recompiló e instaló en el AVD Android TV. El usuario confirmó que un video ya reproduce; quedan pendientes pruebas adicionales de HLS, pistas, reanudación y perfiles de contenido.
+
+#### Android TV: navegación por temporadas y catálogo visual (20-Oct-2026)
+- Se corrigió la detección de la carpeta raíz de serie para rutas con temporadas anidadas: el grupo termina antes de la carpeta `Season`/`Temporada`, en lugar de agrupar por una profundidad fija de tres segmentos. `/api/tv/episodes` acepta ahora rutas de serie de distintas profundidades, manteniendo la validación de segmentos y filtros de acceso.
+- El endpoint de episodios usa el nombre del archivo multimedia sin extensión para diferenciarlos cuando el campo `title` del catálogo contiene el título general de la serie. KrakenTV normaliza nombres como `Season 1` y `Temporada 1` para presentarlos en una sola temporada.
+- KrakenTV sigue cargando todas las páginas en segundo plano, agrega episodios sueltos como una sola tarjeta por serie y permite seleccionar temporada y episodio. Se oscureció el fondo y se adaptó el color de los diálogos al tema Kraken.
+- Verificación local: `:app:assembleDebug` completó y el APK se instaló/abrió en el AVD Android TV. El catálogo muestra carruseles de películas y series. La revisión detectó que varias portadas de serie siguen siendo oscuras o genéricas; revisar el origen de sus posters y metadatos en Kraken antes de atribuirlo al render del cliente.
+
+#### Versión 5.0.0 & 5.0.1 — Arquitectura Modular, Watch Party & Control Cinemático (22-Oct-2026)
+- **Modularización del Backend**: división de `app.py` en blueprints independientes (`routes/api.py`, `routes/media.py`, `routes/hls.py`, `routes/tv_api.py`) y servicios modulares (`services/library.py`, `services/database.py`, `services/auth.py`, `services/hls_transcoder.py`). Limpieza y estructuración del frontend en módulos JavaScript (`assets/js/`).
+- **Watch Party y Salas Compartidas**:
+  - Control de sincronización remota bidireccional entre anfitrión y participantes (Play, Pause, Seek).
+  - Danmaku de chat interactivo en pantalla de video: renderizado de reacciones con super-emojis (56px) con animación `emojiPopBounce`, y mensajes de texto estilizados con avatar y animación de entrada/salida flotante.
+  - El Danmaku se muestra estrictamente en la pantalla que reproduce el video (`isVideoActiveHere`).
+  - Barra rápida de emojis integrada en los controles del reproductor web que se auto-oculta tras 3 segundos o en pantalla completa.
+  - Modo Control / Móvil de acompañamiento: rescate mediante píldora flotante persistente ("Chat con Nico / Watch Party") únicamente visible en el dispositivo remoto cuando no está reproduciendo video, permitiendo reabrir el chat o los controles fácilmente.
+- **Cliente Android TV (KrakenTV v5.0.1)**:
+  - Soporte en `TvRadarManager.kt` para procesar comandos de Watch Party (`party_chat_` y `watch_party_sync_`).
+  - Actualizado `versionCode = 3`, `versionName = "5.0.1"`.
+  - APK compilado y distribuido en `dist/KrakenMS_v5.0.1.apk`.
+- **Caché persistente y Cache-Busting**:
+  - Incremento global a versión `5.0.1` (`window.APP_VERSION = "5.0.1"`, `OFFLINE_VERSION = "5.0.1"`).
+  - Etiquetas `<script>` y `<link>` versionadas con `?v=5.0.1` en `index.html`.
+  - Service Worker `sw.js` v5.0.1 con soporte para borrado automático de cachés obsoletas (`kraken-app-*` y `kraken-offline-*`).
+- **Instalador de Windows**:
+  - Generado instalador `dist/Kraken_Media_Server_Installer_v5.0.1.exe` mediante Inno Setup 6, empaquetando el ejecutable `KrakenOffline.exe` actualizado con PyInstaller.

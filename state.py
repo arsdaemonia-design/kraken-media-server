@@ -47,7 +47,7 @@ def cleanup_inactive_users():
         try:
             with USERS_LOCK:
                 now = time_module.time()
-                to_remove = [sid for sid, data in ACTIVE_USERS.items() if now - data.get('last_ping', 0) > 15]
+                to_remove = [sid for sid, data in ACTIVE_USERS.items() if now - data.get('last_ping', 0) > 45]
                 for sid in to_remove:
                     del ACTIVE_USERS[sid]
                     PENDING_COMMANDS.pop(sid, None)

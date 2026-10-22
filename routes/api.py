@@ -387,18 +387,29 @@ def remote_control():
     action = data.get('action')
     from_name = data.get('from_name', 'Alguien')
     from_email = data.get('from_email', '')
+    from_sid = data.get('from_sid', '')
     
     if target_sid and action:
         command = {
             'action': action,
             'time': time.time(),
             'from_name': from_name,
-            'from_email': from_email
+            'from_email': from_email,
+            'from_sid': from_sid
         }
         with USERS_LOCK:
             queue = PENDING_COMMANDS.setdefault(target_sid, [])
             queue.append(command)
             queue_size = len(queue)
+
+            # Sincronizar mensajes de chat y sync con controladores y pantallas vinculadas (Cine Remote / Segunda Pantalla)
+            if action.startswith('party_chat_') or action.startswith('watch_party_sync_'):
+                for c_sid, t_sid in list(REMOTE_CONTROL_LINKS.items()):
+                    if t_sid == target_sid and c_sid != from_sid:
+                        PENDING_COMMANDS.setdefault(c_sid, []).append(command)
+                    elif c_sid == target_sid and t_sid != from_sid:
+                        PENDING_COMMANDS.setdefault(t_sid, []).append(command)
+
         return jsonify({'status': 'sent', 'target': target_sid, 'action': action, 'queued': queue_size})
     
     return jsonify({'status': 'error', 'msg': 'Faltan datos'})
@@ -1640,108 +1651,6 @@ def biblioteca():
 
     return jsonify(resp_data)
 
-
-@api_bp.route('/api/tv/library')
-def tv_library_page():
-    """Biblioteca de video liviana y paginada para clientes de TV nativos."""
-    try:
-        offset = max(0, int(request.args.get('offset', 0)))
-        limit = min(60, max(1, int(request.args.get('limit', 40))))
-    except (TypeError, ValueError):
-        return jsonify({'error': 'offset/limit inválidos'}), 400
-
-    user_email = get_user_from_request(request)
-    if not user_email:
-        return jsonify({'error': 'Sesión requerida'}), 401
-    is_kid_mode = False
-    conn = get_db()
-    try:
-        if user_email:
-            user = conn.execute('SELECT is_kid_mode FROM users WHERE email = ?', (user_email,)).fetchone()
-            is_kid_mode = bool(user and user['is_kid_mode'])
-
-        has_pin = request.headers.get('X-Master-Pin') == get_master_pin()
-        adult_exists = False
-        if not is_kid_mode:
-            adult_exists = bool(conn.execute(
-                "SELECT 1 FROM media WHERE media_type = 'video' AND COALESCE(is_adult, 0) = 1 LIMIT 1"
-            ).fetchone())
-
-        where = ["media_type = 'video'", 'COALESCE(is_hidden, 0) = 0']
-        params = []
-        if is_kid_mode:
-            where.append('COALESCE(is_adult, 0) = 0')
-        elif not has_pin:
-            where.append('COALESCE(is_adult, 0) = 0')
-        if is_kid_mode:
-            where.append("UPPER(TRIM(COALESCE(tmdb_rating, ''))) NOT IN ('PG-13','R','NC-17','TV-14','TV-MA','18','16','16+','18+','MA15+','M','C','D','MA','R18+','R15+')")
-        where_sql = ' AND '.join(where)
-        total = conn.execute(f'SELECT COUNT(*) FROM media WHERE {where_sql}', params).fetchone()[0]
-        rows = conn.execute(f"""
-            SELECT id, rel_path, filename, title, tmdb_title, tmdb_year,
-                   tmdb_poster, folder_type, is_adult
-            FROM media WHERE {where_sql}
-            ORDER BY COALESCE(tmdb_title, title, filename), id
-            LIMIT ? OFFSET ?
-        """, (*params, limit, offset)).fetchall()
-        items = []
-        for row in rows:
-            items.append({
-                'id': row['id'],
-                'title': row['tmdb_title'] or row['title'] or row['filename'],
-                'path': row['rel_path'],
-                'poster': row['tmdb_poster'] or row['rel_path'],
-                'category': row['folder_type'] or 'Videos',
-                'year': row['tmdb_year'],
-                'is_adult': bool(row['is_adult'])
-            })
-        next_offset = offset + len(items)
-        return jsonify({
-            'items': items,
-            'offset': offset,
-            'limit': limit,
-            'total': total,
-            'next_offset': next_offset if next_offset < total else None,
-            'has_adult_vault': adult_exists,
-            'adult_unlocked': bool(has_pin and not is_kid_mode),
-            'is_kid_mode': is_kid_mode
-        })
-    finally:
-        conn.close()
-
-
-@api_bp.route('/api/tv/poster/<path:filename>')
-def tv_poster(filename):
-    """Serve a cached 185x278 JPEG derivative for low-memory TV clients."""
-    import hashlib
-    from flask import send_file
-
-    decoded = unquote(filename).lstrip('/\\')
-    cache_dir = os.path.join(THUMBNAILS_FOLDER, 'tv_cache')
-    cache_path = os.path.join(cache_dir, hashlib.sha256(decoded.encode('utf-8', errors='ignore')).hexdigest() + '.jpg')
-    if os.path.isfile(cache_path):
-        return send_file(cache_path, mimetype='image/jpeg', conditional=True, max_age=31536000)
-
-    source = caratula(decoded)
-    if source.status_code != 200:
-        return source
-    try:
-        source.direct_passthrough = False
-        raw_image = source.get_data()
-        source.close()
-        os.makedirs(cache_dir, exist_ok=True)
-        with Image.open(io.BytesIO(raw_image)) as image:
-            image = image.convert('RGB')
-            image.thumbnail((185, 278), Image.Resampling.LANCZOS)
-            canvas = Image.new('RGB', (185, 278), (12, 18, 17))
-            canvas.paste(image, ((185 - image.width) // 2, (278 - image.height) // 2))
-            canvas.save(cache_path, 'JPEG', quality=82, optimize=True)
-        response = send_file(cache_path, mimetype='image/jpeg', conditional=True, max_age=31536000)
-        response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
-        return response
-    except Exception:
-        return source
-
 @api_bp.route('/radio/artist/<path:artist_name>')
 def search_similar_artists_radio(artist_name):
     """
@@ -2106,10 +2015,11 @@ def status():
     needs_registration = False
     
     import config
-    db_email = auth_email if auth_email else config.SUPERADMIN_EMAIL
+    # Solo asociar a cuenta en DB si hay email autenticado (JWT o Cloudflare)
+    db_email = auth_email if auth_email else ''
 
-    # 2. CONSULTAR/CREAR USUARIO EN BD
-    if session_id:
+    # 2. CONSULTAR/CREAR USUARIO EN BD (Solo usuarios autenticados)
+    if session_id and db_email:
         try:
             conn = get_db()
             c = conn.cursor()
@@ -2146,6 +2056,9 @@ def status():
             conn.close()
         except Exception as e:
             print(f"Error en Radar DB: {e}")
+    elif session_id and not db_email:
+        if not final_username or final_username == 'Invitado':
+            final_username = device_name or 'Invitado'
 
     # 3. ACTUALIZAR ESTADO EN MEMORIA (Para velocidad)
     if session_id:
@@ -2233,7 +2146,7 @@ def status():
     response['controlled_target'] = linked_target
     
     # Retornamos flag global para forzar al frontend de ESTE cliente a registrarse
-    if session_id and session_id in ACTIVE_USERS:
+    if session_id and session_id in ACTIVE_USERS and db_email:
         response['my_email'] = db_email
     
     # CHEQUEO DE BUZÃ“N (CONTROL REMOTO)
@@ -2248,6 +2161,7 @@ def status():
             first_command = fresh_commands[0]
             response['remote_command'] = first_command.get('action')
             response['from_name'] = first_command.get('from_name', 'Alguien')
+            response['from_sid'] = first_command.get('from_sid', '')
         PENDING_COMMANDS.pop(session_id, None)
     
     return jsonify(response)
@@ -4045,39 +3959,55 @@ def auth_logout():
 def generate_stream_token():
     data = request.get_json() or {}
     media_id = data.get('id')
+    path = data.get('path')
     session_id = data.get('session_id')  # Opcional: asociar sesión al token
 
-    if media_id is None:
-        return jsonify({'error': 'Media ID requerido'}), 400
-
-    # El cliente debe haber desbloqueado Adult Vault con el PIN maestro antes
-    # de solicitar un token reproducible para contenido marcado como +18.
+    # La interfaz filtra contenido +18, pero la emisión del token también debe
+    # exigir el PIN: este endpoint puede invocarse directamente desde cualquier cliente.
     conn = None
     try:
         conn = get_db()
+        if media_id is None and path:
+            norm_path = str(path).replace('\\', '/').lstrip('/')
+            base_fname = os.path.basename(norm_path)
+            title_stem = os.path.splitext(base_fname)[0]
+            row = conn.execute(
+                "SELECT id FROM media WHERE rel_path = ? OR rel_path = ? OR rel_path LIKE ? OR title = ? OR title LIKE ? LIMIT 1",
+                (norm_path, norm_path.replace('/', '\\'), f"%{base_fname}", title_stem, f"%{title_stem}%")
+            ).fetchone()
+            if row:
+                media_id = row['id']
+
+        if media_id is None:
+            return jsonify({'error': 'Media ID requerido'}), 400
         media_row = conn.execute(
             "SELECT is_adult, tmdb_rating FROM media WHERE id = ? AND media_type = 'video'",
             (media_id,)
         ).fetchone()
+        if not media_row:
+            return jsonify({'error': 'Video no encontrado'}), 404
+
+        user_email = get_user_from_request(request)
+        user_row = conn.execute(
+            'SELECT is_kid_mode FROM users WHERE email = ?', (user_email,)
+        ).fetchone() if user_email else None
+        is_adult = bool(media_row['is_adult'])
+        blocked_ratings = {
+            'PG-13', 'R', 'NC-17', 'TV-14', 'TV-MA', '18', '16', '16+', '18+',
+            'MA15+', 'M', 'C', 'D', 'MA', 'R18+', 'R15+'
+        }
+        rating = str(media_row['tmdb_rating'] or '').upper().strip()
+        is_kid_mode = bool(user_row and user_row['is_kid_mode'])
+        if is_kid_mode and (is_adult or rating in blocked_ratings):
+            return jsonify({'error': 'Este contenido no está disponible en modo niños'}), 403
+        adult_authorized = is_adult and request.headers.get('X-Master-Pin') == get_master_pin()
+        if is_adult and not adult_authorized:
+            return jsonify({'error': 'Se requiere el PIN maestro para este contenido'}), 403
     except Exception as e:
         return jsonify({'error': f'No se pudo validar el contenido: {e}'}), 500
     finally:
         if conn:
             conn.close()
-    if not media_row:
-        return jsonify({'error': 'Video no encontrado'}), 404
-    is_adult = bool(media_row['is_adult'])
-    user_email = get_user_from_request(request)
-    if user_email:
-        conn = get_db()
-        user_row = conn.execute('SELECT is_kid_mode FROM users WHERE email = ?', (user_email,)).fetchone()
-        conn.close()
-        blocked_ratings = {'PG-13', 'R', 'NC-17', 'TV-14', 'TV-MA', '18', '16', '16+', '18+', 'MA15+', 'M', 'C', 'D', 'MA', 'R18+', 'R15+'}
-        rating = str(media_row['tmdb_rating'] or '').upper().strip()
-        if user_row and bool(user_row['is_kid_mode']) and (is_adult or rating in blocked_ratings):
-            return jsonify({'error': 'Este contenido no está disponible en modo niños'}), 403
-    if is_adult and request.headers.get('X-Master-Pin') != get_master_pin():
-        return jsonify({'error': 'Se requiere el PIN maestro para este contenido'}), 403
     
     import uuid
     import time
@@ -4087,7 +4017,7 @@ def generate_stream_token():
         'id': media_id,
         'expires': time.time() + (4 * 3600),  # Expira en 4 horas
         'sessions': [session_id] if session_id else [],
-        'adult_authorized': is_adult and request.headers.get('X-Master-Pin') == get_master_pin()
+        'adult_authorized': adult_authorized
     }
     state.STREAM_TOKENS[token] = token_data
     

@@ -17,6 +17,7 @@ import config
 from routes.api import api_bp
 from routes.media import media_bp
 from routes.hls import hls_bp
+from routes.tv_api import tv_bp
 from services import library, database
 from utils import check_ffmpeg
 from state import cleanup_inactive_users, cleanup_old_hls_sessions
@@ -29,6 +30,7 @@ Compress(app)
 app.register_blueprint(api_bp)
 app.register_blueprint(media_bp)
 app.register_blueprint(hls_bp)
+app.register_blueprint(tv_bp)
 
 # Register Alexa Handlers
 alexa_handlers.setup_alexa(app)
@@ -73,10 +75,13 @@ def run_server(open_browser: bool = False):
     hls_cleanup_thread = threading.Thread(target=cleanup_old_hls_sessions, daemon=True)
     hls_cleanup_thread.start()
 
+    port = int(os.environ.get('PORT', os.environ.get('KRAKEN_PORT', 5000)))
     if open_browser:
-        _open_browser_soon("http://127.0.0.1:5000")
+        _open_browser_soon(f"http://127.0.0.1:{port}")
 
-    app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
+    debug = os.environ.get('FLASK_DEBUG', os.environ.get('KRAKEN_DEBUG', 'False')).lower() in ('true', '1')
+    print(f"🚀 Kraken Media Server v5.0.1 (Modular) escuchando en http://127.0.0.1:{port} (LAN: http://0.0.0.0:{port}) [Debug: {debug}]")
+    app.run(host='0.0.0.0', port=port, debug=debug, use_reloader=False)
 
 if __name__ == '__main__':
     run_server(open_browser=False)

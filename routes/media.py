@@ -19,6 +19,16 @@ def index():
         html = f.read()
     return render_template_string(html)
 
+@media_bp.route('/sw.js')
+def serve_sw():
+    sw_path = os.path.join(config.BASE_DIR, 'sw.js')
+    if os.path.isfile(sw_path):
+        response = send_file(sw_path, mimetype='application/javascript')
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        return response
+    return "Service Worker not found", 404
+
+@media_bp.route('/stream/<path:filename>')
 @media_bp.route('/descargas/<path:filename>')
 def serve_file(filename):
     try:

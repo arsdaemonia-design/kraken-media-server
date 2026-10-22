@@ -1,13 +1,17 @@
 @echo off
 setlocal
-TITLE KRAKEN OFFLINE (Modo Remoto)
+TITLE KRAKEN OFFLINE (Modo Remoto + Tunnel - Puerto 5000)
 
 echo ==========================================
 echo   INICIANDO KRAKEN OFFLINE + TUNNEL
+echo   (Entorno Oficial - Puerto 5000)
 echo ==========================================
 echo.
 
 cd /d "%~dp0"
+
+set PORT=5000
+set KRAKEN_PORT=5000
 
 REM 1) Verificar venv
 if not exist "venv\Scripts\python.exe" (
@@ -29,9 +33,9 @@ if errorlevel 1 (
   )
 )
 
-REM 3) Iniciar servidor en ventana aparte (sin comillas rotas)
-echo Iniciando Kraken Offline...
-start "Kraken Offline" /D "%~dp0" cmd /k "venv\Scripts\python.exe app_offline.py"
+REM 3) Iniciar servidor en ventana aparte
+echo Iniciando Kraken Offline en puerto 5000...
+start "Kraken Offline (Modular 5000)" /D "%~dp0" cmd /k "set PORT=5000 & set KRAKEN_PORT=5000 & venv\Scripts\python.exe app_offline.py"
 
 REM 4) Esperar a que el servidor arranque (pywebview abre la ventana)
 timeout /t 5 /nobreak >nul
@@ -43,7 +47,7 @@ echo  COPIA EL LINK QUE TERMINA EN .trycloudflare.com
 echo =====================================================
 echo.
 
-REM 5) Iniciar tunnel con ruta absoluta
+REM 5) Iniciar tunnel con ruta absoluta hacia puerto 5000
 if not exist "%~dp0cloudflared-windows-amd64.exe" (
   echo [ERROR] No se encontro cloudflared-windows-amd64.exe en:
   echo %~dp0

@@ -102,16 +102,20 @@ class HLSTranscoder:
             
             video_codec = video_stream.get('codec_name') if video_stream else None
             pix_fmt = video_stream.get('pix_fmt') if video_stream else None
+            width = int(video_stream.get('width', 0) or 0) if video_stream else 0
+            height = int(video_stream.get('height', 0) or 0) if video_stream else 0
+            is_over_1080p = (width > 1920 or height > 1080)
             
             friendly_audio = ['aac', 'mp3', 'opus', 'vorbis']
             audio_needs_transcode = not all(s.get('codec_name') in friendly_audio for s in audio_streams) if audio_streams else False
             
             # Para Direct Play en navegador (MP4/WebM):
             browser_friendly_video = ['h264', 'vp8', 'vp9', 'av1']
-            # Para HLS MPEG-TS sin recodificar (-c:v copy), el stream debe ser H.264 8-bit estándar:
+            # Para HLS MPEG-TS sin recodificar (-c:v copy), el stream debe ser H.264 8-bit estándar y no superar 1080p:
             hls_can_copy_video = (
                 video_codec == 'h264'
                 and (pix_fmt in ('yuv420p', 'yuvj420p', None))
+                and not is_over_1080p
             )
             video_needs_transcode = not hls_can_copy_video
             
@@ -120,11 +124,13 @@ class HLSTranscoder:
             friendly_container = ['.mp4', '.webm', '.m4v']
             is_friendly_container = any(input_file.lower().endswith(ext) for ext in friendly_container)
             first_audio_friendly = (not audio_streams) or (audio_streams[0].get('codec_name') in friendly_audio)
+            # Para Direct Play: H.264 > 1080p (4K AVC) desborda decodificadores de hardware en Smart TVs / Android TV
             direct_play = (
                 is_friendly_container
                 and (video_codec in browser_friendly_video)
                 and (pix_fmt in ('yuv420p', 'yuvj420p', None))
                 and first_audio_friendly
+                and not (video_codec == 'h264' and is_over_1080p)
             )
             
             lang_map = {
@@ -187,6 +193,9 @@ class HLSTranscoder:
             return {
                 "video_codec": video_codec,
                 "pix_fmt": pix_fmt,
+                "width": width,
+                "height": height,
+                "is_over_1080p": is_over_1080p,
                 "hls_can_copy_video": hls_can_copy_video,
                 "can_remux": can_remux,
                 "needs_audio_transcode": audio_needs_transcode,
@@ -240,6 +249,9 @@ class HLSTranscoder:
 
         if needs_video_reencode:
             cmd += encoder_settings
+            # Solo escalar si es H.264 > 1080p porque los decodificadores de hardware de Smart TVs no soportan 4K en H.264
+            if analysis.get('is_over_1080p') and analysis.get('video_codec') == 'h264':
+                cmd += ["-vf", "scale='min(1920,iw)':-2"]
             cmd += ["-g", "48", "-force_key_frames", "expr:gte(t,n_forced*2)"]
             if video_encoder == "libx264":
                 cmd += ["-sc_threshold", "0"]
