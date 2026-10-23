@@ -2076,47 +2076,54 @@ def status():
         # Solo asociar a cuenta en DB si hay email autenticado (JWT o Cloudflare)
         db_email = auth_email if auth_email else ''
 
-        # 2. CONSULTAR/CREAR USUARIO EN BD (Solo usuarios autenticados)
-        if session_id and db_email:
+        # 2. CONSULTAR/CREAR USUARIO EN BD (Resuelve por email autenticado, username o SuperAdmin local)
+        if session_id:
             try:
                 conn = get_db()
                 c = conn.cursor()
-                c.execute("SELECT username, avatar_url, is_superadmin FROM users WHERE email = ?", (db_email,))
-                user_row = c.fetchone()
-            
+                user_row = None
+                if db_email:
+                    c.execute("SELECT email, username, avatar_url, is_superadmin FROM users WHERE email = ?", (db_email,))
+                    user_row = c.fetchone()
+                if not user_row and user_name_fallback and user_name_fallback not in ('Invitado', '', 'Anónimo'):
+                    c.execute("SELECT email, username, avatar_url, is_superadmin FROM users WHERE username = ? COLLATE NOCASE", (user_name_fallback,))
+                    user_row = c.fetchone()
+                if not user_row and not db_email and config.SUPERADMIN_EMAIL:
+                    c.execute("SELECT email, username, avatar_url, is_superadmin FROM users WHERE email = ?", (config.SUPERADMIN_EMAIL,))
+                    user_row = c.fetchone()
+
                 if user_row:
+                    db_email = user_row['email'] or db_email
                     final_username = user_row['username'] or final_username
                     avatar_url = user_row['avatar_url']
                     is_superadmin = bool(user_row['is_superadmin'])
-                
-                    # Auto-PromociÃ³n a Super Admin via Config
-                    import config
+
+                    # Auto-Promoción a Super Admin via Config
                     if config.SUPERADMIN_EMAIL and db_email.lower() == config.SUPERADMIN_EMAIL.lower() and not is_superadmin:
                         is_superadmin = True
                         c.execute("UPDATE users SET is_superadmin = 1 WHERE email = ?", (db_email,))
-                
+
                     c.execute("UPDATE users SET sid = ? WHERE email = ?", (session_id, db_email))
                     conn.commit()
-                
+
                     # Exigir registro si no tienen avatar (perfil incompleto)
                     if not avatar_url:
                         needs_registration = True
-                else:
+                elif db_email:
                     needs_registration = True
-                
-                    import config
+
                     is_admin = 1 if (config.SUPERADMIN_EMAIL and db_email.lower() == config.SUPERADMIN_EMAIL.lower()) else 0
                     is_superadmin = bool(is_admin)
-                
+
                     c.execute("INSERT INTO users (email, sid, username, is_superadmin, created_at) VALUES (?, ?, ?, ?, ?)", 
                               (db_email, session_id, final_username, is_admin, time.time()))
                     conn.commit()
+                else:
+                    if not final_username or final_username == 'Invitado':
+                        final_username = device_name or 'Invitado'
                 conn.close()
             except Exception as e:
                 print(f"Error en Radar DB: {e}")
-        elif session_id and not db_email:
-            if not final_username or final_username == 'Invitado':
-                final_username = device_name or 'Invitado'
 
         # 3. ACTUALIZAR ESTADO EN MEMORIA (Para velocidad)
         if session_id:

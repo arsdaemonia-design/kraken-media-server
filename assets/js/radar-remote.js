@@ -691,7 +691,7 @@
             ${editBtn}
             ${isSuperAdmin ? '<div class="absolute -top-2 left-1/2 -translate-x-1/2 text-[10px] z-50 text-yellow-400 drop-shadow-[0_0_5px_rgba(250,204,21,1)]" title="Kraken Master">👑</div>' : ''}
             
-            <div onclick="showControlMenu('${name}')" class="w-14 h-14 rounded-full overflow-hidden ${baseColor} ${ringColor} flex items-center justify-center text-lg font-bold text-white shadow-lg cursor-pointer relative z-30 hover:scale-110 transition-transform bg-zinc-800">
+            <div onclick="showControlMenu('${name}')" class="w-14 h-14 rounded-full overflow-hidden ${baseColor} ${ringColor} flex items-center justify-center text-lg font-bold text-white shadow-lg cursor-pointer relative z-30 hover:scale-110 transition-transform">
                 ${centerIcon}
                 ${count > 1 ? `<div class="absolute -bottom-1 -right-1 w-4 h-4 bg-black text-white text-[9px] rounded-full flex items-center justify-center border border-white/20">${count}</div>` : ''}
             </div>
