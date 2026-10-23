@@ -433,24 +433,49 @@ function showAdminPanel(pin) {
                     
                     <div id="content-invites" class="hidden">
                         <div class="mb-4">
-                            <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Duración del Código</label>
+                            <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Tipo de Invitación</label>
+                            <div class="grid grid-cols-2 gap-3 mb-4">
+                                <button type="button" id="btn-inv-type-std" onclick="selectInviteType('standard')" class="p-3 rounded-xl border border-emerald-500 bg-emerald-500/20 text-white font-bold text-xs text-center transition">
+                                    <i class="fa-solid fa-user-check mb-1 block text-base text-emerald-400"></i>
+                                    Permanente
+                                </button>
+                                <button type="button" id="btn-inv-type-beta" onclick="selectInviteType('beta')" class="p-3 rounded-xl border border-white/10 bg-white/5 text-zinc-400 font-bold text-xs text-center hover:border-purple-500/50 transition">
+                                    <i class="fa-solid fa-flask mb-1 block text-base text-purple-400"></i>
+                                    Beta Temporal
+                                </button>
+                            </div>
+
+                            <div id="beta-trial-config-box" class="hidden mb-4 p-4 rounded-xl bg-purple-950/20 border border-purple-500/30">
+                                <label class="block text-xs font-bold text-purple-300 uppercase tracking-widest mb-2">Duración de la Prueba Beta</label>
+                                <select id="beta-trial-hours" class="w-full bg-black/60 border border-purple-500/30 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-purple-400 transition">
+                                    <option value="24">24 horas (1 día)</option>
+                                    <option value="48">48 horas (2 días)</option>
+                                    <option value="72" selected>72 horas (3 días - Recomendado)</option>
+                                    <option value="168">7 días (1 semana)</option>
+                                    <option value="336">14 días (2 semanas)</option>
+                                    <option value="720">30 días (1 mes)</option>
+                                </select>
+                                <p class="text-[11px] text-zinc-400 mt-2">La cuenta del usuario caducará al cumplirse este período tras su registro.</p>
+                            </div>
+
+                            <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Validez del Código de Invitación</label>
                             <select id="invite-duration" class="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition mb-4">
-                                <option value="0">Nunca expira</option>
-                                <option value="5">5 minutos</option>
                                 <option value="60">1 hora</option>
-                                <option value="1440">24 horas</option>
+                                <option value="1440" selected>24 horas</option>
                                 <option value="10080">1 semana</option>
+                                <option value="0">Nunca expira</option>
                             </select>
-                            <button onclick="adminGenerateInvite()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-xl font-bold mr-3">
+                            <button onclick="adminGenerateInvite()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-xl font-bold mr-3 transition shadow-lg shadow-emerald-950">
                                 <i class="fa-solid fa-ticket mr-2"></i> Generar Código
                             </button>
-                            <div id="invite-code-display" class="mt-4 p-4 bg-zinc-800 rounded-xl hidden">
+                            <div id="invite-code-display" class="mt-4 p-4 bg-zinc-800 rounded-xl hidden border border-white/10">
                                 <div class="text-sm text-zinc-400 mb-1">Código de invitación:</div>
-                                <div class="text-3xl font-bold text-yellow-400 tracking-widest" id="invite-code-text"></div>
+                                <div class="text-3xl font-bold text-yellow-400 tracking-widest font-mono" id="invite-code-text"></div>
                                 <div class="text-sm text-emerald-400 mt-2" id="invite-code-expiry"></div>
+                                <div class="text-xs text-purple-300 mt-1 font-semibold hidden" id="invite-code-beta-info"></div>
                             </div>
                         </div>
-                        <button onclick="adminClearInvites()" class="bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-500/30 px-4 py-2 rounded-lg text-sm">
+                        <button onclick="adminClearInvites()" class="bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-500/30 px-4 py-2 rounded-lg text-sm transition">
                                 <i class="fa-solid fa-trash mr-1"></i> Invalidar Todos
                             </button>
                         </div>
@@ -615,8 +640,14 @@ function loadAdminUsers() {
                             ${u.avatar_url ? '<img src="' + u.avatar_url + '" class="w-full h-full object-cover">' : (u.username ? u.username.charAt(0).toUpperCase() : '🐙')}
                         </div>
                         <div>
-                            <div class="text-white font-medium">${u.username}</div>
-                            <div class="text-zinc-500 text-xs">${u.email} ${u.is_superadmin ? '<span class="text-yellow-400">ADMIN</span>' : ''}</div>
+                            <div class="text-white font-medium flex items-center gap-2">
+                                <span>${u.username}</span>
+                                ${u.is_superadmin ? '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40">ADMIN</span>' : (u.role === 'beta' ? (u.is_expired ? '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-red-500/20 text-red-400 border border-red-500/40">BETA EXPIRADO</span>' : '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">BETA</span>') : '<span class="px-2 py-0.5 rounded text-[9px] font-medium bg-zinc-700/40 text-zinc-400">USUARIO</span>')}
+                            </div>
+                            <div class="text-zinc-500 text-xs flex items-center gap-2">
+                                <span>${u.email}</span>
+                                ${u.trial_expires_at && !u.is_superadmin ? `<span class="text-[10px] text-purple-300">${u.is_expired ? 'Caducó' : 'Expira'}: ${new Date(u.trial_expires_at * 1000).toLocaleDateString()}</span>` : ''}
+                            </div>
                         </div>
                     </div>
                     ${!u.is_superadmin ? `
@@ -630,6 +661,9 @@ function loadAdminUsers() {
                                 </button>
                             </div>
                             <div class="flex gap-2 ml-2">
+                                <button onclick="adminOpenRoleModal('${u.email}', '${u.role || 'user'}', ${u.trial_expires_at || 'null'})" class="text-purple-400 hover:text-purple-300 text-sm" title="Gestionar rol / prueba beta">
+                                    <i class="fa-solid fa-user-shield"></i>
+                                </button>
                                 <button onclick="adminOpenEditUserModal('${u.email}', '${encodeURIComponent(u.username || '')}', '${encodeURIComponent(u.avatar_url || '')}')" class="text-cyan-400 hover:text-cyan-300 text-sm" title="Editar usuario">
                                     <i class="fa-solid fa-user-pen"></i>
                                 </button>
@@ -927,15 +961,41 @@ async function adminSaveUserEdit(email) {
  * `adminGenerateInvite()`
  * Genera un código de invitación temporal para registro de nuevos usuarios.
  */
+window._selectedInviteType = 'standard';
+
+function selectInviteType(type) {
+    window._selectedInviteType = type;
+    const btnStd = document.getElementById('btn-inv-type-std');
+    const btnBeta = document.getElementById('btn-inv-type-beta');
+    const betaBox = document.getElementById('beta-trial-config-box');
+
+    if (type === 'beta') {
+        btnBeta.className = 'p-3 rounded-xl border border-purple-500 bg-purple-500/20 text-white font-bold text-xs text-center transition';
+        btnStd.className = 'p-3 rounded-xl border border-white/10 bg-white/5 text-zinc-400 font-bold text-xs text-center hover:border-emerald-500/50 transition';
+        if (betaBox) betaBox.classList.remove('hidden');
+    } else {
+        btnStd.className = 'p-3 rounded-xl border border-emerald-500 bg-emerald-500/20 text-white font-bold text-xs text-center transition';
+        btnBeta.className = 'p-3 rounded-xl border border-white/10 bg-white/5 text-zinc-400 font-bold text-xs text-center hover:border-purple-500/50 transition';
+        if (betaBox) betaBox.classList.add('hidden');
+    }
+}
+
 function adminGenerateInvite() {
-    const duration = parseInt(document.getElementById('invite-duration')?.value || '0');
+    const duration = parseInt(document.getElementById('invite-duration')?.value || '1440');
+    const isBeta = (window._selectedInviteType === 'beta');
+    const trialHours = isBeta ? parseFloat(document.getElementById('beta-trial-hours')?.value || '72') : 0;
+
     fetch('/api/admin/invite', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer ' + (window.krakenAuth?.getToken() || '')
         },
-        body: JSON.stringify({ duration_minutes: duration })
+        body: JSON.stringify({
+            duration_minutes: duration,
+            is_beta: isBeta,
+            trial_hours: trialHours
+        })
     })
         .then(r => r.json())
         .then(d => {
@@ -943,18 +1003,112 @@ function adminGenerateInvite() {
                 const display = document.getElementById('invite-code-display');
                 document.getElementById('invite-code-text').textContent = d.code;
 
-                let expiryText = 'Nunca expira';
+                let expiryText = 'Código permanente';
                 if (d.duration_text) {
-                    expiryText = 'Expira en: ' + d.duration_text;
+                    expiryText = 'Código válido por: ' + d.duration_text;
                 } else if (d.expires_at) {
                     const date = new Date(d.expires_at * 1000);
-                    expiryText = 'Expira: ' + date.toLocaleString();
+                    expiryText = 'Código expira: ' + date.toLocaleString();
                 }
                 document.getElementById('invite-code-expiry').textContent = expiryText;
+
+                const betaInfo = document.getElementById('invite-code-beta-info');
+                if (betaInfo) {
+                    if (d.is_beta) {
+                        betaInfo.textContent = `Cuenta Beta: ${d.trial_text || (d.trial_hours + 'h')} de acceso de prueba`;
+                        betaInfo.classList.remove('hidden');
+                    } else {
+                        betaInfo.classList.add('hidden');
+                    }
+                }
 
                 display.classList.remove('hidden');
             }
         });
+}
+
+function adminOpenRoleModal(email, currentRole, currentExpiry) {
+    const oldModal = document.getElementById('admin-role-modal');
+    if (oldModal) oldModal.remove();
+
+    const isBeta = (currentRole === 'beta');
+    const expiryText = currentExpiry ? new Date(currentExpiry * 1000).toLocaleString() : 'Sin expiración';
+
+    const modalHtml = `
+    <div id="admin-role-modal" class="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-zinc-900 border border-white/10 rounded-2xl w-full max-w-sm p-6 shadow-2xl relative">
+            <h3 class="text-white font-bold text-lg mb-1 flex items-center gap-2">
+                <i class="fa-solid fa-user-shield text-purple-400"></i> Membresía / Rol
+            </h3>
+            <p class="text-zinc-400 text-xs mb-4 truncate">${email}</p>
+
+            <div class="space-y-4 mb-6">
+                <div>
+                    <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1.5">Rol de usuario</label>
+                    <select id="admin-role-select" onchange="toggleRoleExpirySection(this.value)" class="w-full bg-black/50 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500">
+                        <option value="user" ${!isBeta ? 'selected' : ''}>Usuario Estándar (Permanente)</option>
+                        <option value="beta" ${isBeta ? 'selected' : ''}>Usuario Beta (Temporal con Expiración)</option>
+                    </select>
+                </div>
+
+                <div id="admin-role-beta-opts" class="${isBeta ? '' : 'hidden'} space-y-3 bg-purple-950/20 border border-purple-500/20 p-3 rounded-xl">
+                    <div class="text-[11px] text-zinc-300">Expiración actual: <strong class="text-purple-300">${expiryText}</strong></div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-purple-300 uppercase tracking-widest mb-1">Añadir / Establecer Tiempo</label>
+                        <select id="admin-role-extend" class="w-full bg-black/60 border border-purple-500/30 rounded-xl px-3 py-2 text-white text-xs">
+                            <option value="24">+24 horas (1 día)</option>
+                            <option value="72" selected>+3 días (72h)</option>
+                            <option value="168">+7 días (1 semana)</option>
+                            <option value="720">+30 días (1 mes)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex gap-2">
+                <button onclick="document.getElementById('admin-role-modal').remove()" class="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-2.5 rounded-xl text-xs transition">Cancelar</button>
+                <button onclick="adminSaveUserRole('${email}')" class="flex-1 bg-purple-600 hover:bg-purple-500 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-lg shadow-purple-950">Guardar</button>
+            </div>
+        </div>
+    </div>`;
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+function toggleRoleExpirySection(role) {
+    const opts = document.getElementById('admin-role-beta-opts');
+    if (opts) {
+        if (role === 'beta') opts.classList.remove('hidden');
+        else opts.classList.add('hidden');
+    }
+}
+
+async function adminSaveUserRole(email) {
+    const role = document.getElementById('admin-role-select')?.value || 'user';
+    const extendHours = parseFloat(document.getElementById('admin-role-extend')?.value || '72');
+
+    try {
+        const token = window.krakenAuth?.getToken() || '';
+        const res = await fetch('/api/admin/users/' + encodeURIComponent(email) + '/role', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            },
+            body: JSON.stringify({ role: role, trial_hours: extendHours })
+        });
+        const d = await res.json();
+        if (d.ok) {
+            document.getElementById('admin-role-modal')?.remove();
+            if (typeof showToast === 'function') showToast('Rol actualizado correctamente', 'success');
+            loadAdminUsers();
+        } else {
+            alert('Error: ' + (d.error || 'No se pudo actualizar'));
+        }
+    } catch (e) {
+        console.error('Error saving user role:', e);
+        alert('Error de red al actualizar rol');
+    }
 }
 
 /**

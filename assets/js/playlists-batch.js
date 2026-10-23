@@ -476,6 +476,9 @@ function openContextMenu(event, path) {
 
         <div style="display: flex; flex-direction: column; gap: 8px;">
         ${remotePlayBtn}
+        <button onclick="ctxAction('share')" style="background: transparent; border: none; width: 100%; padding: 12px; color: #a78bfa; text-align: left; font-size: 14px; display: flex; align-items: center; gap: 15px; cursor: pointer; border-radius: 8px;" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'">
+                <i class="fa-solid fa-share-nodes" style="width: 20px; text-align: center;"></i> Compartir enlace seguro
+        </button>
         <button onclick="ctxAction('edit')" style="background: transparent; border: none; width: 100%; padding: 12px; color: #fbbf24; text-align: left; font-size: 14px; display: flex; align-items: center; gap: 15px; cursor: pointer; border-radius: 8px;" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'">
                 <i class="fa-solid fa-pen-to-square" style="width: 20px; text-align: center;"></i> Editar etiquetas
             </button>
@@ -531,6 +534,11 @@ function openContextMenu(event, path) {
             if (action === 'send_remote') {
                 const file = libData?.files?.find(f => f.path === currentContextPath);
                 sendFileToControlledDevice(file || { path: currentContextPath, title: currentContextPath.split('/').pop(), artist: '', type: 'audio' });
+            }
+            if (action === 'share') {
+                if (typeof openShareModal === 'function') {
+                    openShareModal(currentContextPath);
+                }
             }
             if (action === 'edit') abrirEditorMasivo(currentContextPath);
             if (action === 'move') abrirMover(currentContextPath);

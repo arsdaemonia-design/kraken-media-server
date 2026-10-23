@@ -126,6 +126,19 @@ def init_db():
     )
     ''')
     
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS shared_links (
+        token TEXT PRIMARY KEY,
+        media_id INTEGER NOT NULL,
+        created_by TEXT,
+        created_at REAL DEFAULT (datetime('now')),
+        expires_at REAL NOT NULL,
+        views_count INTEGER DEFAULT 0,
+        media_type TEXT DEFAULT 'audio',
+        FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
+    )
+    ''')
+    
     conn.commit()
     
     # Add 'language' column to media table if it doesn't exist
@@ -278,6 +291,8 @@ def init_db():
         ("is_superadmin", "BOOLEAN DEFAULT 0"),
         ("created_at", "REAL"),
         ("pin_hash", "TEXT DEFAULT NULL"),
+        ("role", "TEXT DEFAULT 'user'"),
+        ("trial_expires_at", "REAL DEFAULT NULL"),
     ]
     
     for col_name, col_type in user_columns:

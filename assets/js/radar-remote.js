@@ -207,6 +207,7 @@
             }
 
             const payload = JSON.stringify({
+                id: file.id || -1,
                 path: file.path,
                 title: file.title || '',
                 artist: file.artist || '',
@@ -980,6 +981,20 @@
             applyPlaybackTargetState(target);
             applyControlledTargetState(target);
             localStorage.setItem(KRAKEN_PLAYBACK_TARGET_KEY, target.session_id);
+
+            // Transferir música si está sonando localmente hacia la TV / pantalla:
+            const curAudio = (typeof playerQueue !== 'undefined' && currentTrackIndex >= 0) ? playerQueue[currentTrackIndex] : null;
+            if (curAudio && typeof audioElement !== 'undefined' && audioElement && !audioElement.paused) {
+                if (typeof sendFileToControlledDevice === 'function') {
+                    sendFileToControlledDevice(curAudio, target);
+                }
+                const curSec = Math.floor(audioElement.currentTime || 0);
+                setTimeout(() => {
+                    if (curSec > 0) sendCommand(targetSid, 'seek_to_' + curSec);
+                }, 1000);
+                audioElement.pause();
+                audioElement.src = '';
+            }
 
             document.getElementById('connect-devices-modal')?.remove();
             renderPlayerConnectIndicator();

@@ -656,3 +656,205 @@ function updateHeartButton(isFav) {
         actualizarVisuales(playerQueue[currentTrackIndex].path, isFav);
     }
 }
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SECURE EPHEMERAL SHARE MODAL & CONTROLLER
+// ══════════════════════════════════════════════════════════════════════════════
+
+window._pendingShareTrack = null;
+
+/**
+ * Abre el modal de compartir enlace temporal para una pista (objeto, path o la actual).
+ */
+function openShareModal(trackOrPath) {
+    let track = null;
+    if (trackOrPath && typeof trackOrPath === 'object') {
+        track = trackOrPath;
+    } else if (typeof trackOrPath === 'string') {
+        if (typeof libData !== 'undefined' && libData.files) {
+            track = libData.files.find(f => f.path === trackOrPath);
+        }
+        if (!track) {
+            track = { path: trackOrPath, title: trackOrPath.split('/').pop().replace(/\.[^/.]+$/, ''), artist: 'Kraken Audio' };
+        }
+    } else if (typeof currentTrackIndex !== 'undefined' && typeof playerQueue !== 'undefined' && playerQueue[currentTrackIndex]) {
+        track = playerQueue[currentTrackIndex];
+    } else if (typeof currentTrack !== 'undefined' && currentTrack) {
+        track = currentTrack;
+    }
+
+    if (!track || (!track.path && !track.id)) {
+        if (typeof showToast === 'function') {
+            showToast('Selecciona o reproduce una canción para compartir', 'warning');
+        } else {
+            alert('Selecciona o reproduce una canción para compartir');
+        }
+        return;
+    }
+
+    window._pendingShareTrack = track;
+
+    const modal = document.getElementById('share-modal');
+    if (!modal) return;
+
+    const titleEl = document.getElementById('share-modal-title');
+    const artistEl = document.getElementById('share-modal-artist');
+    const coverEl = document.getElementById('share-modal-cover');
+
+    if (titleEl) titleEl.textContent = track.title || track.filename || 'Pista Multimedia';
+    if (artistEl) artistEl.textContent = track.artist || 'Kraken';
+    if (coverEl) {
+        if (track.path) {
+            coverEl.src = '/caratula/' + encodeURIComponent(track.path);
+        } else if (track.id) {
+            coverEl.src = '/api/cover/' + track.id;
+        } else {
+            coverEl.src = '/static/default_cover.jpg';
+        }
+    }
+
+    // Resetear vistas
+    const resultBox = document.getElementById('share-result-box');
+    if (resultBox) resultBox.classList.add('hidden');
+    const btnDo = document.getElementById('btn-do-share');
+    if (btnDo) {
+        btnDo.disabled = false;
+        btnDo.innerHTML = '<i class="fa-solid fa-link"></i> Generar Enlace Temporal';
+    }
+
+    modal.classList.remove('hidden');
+}
+
+function closeShareModal() {
+    const modal = document.getElementById('share-modal');
+    if (modal) modal.classList.add('hidden');
+    window._pendingShareTrack = null;
+}
+
+async function submitCreateShareLink() {
+    const track = window._pendingShareTrack;
+    if (!track) return;
+
+    const durationSelect = document.getElementById('share-modal-duration');
+    const hours = parseFloat(durationSelect ? durationSelect.value : '24') || 24;
+
+    const btn = document.getElementById('btn-do-share');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Generando Enlace Cifrado...';
+    }
+
+    try {
+        const payload = {
+            expires_in_hours: hours,
+            media_id: track.id || undefined,
+            path: track.path || undefined
+        };
+
+        const token = window.krakenAuth?.getToken() || localStorage.getItem('kraken_auth_token') || '';
+        const res = await fetch('/api/share/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (data.ok && data.share_url) {
+            const urlInput = document.getElementById('share-result-url');
+            if (urlInput) urlInput.value = data.share_url;
+
+            const expDate = new Date(data.expires_at * 1000);
+            const expLabel = document.getElementById('share-expiry-label');
+            if (expLabel) {
+                expLabel.textContent = `Válido hasta: ${expDate.toLocaleDateString()} ${expDate.toLocaleTimeString()}`;
+            }
+
+            const nativeBtnWrap = document.getElementById('share-native-share-btn-wrap');
+            if (nativeBtnWrap) {
+                if (navigator.share) {
+                    nativeBtnWrap.classList.remove('hidden');
+                } else {
+                    nativeBtnWrap.classList.add('hidden');
+                }
+            }
+
+            const resultBox = document.getElementById('share-result-box');
+            if (resultBox) resultBox.classList.remove('hidden');
+
+            if (btn) btn.innerHTML = '<i class="fa-solid fa-check"></i> Enlace Listo';
+            
+            // Copiar automáticamente al portapapeles
+            copyShareResultUrl();
+        } else {
+            alert('Error generando enlace: ' + (data.error || 'Error desconocido'));
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-link"></i> Reintentar';
+            }
+        }
+    } catch (e) {
+        console.error('Error creating share link:', e);
+        alert('Error al contactar con el servidor');
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-link"></i> Reintentar';
+        }
+    }
+}
+
+function copyShareResultUrl() {
+    const urlInput = document.getElementById('share-result-url');
+    if (!urlInput || !urlInput.value) return;
+
+    const copyText = document.getElementById('share-copy-text');
+    const copyIcon = document.getElementById('share-copy-icon');
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(urlInput.value).then(() => {
+            if (copyText) copyText.textContent = '¡Copiado!';
+            if (copyIcon) copyIcon.className = 'fa-solid fa-check';
+            if (typeof showToast === 'function') {
+                showToast('¡Enlace seguro copiado al portapapeles!', 'success');
+            }
+            setTimeout(() => {
+                if (copyText) copyText.textContent = 'Copiar';
+                if (copyIcon) copyIcon.className = 'fa-regular fa-copy';
+            }, 2500);
+        }).catch(() => fallbackCopy(urlInput, copyText, copyIcon));
+    } else {
+        fallbackCopy(urlInput, copyText, copyIcon);
+    }
+}
+
+function fallbackCopy(input, textEl, iconEl) {
+    input.select();
+    input.setSelectionRange(0, 99999);
+    try {
+        document.execCommand('copy');
+        if (textEl) textEl.textContent = '¡Copiado!';
+        if (iconEl) iconEl.className = 'fa-solid fa-check';
+        if (typeof showToast === 'function') showToast('¡Enlace copiado!', 'success');
+        setTimeout(() => {
+            if (textEl) textEl.textContent = 'Copiar';
+            if (iconEl) iconEl.className = 'fa-regular fa-copy';
+        }, 2500);
+    } catch (e) {}
+}
+
+function nativeShareUrl() {
+    const urlInput = document.getElementById('share-result-url');
+    const track = window._pendingShareTrack;
+    if (!urlInput || !urlInput.value) return;
+
+    if (navigator.share) {
+        navigator.share({
+            title: track?.title || 'Compartido desde Kraken',
+            text: `Escucha "${track?.title || 'esta canción'}" en Kraken:`,
+            url: urlInput.value
+        }).catch(() => {});
+    }
+}

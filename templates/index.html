@@ -923,8 +923,10 @@
                     </div>
                     <button onclick="toggleFavorite()" id="btn-like-player" class="text-zinc-600 px-2 transition"><i
                             class="fa-regular fa-heart"></i></button>
-                    <button onclick="toggleLyrics()" class="text-zinc-600 px-2 transition"><i
+                    <button onclick="toggleLyrics()" class="text-zinc-600 px-2 transition" title="Ver Letra"><i
                             class="fa-solid fa-microphone-lines"></i></button>
+                    <button onclick="openShareModal()" class="text-zinc-500 hover:text-emerald-400 px-2 transition" title="Compartir enlace seguro"><i
+                            class="fa-solid fa-share-nodes"></i></button>
                     <button onclick="showConnectModal()" id="btn-connect-mobile" title="Dispositivos" class="text-zinc-500 hover:text-emerald-400 px-2 transition relative">
                         <i class="fa-solid fa-tower-broadcast"></i>
                         <span id="connect-indicator-mobile" class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-400 rounded-full border border-black hidden"></span>
@@ -987,6 +989,10 @@
                     <button onclick="toggleLyrics()" id="btn-lyrics-bar"
                         class="text-zinc-400 hover:text-emerald-400 transition p-2" title="Ver Letra">
                         <i class="fa-solid fa-microphone-lines"></i>
+                    </button>
+                    <button onclick="openShareModal()" id="btn-share-bar-desktop"
+                        class="text-zinc-400 hover:text-emerald-400 transition p-2" title="Compartir enlace seguro">
+                        <i class="fa-solid fa-share-nodes"></i>
                     </button>
                 </div>
 
@@ -1173,6 +1179,10 @@
                         class="text-zinc-600 hover:text-emerald-400 transition">
                         <i class="fa-regular fa-heart text-2xl"></i>
                     </button>
+                    <button onclick="openShareModal()" id="fp-share"
+                        class="text-zinc-500 hover:text-emerald-400 transition" title="Compartir enlace seguro">
+                        <i class="fa-solid fa-share-nodes text-2xl"></i>
+                    </button>
 
                     <button onclick="toggleQueue()" class="text-zinc-500 hover:text-emerald-400 transition">
                         <i class="fa-solid fa-list-ul text-xl"></i>
@@ -1234,6 +1244,69 @@
                     class="w-full bg-emerald-800 py-2 rounded-xl text-xs font-bold hover:bg-emerald-700 transition">Entendido</button>
             </div>
         </div>
+                <!-- Modal Compartir Enlace Seguro -->
+        <div id="share-modal" class="fixed inset-0 z-[140] bg-black/85 hidden flex items-center justify-center p-4 backdrop-blur-md">
+            <div class="bg-[#0f172a] p-6 rounded-2xl w-full max-w-md border border-emerald-500/40 shadow-2xl relative">
+                <button onclick="closeShareModal()" class="absolute top-4 right-4 text-zinc-400 hover:text-white transition">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                        <i class="fa-solid fa-share-nodes text-lg"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-lg text-white">Compartir Enlace Seguro</h3>
+                        <p class="text-xs text-emerald-400">Reproducción privada temporal sin login</p>
+                    </div>
+                </div>
+
+                <!-- Preview de la pista -->
+                <div class="flex items-center gap-3 bg-white/5 p-3 rounded-xl border border-white/10 mb-4">
+                    <img id="share-modal-cover" src="/static/default_cover.jpg" class="w-12 h-12 rounded-lg object-cover bg-zinc-800" onerror="this.src='/static/default_cover.jpg'">
+                    <div class="min-w-0 flex-1">
+                        <h4 id="share-modal-title" class="text-sm font-bold text-white truncate">Canción</h4>
+                        <p id="share-modal-artist" class="text-xs text-zinc-400 truncate">Artista</p>
+                    </div>
+                </div>
+
+                <!-- Selector de duración -->
+                <div id="share-duration-selector" class="space-y-2 mb-4">
+                    <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest">Duración del enlace</label>
+                    <select id="share-modal-duration" class="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition text-sm">
+                        <option value="1">1 hora</option>
+                        <option value="6">6 horas</option>
+                        <option value="24" selected>24 horas (Recomendado)</option>
+                        <option value="48">48 horas (2 días)</option>
+                        <option value="168">7 días (1 semana)</option>
+                    </select>
+                    <p class="text-[11px] text-zinc-400">Cualquiera con este enlace podrá reproducir esta pista de forma cifrada hasta que expire.</p>
+                </div>
+
+                <!-- Botón Generar -->
+                <button id="btn-do-share" onclick="submitCreateShareLink()" class="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-emerald-950 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-link"></i> Generar Enlace Temporal
+                </button>
+
+                <!-- Resultado -->
+                <div id="share-result-box" class="hidden mt-4 pt-4 border-t border-white/10 space-y-3">
+                    <label class="block text-xs font-bold text-emerald-400 uppercase tracking-widest">Enlace Listo para Compartir</label>
+                    <div class="flex items-center gap-2">
+                        <input id="share-result-url" type="text" readonly class="flex-1 bg-black/60 border border-emerald-500/40 rounded-xl px-3 py-2.5 text-xs text-emerald-300 font-mono focus:outline-none select-all">
+                        <button onclick="copyShareResultUrl()" class="bg-emerald-500 hover:bg-emerald-400 text-black px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center gap-1.5 shrink-0">
+                            <i class="fa-regular fa-copy" id="share-copy-icon"></i>
+                            <span id="share-copy-text">Copiar</span>
+                        </button>
+                    </div>
+                    <div id="share-native-share-btn-wrap" class="hidden">
+                        <button onclick="nativeShareUrl()" class="w-full bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/40 text-purple-300 py-2.5 rounded-xl font-bold text-xs transition flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-share"></i> Compartir mediante Apps
+                        </button>
+                    </div>
+                    <div class="text-[11px] text-zinc-400 text-center" id="share-expiry-label"></div>
+                </div>
+            </div>
+        </div>
+
         <div id="share-card-container"
             class="fixed top-0 left-0 w-0 h-0 overflow-hidden -z-50 pointer-events-none opacity-0">
             <div id="share-card"

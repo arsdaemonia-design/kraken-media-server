@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, send_file, render_template_string, Response, send_from_directory
-import os, time, json, shutil, subprocess, sys, threading, urllib.parse, re, copy
+import os, time, json, shutil, subprocess, sys, threading, urllib.parse, re, copy, secrets
 import io
 import logging
 from collections import deque
@@ -3312,14 +3312,25 @@ def auth_list_users():
     """Lista usuarios para la pantalla '¿Quién está viendo?'"""
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT email, username, avatar_url, is_superadmin, pin_hash FROM users ORDER BY created_at")
+    c.execute("PRAGMA table_info(users)")
+    cols = [r[1] for r in c.fetchall()]
+    sel_cols = ['email', 'username', 'avatar_url', 'is_superadmin', 'pin_hash']
+    if 'role' in cols: sel_cols.append('role')
+    if 'trial_expires_at' in cols: sel_cols.append('trial_expires_at')
+    c.execute(f"SELECT {', '.join(sel_cols)} FROM users ORDER BY created_at")
     users = []
+    now = time.time()
     for row in c.fetchall():
+        trial_exp = row['trial_expires_at'] if 'trial_expires_at' in cols else None
+        role_val = row['role'] if 'role' in cols and row['role'] else ('admin' if row['is_superadmin'] else 'user')
         users.append({
             'email': row['email'],
             'username': row['username'] or 'Usuario',
             'avatar_url': row['avatar_url'],
             'is_superadmin': bool(row['is_superadmin']),
+            'role': role_val,
+            'trial_expires_at': trial_exp,
+            'is_expired': bool(trial_exp and now > trial_exp),
             'has_password': bool(row['pin_hash'])
         })
     conn.close()
@@ -3341,6 +3352,10 @@ def admin_list_users():
         base_cols = ['email', 'username', 'avatar_url', 'is_superadmin', 'created_at']
         if 'is_kid_mode' in columns:
             base_cols.append('is_kid_mode')
+        if 'role' in columns:
+            base_cols.append('role')
+        if 'trial_expires_at' in columns:
+            base_cols.append('trial_expires_at')
         if 'id' in columns:
             base_cols.insert(0, 'id')
         
@@ -3349,14 +3364,20 @@ def admin_list_users():
         c.execute(query)
 
         users = []
+        now = time.time()
         for row in c.fetchall():
+            trial_exp = row['trial_expires_at'] if 'trial_expires_at' in columns else None
+            role_val = row['role'] if 'role' in columns and row['role'] else ('admin' if row['is_superadmin'] else 'user')
             user_data = {
                 'email': row['email'],
                 'username': row['username'] or 'Usuario',
                 'avatar_url': row['avatar_url'],
                 'is_superadmin': bool(row['is_superadmin']),
+                'role': role_val,
                 'created_at': row['created_at'],
-                'is_kid_mode': bool(row['is_kid_mode']) if 'is_kid_mode' in columns else False
+                'is_kid_mode': bool(row['is_kid_mode']) if 'is_kid_mode' in columns else False,
+                'trial_expires_at': trial_exp,
+                'is_expired': bool(trial_exp and now > trial_exp)
             }
             if 'id' in columns:
                 user_data['id'] = row['id']
@@ -3523,6 +3544,47 @@ def admin_toggle_kid_mode(email):
     return jsonify({'ok': True, 'is_kid_mode': is_kid_mode})
 
 
+@api_bp.route('/api/admin/users/<email>/role', methods=['PUT'])
+@require_admin
+def admin_update_user_role(email):
+    """Actualizar rol de usuario (usuario permanente o beta con expiración)."""
+    data = request.get_json() or {}
+    new_role = data.get('role', 'user')  # 'user' o 'beta'
+    trial_hours = float(data.get('trial_hours', 0))
+    if not trial_hours and data.get('trial_days'):
+        trial_hours = float(data.get('trial_days')) * 24.0
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT email, is_superadmin, trial_expires_at FROM users WHERE email = ?", (email,))
+    user = c.fetchone()
+    if not user:
+        conn.close()
+        return jsonify({'error': 'Usuario no encontrado'}), 404
+
+    if user['is_superadmin']:
+        conn.close()
+        return jsonify({'error': 'No se puede modificar el rol del superadministrador'}), 400
+
+    trial_expires_at = None
+    if new_role == 'beta':
+        base_time = max(time.time(), user['trial_expires_at'] or time.time())
+        trial_expires_at = base_time + (trial_hours * 3600 if trial_hours > 0 else 72 * 3600)
+    elif new_role == 'user':
+        trial_expires_at = None
+
+    c.execute("UPDATE users SET role = ?, trial_expires_at = ? WHERE email = ?", (new_role, trial_expires_at, email))
+    conn.commit()
+    conn.close()
+
+    security_logger.info(f'USER ROLE UPDATED: email={email} role={new_role} trial_expires_at={trial_expires_at}')
+    return jsonify({
+        'ok': True,
+        'role': new_role,
+        'trial_expires_at': trial_expires_at
+    })
+
+
 # ========================================
 # ADULT VAULT (Contenido Restringido)
 # ========================================
@@ -3633,26 +3695,44 @@ def adult_list_items():
 @api_bp.route('/api/admin/invite', methods=['POST'])
 @require_admin
 def admin_create_invite():
-    """Genera código de invitación con expiración configurable."""
+    """Genera código de invitación con expiración configurable y soporte para cuentas Beta."""
     data = request.get_json() or {}
-    # Duración en minutos: 0 = nunca expira, 5 = 5 min, 60 = 1 hora, 1440 = 24 horas
+    # Duración en minutos del código de invitación: 0 = nunca expira
     duration_minutes = data.get('duration_minutes', 0)
+    is_beta = data.get('is_beta', False)
+    trial_hours = float(data.get('trial_hours', 0))
+    if not trial_hours and data.get('trial_days'):
+        trial_hours = float(data.get('trial_days')) * 24.0
+    if trial_hours > 0:
+        is_beta = True
     
     code = generate_invite_code()
     if '_invite_codes' not in state.STREAM_TOKENS:
         state.STREAM_TOKENS['_invite_codes'] = {}
     
-    # Guardar tiempo de creación y duración
+    # Guardar tiempo de creación, duración y configuración beta
     state.STREAM_TOKENS['_invite_codes'][code] = {
         'created_at': time.time(),
         'duration_minutes': duration_minutes,
-        'expires_at': time.time() + (duration_minutes * 60) if duration_minutes > 0 else None
+        'expires_at': time.time() + (duration_minutes * 60) if duration_minutes > 0 else None,
+        'is_beta': bool(is_beta),
+        'trial_hours': trial_hours
     }
     
-    response = {'code': code}
+    response = {
+        'code': code,
+        'is_beta': bool(is_beta),
+        'trial_hours': trial_hours
+    }
     if duration_minutes > 0:
         response['expires_at'] = state.STREAM_TOKENS['_invite_codes'][code]['expires_at']
         response['duration_text'] = f'{duration_minutes} minutos' if duration_minutes < 60 else f'{duration_minutes // 60} horas'
+    if is_beta:
+        if trial_hours >= 24:
+            days = trial_hours / 24.0
+            response['trial_text'] = f"{int(days) if days.is_integer() else days} días"
+        else:
+            response['trial_text'] = f"{int(trial_hours) if trial_hours.is_integer() else trial_hours} horas"
     
     return jsonify(response)
 
@@ -3686,8 +3766,12 @@ def validate_invite_code():
     
     # Código válido - no lo consumimos, solo validamos
     response = {'valid': True}
-    if isinstance(code_data, dict) and code_data.get('expires_at'):
-        response['expires_at'] = code_data['expires_at']
+    if isinstance(code_data, dict):
+        if code_data.get('expires_at'):
+            response['expires_at'] = code_data['expires_at']
+        if code_data.get('is_beta'):
+            response['is_beta'] = True
+            response['trial_hours'] = code_data.get('trial_hours', 0)
     
     return jsonify(response)
 
@@ -3751,7 +3835,12 @@ def auth_login():
         
         conn = get_db()
         c = conn.cursor()
-        c.execute("SELECT email, username, avatar_url, is_superadmin, pin_hash FROM users WHERE email = ?", (email,))
+        c.execute("PRAGMA table_info(users)")
+        cols = [r[1] for r in c.fetchall()]
+        sel_cols = ['email', 'username', 'avatar_url', 'is_superadmin', 'pin_hash']
+        if 'role' in cols: sel_cols.append('role')
+        if 'trial_expires_at' in cols: sel_cols.append('trial_expires_at')
+        c.execute(f"SELECT {', '.join(sel_cols)} FROM users WHERE email = ?", (email,))
         user = c.fetchone()
         conn.close()
         
@@ -3769,17 +3858,28 @@ def auth_login():
                 "remaining_attempts": max(0, remaining)
             }), 401
 
+        trial_expires_at = user['trial_expires_at'] if 'trial_expires_at' in user.keys() else None
+        if trial_expires_at and time.time() > trial_expires_at:
+            security_logger.warning(f'LOGIN BETA EXPIRADO: email={email} IP={client_ip}')
+            return jsonify({
+                "error": "Tu período de prueba beta ha expirado. Contacta al administrador para renovar tu acceso.",
+                "expired": True
+            }), 403
+
         # Login successful - clear failed attempts
         _clear_failed_attempts(client_ip)
 
-        token = create_token(user['email'], user['username'] or '', bool(user['is_superadmin']))
-        security_logger.info(f'LOGIN EXITOSO: email={email} IP={client_ip} username={user["username"]}')
+        user_role = user['role'] if 'role' in user.keys() and user['role'] else ('admin' if user['is_superadmin'] else 'user')
+        token = create_token(user['email'], user['username'] or '', bool(user['is_superadmin']), expires_at=trial_expires_at, role=user_role)
+        security_logger.info(f'LOGIN EXITOSO: email={email} IP={client_ip} username={user["username"]} role={user_role}')
         return jsonify({
             'token': token,
             'email': user['email'],
             'username': user['username'],
             'avatar_url': user['avatar_url'],
-            'is_superadmin': bool(user['is_superadmin'])
+            'is_superadmin': bool(user['is_superadmin']),
+            'role': user_role,
+            'trial_expires_at': trial_expires_at
         })
     except Exception as e:
         import traceback
@@ -3811,6 +3911,9 @@ def auth_register():
         # Ya hay admin, necesita código de invitación
         return jsonify({"error": "Se requiere código de invitación"}), 403
     
+    role = 'user'
+    trial_expires_at = None
+
     if invite_code:
         # Validar código de invitación
         codes = state.STREAM_TOKENS.get('_invite_codes', {})
@@ -3826,6 +3929,12 @@ def auth_register():
                 conn.close()
                 return jsonify({"error": "Código de invitación expirado"}), 403
         
+        if isinstance(code_data, dict):
+            if code_data.get('is_beta') or code_data.get('trial_hours'):
+                role = 'beta'
+                trial_hours = float(code_data.get('trial_hours', 24))
+                trial_expires_at = time.time() + (trial_hours * 3600)
+
         # Consumir el código (un solo uso)
         del state.STREAM_TOKENS['_invite_codes'][invite_code]
     
@@ -3841,20 +3950,25 @@ def auth_register():
     
     password_hash = hash_password(password)
     is_admin = 1 if not has_admin else 0
+    if is_admin:
+        role = 'admin'
+        trial_expires_at = None
     
     c.execute("""
-        INSERT INTO users (email, username, avatar_url, is_superadmin, pin_hash, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (email, username, None, is_admin, password_hash, time.time()))
+        INSERT INTO users (email, username, avatar_url, is_superadmin, pin_hash, created_at, role, trial_expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (email, username, None, is_admin, password_hash, time.time(), role, trial_expires_at))
     conn.commit()
     conn.close()
     
-    token = create_token(email, username, bool(is_admin))
+    token = create_token(email, username, bool(is_admin), expires_at=trial_expires_at, role=role)
     return jsonify({
         'token': token,
         'email': email,
         'username': username,
-        'is_superadmin': bool(is_admin)
+        'is_superadmin': bool(is_admin),
+        'role': role,
+        'trial_expires_at': trial_expires_at
     })
 
 @api_bp.route('/api/auth/invite', methods=['POST'])
@@ -3914,19 +4028,35 @@ def auth_verify():
     
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT email, username, avatar_url, is_superadmin FROM users WHERE email = ?", (user_email,))
+    c.execute("PRAGMA table_info(users)")
+    cols = [r[1] for r in c.fetchall()]
+    sel_cols = ['email', 'username', 'avatar_url', 'is_superadmin']
+    if 'role' in cols: sel_cols.append('role')
+    if 'trial_expires_at' in cols: sel_cols.append('trial_expires_at')
+    c.execute(f"SELECT {', '.join(sel_cols)} FROM users WHERE email = ?", (user_email,))
     user = c.fetchone()
     conn.close()
     
     if not user:
         return jsonify({"valid": False}), 401
     
+    trial_expires_at = user['trial_expires_at'] if 'trial_expires_at' in user.keys() else None
+    if trial_expires_at and time.time() > trial_expires_at:
+        return jsonify({
+            "valid": False,
+            "expired": True,
+            "error": "Tu período de prueba beta ha expirado."
+        }), 403
+    
+    user_role = user['role'] if 'role' in user.keys() and user['role'] else ('admin' if user['is_superadmin'] else 'user')
     return jsonify({
         "valid": True,
         "email": user['email'],
         "username": user['username'],
         "avatar_url": user['avatar_url'],
-        "is_superadmin": bool(user['is_superadmin'])
+        "is_superadmin": bool(user['is_superadmin']),
+        "role": user_role,
+        "trial_expires_at": trial_expires_at
     })
 
 @api_bp.route('/api/auth/logout', methods=['POST'])
@@ -4595,3 +4725,318 @@ def download_online_subtitle():
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
 
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECURE EPHEMERAL SHARE LINKS (/share/<token>)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@api_bp.route('/api/share/create', methods=['POST'])
+def api_create_share_link():
+    """Crea un enlace compartido temporal y seguro para reproducir una canción sin login."""
+    user_email = get_user_from_request(request)
+    if not user_email:
+        return jsonify({'error': 'No autorizado'}), 401
+    
+    data = request.get_json() or {}
+    media_id = data.get('media_id')
+    path = data.get('path')
+    expires_in_hours = float(data.get('expires_in_hours', 24))
+    if expires_in_hours <= 0:
+        expires_in_hours = 24.0
+
+    conn = get_db()
+    c = conn.cursor()
+    
+    media = None
+    if media_id:
+        try:
+            c.execute("SELECT * FROM media WHERE id = ?", (int(media_id),))
+            media = c.fetchone()
+        except Exception:
+            pass
+    if not media and path:
+        norm = path.replace('\\', '/').lstrip('/')
+        c.execute("SELECT * FROM media WHERE rel_path = ? OR rel_path = ? OR filename = ?", 
+                  (norm, path, os.path.basename(path)))
+        media = c.fetchone()
+        
+    if not media:
+        conn.close()
+        return jsonify({'error': 'Pista multimedia no encontrada'}), 404
+
+    actual_media_id = media['id']
+    media_type = media['media_type'] or ('audio' if media['rel_path'].lower().endswith(('.mp3', '.flac', '.m4a', '.wav', '.ogg', '.opus', '.aac')) else 'video')
+    
+    token = secrets.token_urlsafe(16)
+    expires_at = time.time() + (expires_in_hours * 3600)
+    
+    c.execute("""
+        INSERT INTO shared_links (token, media_id, created_by, created_at, expires_at, views_count, media_type)
+        VALUES (?, ?, ?, ?, ?, 0, ?)
+    """, (token, actual_media_id, user_email, time.time(), expires_at, media_type))
+    conn.commit()
+    conn.close()
+    
+    base_url = request.host_url.rstrip('/')
+    share_url = f"{base_url}/share/{token}"
+    
+    security_logger.info(f'SHARE LINK CREATED: by={user_email} token={token} media_id={actual_media_id} exp_hours={expires_in_hours}')
+    return jsonify({
+        'ok': True,
+        'token': token,
+        'share_url': share_url,
+        'path': f"/share/{token}",
+        'expires_at': expires_at,
+        'duration_hours': expires_in_hours,
+        'title': media['title'] or media['filename'],
+        'artist': media['artist'] or 'Desconocido',
+        'media_type': media_type
+    })
+
+
+@api_bp.route('/api/share/list', methods=['GET'])
+def api_list_shares():
+    """Lista los enlaces compartidos del usuario actual o todos si es superadmin."""
+    user_email = get_user_from_request(request)
+    if not user_email:
+        return jsonify({'error': 'No autorizado'}), 401
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT is_superadmin FROM users WHERE email = ?", (user_email,))
+    u = c.fetchone()
+    is_admin = bool(u['is_superadmin']) if u else False
+
+    if is_admin:
+        c.execute("""
+            SELECT s.*, m.title, m.artist, m.album, m.rel_path
+            FROM shared_links s
+            LEFT JOIN media m ON s.media_id = m.id
+            ORDER BY s.created_at DESC
+        """)
+    else:
+        c.execute("""
+            SELECT s.*, m.title, m.artist, m.album, m.rel_path
+            FROM shared_links s
+            LEFT JOIN media m ON s.media_id = m.id
+            WHERE s.created_by = ?
+            ORDER BY s.created_at DESC
+        """, (user_email,))
+
+    rows = c.fetchall()
+    conn.close()
+
+    base_url = request.host_url.rstrip('/')
+    now = time.time()
+    items = []
+    for r in rows:
+        items.append({
+            'token': r['token'],
+            'media_id': r['media_id'],
+            'title': r['title'] or 'Desconocido',
+            'artist': r['artist'] or 'Desconocido',
+            'album': r['album'] or '',
+            'created_by': r['created_by'],
+            'created_at': r['created_at'],
+            'expires_at': r['expires_at'],
+            'is_expired': now > r['expires_at'],
+            'views_count': r['views_count'] or 0,
+            'media_type': r['media_type'],
+            'share_url': f"{base_url}/share/{r['token']}"
+        })
+
+    return jsonify({'items': items})
+
+
+@api_bp.route('/api/share/<token>', methods=['DELETE'])
+def api_delete_share(token):
+    """Elimina o revoca un enlace compartido."""
+    user_email = get_user_from_request(request)
+    if not user_email:
+        return jsonify({'error': 'No autorizado'}), 401
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT is_superadmin FROM users WHERE email = ?", (user_email,))
+    u = c.fetchone()
+    is_admin = bool(u['is_superadmin']) if u else False
+
+    if is_admin:
+        c.execute("DELETE FROM shared_links WHERE token = ?", (token,))
+    else:
+        c.execute("DELETE FROM shared_links WHERE token = ? AND created_by = ?", (token, user_email))
+    
+    deleted = c.rowcount > 0
+    conn.commit()
+    conn.close()
+
+    security_logger.info(f'SHARE LINK REVOKED: by={user_email} token={token} deleted={deleted}')
+    return jsonify({'ok': True, 'deleted': deleted})
+
+
+@api_bp.route('/share/<token>')
+def share_player_view(token):
+    """Página del reproductor web público standalone para enlaces compartidos."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("""
+        SELECT s.*, m.title, m.artist, m.album, m.rel_path, m.duration_sec, m.filename
+        FROM shared_links s
+        JOIN media m ON s.media_id = m.id
+        WHERE s.token = ?
+    """, (token,))
+    item = c.fetchone()
+
+    template_file = os.path.join(config.BASE_DIR, 'templates', 'share_player.html')
+    if not os.path.isfile(template_file):
+        conn.close()
+        return "Template de reproductor compartido no encontrado", 500
+
+    with open(template_file, 'r', encoding='utf-8') as f:
+        tpl_html = f.read()
+
+    now = time.time()
+    if not item:
+        conn.close()
+        return render_template_string(tpl_html, is_expired=True, title="Enlace no disponible", artist="Kraken"), 404
+
+    if now > item['expires_at']:
+        conn.close()
+        return render_template_string(tpl_html, is_expired=True, title=item['title'] or item['filename'], artist=item['artist'] or "Kraken"), 410
+
+    # Incrementar contador de reproducciones/visitas
+    c.execute("UPDATE shared_links SET views_count = COALESCE(views_count, 0) + 1 WHERE token = ?", (token,))
+    conn.commit()
+    conn.close()
+
+    display_title = item['title'] or item['filename']
+    display_artist = item['artist'] or 'Kraken System'
+    display_album = item['album'] or ''
+
+    return render_template_string(
+        tpl_html,
+        is_expired=False,
+        token=token,
+        title=display_title,
+        artist=display_artist,
+        album=display_album,
+        duration_sec=item['duration_sec'] or 0,
+        expires_at=item['expires_at']
+    )
+
+
+@api_bp.route('/share/<token>/stream')
+def share_stream(token):
+    """Streaming de audio seguro con soporte de Range 206 para el reproductor compartido."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("""
+        SELECT s.expires_at, m.rel_path
+        FROM shared_links s
+        JOIN media m ON s.media_id = m.id
+        WHERE s.token = ?
+    """, (token,))
+    row = c.fetchone()
+    conn.close()
+
+    if not row or time.time() > row['expires_at']:
+        return "Enlace expirado o no válido", 403
+
+    rel_path = row['rel_path'].replace('\\', '/').lstrip('/')
+    base_dir = Path(config.DOWNLOAD_FOLDER).resolve()
+    target_path = (base_dir / rel_path).resolve()
+    
+    try:
+        target_path.relative_to(base_dir)
+    except ValueError:
+        return "Acceso denegado", 403
+
+    if not target_path.exists() or not target_path.is_file():
+        return "Archivo multimedia no encontrado", 404
+
+    range_header = request.headers.get('Range')
+    if not range_header:
+        resp = send_file(str(target_path), conditional=True)
+        resp.headers['Accept-Ranges'] = 'bytes'
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+
+    match = re.match(r'bytes=(\d+)-(\d*)', range_header)
+    if not match:
+        return "Invalid Range", 416
+
+    size = target_path.stat().st_size
+    start = int(match.group(1))
+    end = int(match.group(2)) if match.group(2) else size - 1
+    end = min(end, size - 1)
+    if start > end or start >= size:
+        return "Invalid Range", 416
+
+    length = end - start + 1
+    import mimetypes
+    mime_type = mimetypes.guess_type(str(target_path))[0] or 'audio/mpeg'
+    chunk_size = 1024 * 1024
+
+    def generate_chunks(fpath, offset, total_bytes):
+        remaining = total_bytes
+        with open(fpath, 'rb') as f:
+            f.seek(offset)
+            while remaining > 0:
+                chunk = f.read(min(chunk_size, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    response = Response(
+        generate_chunks(target_path, start, length),
+        206,
+        mimetype=mime_type,
+        direct_passthrough=True
+    )
+    response.headers['Content-Range'] = f'bytes {start}-{end}/{size}'
+    response.headers['Accept-Ranges'] = 'bytes'
+    response.headers['Content-Length'] = str(length)
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
+
+
+@api_bp.route('/share/<token>/cover')
+def share_cover(token):
+    """Carátula segura para el reproductor compartido."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("""
+        SELECT s.expires_at, m.rel_path
+        FROM shared_links s
+        JOIN media m ON s.media_id = m.id
+        WHERE s.token = ?
+    """, (token,))
+    row = c.fetchone()
+    conn.close()
+
+    if not row or time.time() > row['expires_at']:
+        return "No disponible", 404
+
+    return caratula(row['rel_path'])
+
+
+@api_bp.route('/share/<token>/lyrics')
+def share_lyrics(token):
+    """Letras seguras para el reproductor compartido."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("""
+        SELECT s.expires_at, m.rel_path
+        FROM shared_links s
+        JOIN media m ON s.media_id = m.id
+        WHERE s.token = ?
+    """, (token,))
+    row = c.fetchone()
+    conn.close()
+
+    if not row or time.time() > row['expires_at']:
+        return jsonify({'found': False, 'error': 'Enlace expirado'})
+
+    return lyrics(row['rel_path'])

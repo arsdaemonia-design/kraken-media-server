@@ -80,16 +80,18 @@ verify_pin = verify_password
 
 # ═══ Token Creation & Verification ═══
 
-def create_token(user_email, username='', is_superadmin=False):
+def create_token(user_email, username='', is_superadmin=False, expires_at=None, role='user'):
     """Create a signed token (JWT-like) for a user con JTI único."""
     jti = str(uuid.uuid4())  # Unique token ID para blacklist
+    exp_time = int(expires_at) if expires_at else (int(time.time()) + TOKEN_EXPIRY)
     payload = {
         'jti': jti,
         'email': user_email,
         'username': username,
         'is_superadmin': is_superadmin,
+        'role': role,
         'iat': int(time.time()),
-        'exp': int(time.time()) + TOKEN_EXPIRY
+        'exp': exp_time
     }
     payload_b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
     signature = hmac.new(JWT_SECRET.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()

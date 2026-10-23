@@ -167,7 +167,7 @@ function renderUsers(users) {
             (u.username ? u.username.charAt(0).toUpperCase() : '🐙')}
             </div>
             <span class="text-white text-sm font-medium">${u.username || 'Usuario'}</span>
-            ${u.is_superadmin ? '<span class="text-[10px] text-emerald-400 font-bold">ADMIN</span>' : ''}
+            ${u.is_superadmin ? '<span class="text-[10px] text-emerald-400 font-bold">ADMIN</span>' : (u.role === 'beta' ? '<span class="text-[10px] text-purple-400 font-bold">BETA</span>' : '')}
         </div>
     `).join('');
 }
@@ -232,7 +232,17 @@ function showRegister(withInvite) {
     document.getElementById('auth-password-entry').style.display = 'none';
     document.getElementById('auth-register').style.display = 'block';
     document.getElementById('auth-invite').style.display = 'none';
-    document.getElementById('auth-register-title').textContent = withInvite ? 'Crear tu Perfil' : 'Crear Administrador';
+        let regTitle = 'Crear Administrador';
+    if (withInvite) {
+        if (window._pendingInviteIsBeta) {
+            const h = window._pendingInviteTrialHours || 24;
+            const periodText = h >= 24 ? `${Math.round(h / 24)} días` : `${h} horas`;
+            regTitle = `Crear Perfil Beta (${periodText} de prueba)`;
+        } else {
+            regTitle = 'Crear tu Perfil';
+        }
+    }
+    document.getElementById('auth-register-title').textContent = regTitle;
     document.getElementById('auth-reg-back').style.display = withInvite ? 'inline' : 'none';
     document.getElementById('auth-reg-error').style.display = 'none';
     window._registerWithInvite = withInvite ? window._pendingInviteCode : '';
@@ -371,6 +381,8 @@ async function submitInvite() {
 
         // Código válido - mostrar formulario de registro
         window._pendingInviteCode = code;
+        window._pendingInviteIsBeta = !!data.is_beta;
+        window._pendingInviteTrialHours = data.trial_hours || 0;
         showRegister(true);
     } catch (e) {
         console.error('Error validando código:', e);
