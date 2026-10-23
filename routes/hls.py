@@ -429,6 +429,7 @@ def play_hls():
             selected_audio_track = None
 
     force_transcode = request.args.get('force_transcode') in ('1', 'true', 'True')
+    downscale_1080 = request.args.get('downscale_1080') in ('1', 'true', 'True') or (force_transcode and request.args.get('downscale_1080') != '0')
     process, audio_tracks, selected_audio_track, hls_error = hls_transcoder.start_hls_session(
         full_video_path,
         session_dir,
@@ -437,6 +438,7 @@ def play_hls():
         hls_segment_type=config.HLS_SEGMENT_TYPE,
         start_time=start_time,
         force_transcode=force_transcode,
+        downscale_1080=downscale_1080,
     )
     all_subs = _build_combined_subtitles(full_video_path, media_id=media_id, token=token, video_rel_path=video_path)
     # Preferir subtítulo externo como activo por defecto; los incrustados quedan disponibles en el menú
@@ -577,6 +579,7 @@ def reconnect_hls():
             selected_audio_track = None
 
     force_transcode = request.args.get('force_transcode') in ('1', 'true', 'True')
+    downscale_1080 = request.args.get('downscale_1080') in ('1', 'true', 'True') or (force_transcode and request.args.get('downscale_1080') != '0')
     process, audio_tracks, selected_audio_track, hls_error = hls_transcoder.start_hls_session(
         full_video_path,
         session_dir,
@@ -585,6 +588,7 @@ def reconnect_hls():
         hls_segment_type=config.HLS_SEGMENT_TYPE,
         start_time=start_time,
         force_transcode=force_transcode,
+        downscale_1080=downscale_1080,
     )
 
     all_subs = _build_combined_subtitles(full_video_path, media_id=media_id, token=token, video_rel_path=video_path)

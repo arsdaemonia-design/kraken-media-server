@@ -124,13 +124,12 @@ class HLSTranscoder:
             friendly_container = ['.mp4', '.webm', '.m4v']
             is_friendly_container = any(input_file.lower().endswith(ext) for ext in friendly_container)
             first_audio_friendly = (not audio_streams) or (audio_streams[0].get('codec_name') in friendly_audio)
-            # Para Direct Play: resoluciones mayores a 1080p (4K/UHD) desbordan buffers y decodificadores en TV/Web
+            # Para Direct Play en navegadores y pantallas compatibles (mantiene 4K nativo en MP4/WebM):
             direct_play = (
                 is_friendly_container
                 and (video_codec in browser_friendly_video)
                 and (pix_fmt in ('yuv420p', 'yuvj420p', None))
                 and first_audio_friendly
-                and not is_over_1080p
             )
             
             lang_map = {
@@ -218,7 +217,8 @@ class HLSTranscoder:
         hls_mode="stream",
         hls_segment_type="mpegts",
         force_video_reencode=False,
-        start_time=0.0
+        start_time=0.0,
+        downscale_1080=False,
     ):
         audio_tracks = analysis.get('audio_tracks', [])
         needs_video_reencode = (
@@ -249,8 +249,8 @@ class HLSTranscoder:
 
         if needs_video_reencode:
             cmd += encoder_settings
-            # Solo escalar si es resolución mayor a 1080p (4K) para que los decodificadores de hardware de Smart TVs / TV boxes no colapsen
-            if analysis.get('is_over_1080p'):
+            # Solo escalar si se solicitó explícitamente (ej. rescate de Smart TV no potente en fallback)
+            if downscale_1080 and analysis.get('is_over_1080p'):
                 cmd += ["-vf", "scale='min(1920,iw)':-2"]
             cmd += ["-g", "48", "-force_key_frames", "expr:gte(t,n_forced*2)"]
             if video_encoder == "libx264":
@@ -324,6 +324,7 @@ class HLSTranscoder:
         hls_segment_type="mpegts",
         start_time=0.0,
         force_transcode=False,
+        downscale_1080=False,
     ):
         """Prepara e inicia el proceso FFmpeg para HLS."""
         print(f"[HLS] Input file: {input_file}")
@@ -367,8 +368,9 @@ class HLSTranscoder:
             normalized_audio_index=normalized_audio_index,
             hls_mode=hls_mode,
             hls_segment_type=hls_segment_type,
-            force_video_reencode=False,
+            force_video_reencode=force_transcode,
             start_time=start_time,
+            downscale_1080=downscale_1080,
         )
 
         print(f"[HLS] Command: {' '.join(cmd)}")
@@ -402,6 +404,7 @@ class HLSTranscoder:
                     hls_segment_type=hls_segment_type,
                     force_video_reencode=True,
                     start_time=start_time,
+                    downscale_1080=downscale_1080,
                 )
                 log_fh = open(log_file_path, "w", encoding="utf-8", errors="ignore")
                 process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=log_fh, **kwargs)

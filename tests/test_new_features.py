@@ -300,26 +300,52 @@ class TestNewFeaturesV5(unittest.TestCase):
         first_ep = data['items'][0]
         self.assertEqual(first_ep['season'], 'Temporada 1')
 
-    def test_09_hls_4k_direct_play_blocked_and_force_transcode(self):
+    def test_09_hls_4k_direct_play_and_selective_downscale(self):
         from services.hls_transcoder import hls_transcoder
-        
-        # When video is over 1080p, direct_play must be False
+        import inspect
+
+        # 1. Verify start_hls_session supports force_transcode and downscale_1080
+        sig = inspect.signature(hls_transcoder.start_hls_session)
+        self.assertIn('force_transcode', sig.parameters)
+        self.assertIn('downscale_1080', sig.parameters)
+        self.assertEqual(sig.parameters['downscale_1080'].default, False)
+
+        # 2. Test FFmpeg command generation:
         analysis_4k = {
-            'video_codec': 'h264',
+            'video_codec': 'hevc',
             'pix_fmt': 'yuv420p',
             'width': 3840,
             'height': 2160,
             'is_over_1080p': True,
-            'direct_play': False,
-            'audio_tracks': [{'index': 0, 'codec_name': 'aac'}]
+            'video_needs_transcode': True,
+            'audio_tracks': [{'index': 0, 'channels': 2}]
         }
-        self.assertFalse(analysis_4k['direct_play'])
 
-        # Verify start_hls_session method signature supports force_transcode
-        import inspect
-        sig = inspect.signature(hls_transcoder.start_hls_session)
-        self.assertIn('force_transcode', sig.parameters)
-        self.assertEqual(sig.parameters['force_transcode'].default, False)
+        # Case A: Normal playback (downscale_1080=False) -> MUST NOT downscale, preserves 4K!
+        cmd_4k, _ = hls_transcoder._build_ffmpeg_hls_cmd(
+            input_file='dummy_4k.mkv',
+            output_dir='dummy_dir',
+            playlist_path='dummy_dir/playlist.m3u8',
+            analysis=analysis_4k,
+            normalized_audio_index=0,
+            force_video_reencode=True,
+            downscale_1080=False
+        )
+        cmd_4k_str = ' '.join(cmd_4k)
+        self.assertNotIn("scale='min(1920,iw)':-2", cmd_4k_str)
+
+        # Case B: TV fallback recovery (downscale_1080=True) -> MUST apply 1080p scale
+        cmd_tv, _ = hls_transcoder._build_ffmpeg_hls_cmd(
+            input_file='dummy_4k.mkv',
+            output_dir='dummy_dir',
+            playlist_path='dummy_dir/playlist.m3u8',
+            analysis=analysis_4k,
+            normalized_audio_index=0,
+            force_video_reencode=True,
+            downscale_1080=True
+        )
+        cmd_tv_str = ' '.join(cmd_tv)
+        self.assertIn("scale='min(1920,iw)':-2", cmd_tv_str)
 
     # 5. PRIVACY: CROSS-ACCOUNT DEVICE CONTROL PROTECTION
     def test_10_device_control_cross_account_forbidden(self):
