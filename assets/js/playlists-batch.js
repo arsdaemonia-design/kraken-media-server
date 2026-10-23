@@ -467,7 +467,7 @@ function openContextMenu(event, path) {
         box-shadow: 0 -10px 40px rgba(0,0,0,0.8);
     ">
         <div style="display: flex; gap: 15px; align-items: center; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px;">
-            <img src="/caratula/${encodeURIComponent(path)}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 8px; background: #333;" onerror="this.src='/static/default_cover.jpg'">
+            <img src="/caratula/${encodeURIComponent(path)}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 8px; background: #333;" onerror="this.onerror=null; this.src='/static/default_cover.jpg'">
             <div style="overflow: hidden;">
                 <h3 style="color: white; font-weight: bold; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0;">${file.title}</h3>
                 <p style="color: #10b981; font-size: 11px; margin: 2px 0 0 0;">${file.artist}</p>

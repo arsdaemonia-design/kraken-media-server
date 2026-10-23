@@ -392,14 +392,29 @@ def remote_control():
     from_sid = data.get('from_sid', '')
     
     if target_sid and action:
-        command = {
-            'action': action,
-            'time': time.time(),
-            'from_name': from_name,
-            'from_email': from_email,
-            'from_sid': from_sid
-        }
+        # Validación de seguridad: Comandos de control de reproducción y hardware
+        # solo se permiten entre dispositivos de la misma cuenta o por el SuperAdmin.
+        is_social_action = action.startswith(('party_chat_', 'watch_party_sync_', 'emoji_'))
+
         with USERS_LOCK:
+            target_data = ACTIVE_USERS.get(target_sid)
+            sender_data = ACTIVE_USERS.get(from_sid) if from_sid else None
+
+            if target_data and not is_social_action:
+                t_email = (target_data.get('email') or '').lower().strip()
+                s_email = (from_email or (sender_data.get('email') if sender_data else '') or '').lower().strip()
+                is_admin = bool(sender_data and sender_data.get('is_superadmin'))
+
+                if not is_admin and t_email and s_email and t_email != s_email:
+                    return jsonify({'status': 'error', 'msg': 'No tienes permisos para controlar este dispositivo'}), 403
+
+            command = {
+                'action': action,
+                'time': time.time(),
+                'from_name': from_name,
+                'from_email': from_email,
+                'from_sid': from_sid
+            }
             queue = PENDING_COMMANDS.setdefault(target_sid, [])
             queue.append(command)
             queue_size = len(queue)
@@ -434,8 +449,18 @@ def link_remote_controller():
         if target_sid not in ACTIVE_USERS:
             return jsonify({'ok': False, 'error': 'El dispositivo destino ya no está en línea'}), 404
 
-        REMOTE_CONTROL_LINKS[controller_sid] = target_sid
+        controller_data = ACTIVE_USERS[controller_sid]
         target_data = dict(ACTIVE_USERS[target_sid])
+
+        # Seguridad: Solo permitir control remoto a dispositivos de la misma cuenta o por el SuperAdmin
+        c_email = (controller_data.get('email') or '').lower().strip()
+        t_email = (target_data.get('email') or '').lower().strip()
+        is_admin = bool(controller_data.get('is_superadmin'))
+
+        if not is_admin and c_email and t_email and c_email != t_email:
+            return jsonify({'ok': False, 'error': 'No tienes permisos para controlar este dispositivo'}), 403
+
+        REMOTE_CONTROL_LINKS[controller_sid] = target_sid
 
     return jsonify({
         'ok': True,
@@ -974,6 +999,35 @@ def delete_playlist():
 
 # Caché en memoria de rutas sin carátula para no reabrir el archivo de audio en cada scroll
 _NO_COVER_CACHE = set()
+
+@api_bp.route('/static/default_cover.jpg')
+@api_bp.route('/assets/default_cover.jpg')
+def default_cover_img():
+    """Sirve la carátula predeterminada segura para fallbacks de frontend."""
+    cand = os.path.join(config.BASE_DIR, 'assets', 'default_cover.jpg')
+    if not os.path.isfile(cand):
+        cand = os.path.join(config.BASE_DIR, 'static', 'default_cover.jpg')
+    if os.path.isfile(cand):
+        resp = send_file(cand, mimetype='image/jpeg', max_age=31536000, conditional=True)
+        resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+        return resp
+    return Response(b'', status=404, mimetype='image/jpeg')
+
+@api_bp.route('/static/<path:filename>')
+def serve_static_legacy(filename):
+    """Alias para servir estáticos solicitados como /static/ desde la carpeta assets o static."""
+    clean = filename.lstrip('/\\')
+    assets_dir = os.path.join(config.BASE_DIR, 'assets')
+    target = os.path.join(assets_dir, clean)
+    if os.path.isfile(target):
+        return send_from_directory(assets_dir, clean)
+    static_dir = os.path.join(config.BASE_DIR, 'static')
+    target_static = os.path.join(static_dir, clean)
+    if os.path.isfile(target_static):
+        return send_from_directory(static_dir, clean)
+    if 'cover' in clean.lower():
+        return default_cover_img()
+    return Response(b'Not found', status=404, mimetype='text/plain')
 
 @api_bp.route('/caratula/<path:filename>')
 @api_bp.route('/api/caratula/<path:filename>')
@@ -1981,193 +2035,206 @@ def borrar():
 
 @api_bp.route('/status')
 def status():
-    global LAST_ALEXA_COMMAND, ACTIVE_USERS
+    try:
+        global LAST_ALEXA_COMMAND, ACTIVE_USERS
     
-    # 1. RECIBIR DATOS (Ahora con Tiempo y DuraciÃ³n)
-    session_id = request.args.get('sid')
-    user_name_fallback = request.args.get('user', 'Invitado')
-    is_speaker_param = request.args.get('is_speaker')
-    current_song = request.args.get('song', '')
-    current_artist = request.args.get('artist', '')
-    current_path = request.args.get('path', '')
-    current_time = request.args.get('time', '0')
-    total_duration = request.args.get('duration', '0')
-    is_speaker = (is_speaker_param == 'true')
-    is_playing_param = request.args.get('is_playing', '')
-    current_volume = request.args.get('volume', '1')
-    queue_length = request.args.get('queue_length', '0')
-    current_index = request.args.get('current_index', '0')
-    library_mode = request.args.get('library_mode', '')
-    device_name = request.args.get('device_name', '')
-    device_type = request.args.get('device_type', '')
-    current_media_type = request.args.get('media_type', '')
+        # 1. RECIBIR DATOS (Ahora con Tiempo y DuraciÃ³n)
+        session_id = request.args.get('sid')
+        user_name_fallback = request.args.get('user', 'Invitado')
+        is_speaker_param = request.args.get('is_speaker')
+        current_song = request.args.get('song', '')
+        current_artist = request.args.get('artist', '')
+        current_path = request.args.get('path', '')
+        current_time = request.args.get('time', '0')
+        total_duration = request.args.get('duration', '0')
+        is_speaker = (is_speaker_param == 'true')
+        is_playing_param = request.args.get('is_playing', '')
+        current_volume = request.args.get('volume', '1')
+        queue_length = request.args.get('queue_length', '0')
+        current_index = request.args.get('current_index', '0')
+        library_mode = request.args.get('library_mode', '')
+        device_name = request.args.get('device_name', '')
+        device_type = request.args.get('device_type', '')
+        current_media_type = request.args.get('media_type', '')
 
-    if is_playing_param == '':
-        is_playing = bool(current_song)
-    else:
-        is_playing = (is_playing_param == 'true')
+        if is_playing_param == '':
+            is_playing = bool(current_song)
+        else:
+            is_playing = (is_playing_param == 'true')
     
-    # --- INTERCEPCIÃ“N CLOUDFLARE ---
-    # --- AUTENTICACIÓN: JWT local → Cloudflare fallback ---
-    auth_email = get_user_from_request(request)
+        # --- INTERCEPCIÃ“N CLOUDFLARE ---
+        # --- AUTENTICACIÓN: JWT local → Cloudflare fallback ---
+        auth_email = get_user_from_request(request)
     
-    # Valores por defecto para el Radar
-    final_username = user_name_fallback
-    avatar_url = None
-    is_superadmin = False
-    needs_registration = False
+        # Valores por defecto para el Radar
+        final_username = user_name_fallback
+        avatar_url = None
+        is_superadmin = False
+        needs_registration = False
     
-    import config
-    # Solo asociar a cuenta en DB si hay email autenticado (JWT o Cloudflare)
-    db_email = auth_email if auth_email else ''
+        import config
+        # Solo asociar a cuenta en DB si hay email autenticado (JWT o Cloudflare)
+        db_email = auth_email if auth_email else ''
 
-    # 2. CONSULTAR/CREAR USUARIO EN BD (Solo usuarios autenticados)
-    if session_id and db_email:
-        try:
-            conn = get_db()
-            c = conn.cursor()
-            c.execute("SELECT username, avatar_url, is_superadmin FROM users WHERE email = ?", (db_email,))
-            user_row = c.fetchone()
+        # 2. CONSULTAR/CREAR USUARIO EN BD (Solo usuarios autenticados)
+        if session_id and db_email:
+            try:
+                conn = get_db()
+                c = conn.cursor()
+                c.execute("SELECT username, avatar_url, is_superadmin FROM users WHERE email = ?", (db_email,))
+                user_row = c.fetchone()
             
-            if user_row:
-                final_username = user_row['username'] or final_username
-                avatar_url = user_row['avatar_url']
-                is_superadmin = bool(user_row['is_superadmin'])
+                if user_row:
+                    final_username = user_row['username'] or final_username
+                    avatar_url = user_row['avatar_url']
+                    is_superadmin = bool(user_row['is_superadmin'])
                 
-                # Auto-PromociÃ³n a Super Admin via Config
-                import config
-                if config.SUPERADMIN_EMAIL and db_email.lower() == config.SUPERADMIN_EMAIL.lower() and not is_superadmin:
-                    is_superadmin = True
-                    c.execute("UPDATE users SET is_superadmin = 1 WHERE email = ?", (db_email,))
+                    # Auto-PromociÃ³n a Super Admin via Config
+                    import config
+                    if config.SUPERADMIN_EMAIL and db_email.lower() == config.SUPERADMIN_EMAIL.lower() and not is_superadmin:
+                        is_superadmin = True
+                        c.execute("UPDATE users SET is_superadmin = 1 WHERE email = ?", (db_email,))
                 
-                c.execute("UPDATE users SET sid = ? WHERE email = ?", (session_id, db_email))
-                conn.commit()
+                    c.execute("UPDATE users SET sid = ? WHERE email = ?", (session_id, db_email))
+                    conn.commit()
                 
-                # Exigir registro si no tienen avatar (perfil incompleto)
-                if not avatar_url:
+                    # Exigir registro si no tienen avatar (perfil incompleto)
+                    if not avatar_url:
+                        needs_registration = True
+                else:
                     needs_registration = True
-            else:
-                needs_registration = True
                 
-                import config
-                is_admin = 1 if (config.SUPERADMIN_EMAIL and db_email.lower() == config.SUPERADMIN_EMAIL.lower()) else 0
-                is_superadmin = bool(is_admin)
+                    import config
+                    is_admin = 1 if (config.SUPERADMIN_EMAIL and db_email.lower() == config.SUPERADMIN_EMAIL.lower()) else 0
+                    is_superadmin = bool(is_admin)
                 
-                c.execute("INSERT INTO users (email, sid, username, is_superadmin, created_at) VALUES (?, ?, ?, ?, ?)", 
-                          (db_email, session_id, final_username, is_admin, time.time()))
-                conn.commit()
-            conn.close()
-        except Exception as e:
-            print(f"Error en Radar DB: {e}")
-    elif session_id and not db_email:
-        if not final_username or final_username == 'Invitado':
-            final_username = device_name or 'Invitado'
+                    c.execute("INSERT INTO users (email, sid, username, is_superadmin, created_at) VALUES (?, ?, ?, ?, ?)", 
+                              (db_email, session_id, final_username, is_admin, time.time()))
+                    conn.commit()
+                conn.close()
+            except Exception as e:
+                print(f"Error en Radar DB: {e}")
+        elif session_id and not db_email:
+            if not final_username or final_username == 'Invitado':
+                final_username = device_name or 'Invitado'
 
-    # 3. ACTUALIZAR ESTADO EN MEMORIA (Para velocidad)
-    if session_id:
-        with USERS_LOCK:
-            ACTIVE_USERS[session_id] = {
-                'email': db_email,
-                'name': final_username,
-                'avatar': avatar_url,
-                'is_superadmin': is_superadmin,
-                'last_ping': time.time(),
-                'is_speaker': is_speaker,
-                'initial': final_username[0].upper() if final_username else '?',
-                'song': current_song,
-                'artist': current_artist,
-                'path': current_path,
-                'time': current_time,
-                'duration': total_duration,
-                'needs_registration': needs_registration,
-                'is_playing': is_playing,
-                'volume': current_volume,
-                'queue_length': queue_length,
-                'current_index': current_index,
-                'library_mode': library_mode,
-                'device_name': device_name,
-                'device_type': device_type,
-                'media_type': current_media_type
-            }
-
-    # 4. PREPARAR LISTA
-    online_list = []
-    linked_target = None
-    with USERS_LOCK:
-        for sid, data in ACTIVE_USERS.items():
-            online_list.append({
-                'session_id': sid,
-                'email': data.get('email', ''),
-                'name': data['name'],
-                'avatar': data.get('avatar'),
-                'is_superadmin': data.get('is_superadmin', False),
-                'initial': data['initial'],
-                'is_speaker': data['is_speaker'],
-                'is_me': (sid == session_id),
-                'song': data.get('song', ''),
-                'artist': data.get('artist', ''),
-                'path': data.get('path', ''),
-                'time': data.get('time', '0'),
-                'duration': data.get('duration', '0'),
-                'is_playing': data.get('is_playing', False),
-                'volume': data.get('volume', '1'),
-                'queue_length': data.get('queue_length', '0'),
-                'current_index': data.get('current_index', '0'),
-                'library_mode': data.get('library_mode', ''),
-                'device_name': data.get('device_name', ''),
-                'device_type': data.get('device_type', ''),
-                'media_type': data.get('media_type', '')
-            })
-
-        if session_id and session_id in REMOTE_CONTROL_LINKS:
-            target_sid = REMOTE_CONTROL_LINKS.get(session_id)
-            target_data = ACTIVE_USERS.get(target_sid)
-            if target_data:
-                linked_target = {
-                    'session_id': target_sid,
-                    'name': target_data.get('name', ''),
-                    'device_name': target_data.get('device_name', ''),
-                    'device_type': target_data.get('device_type', ''),
-                    'song': target_data.get('song', ''),
-                    'artist': target_data.get('artist', ''),
-                    'path': target_data.get('path', ''),
-                    'time': target_data.get('time', '0'),
-                    'duration': target_data.get('duration', '0'),
-                    'is_playing': target_data.get('is_playing', False),
-                    'volume': target_data.get('volume', '1'),
-                    'queue_length': target_data.get('queue_length', '0'),
-                    'current_index': target_data.get('current_index', '0'),
-                    'library_mode': target_data.get('library_mode', ''),
-                    'media_type': target_data.get('media_type', '')
+        # 3. ACTUALIZAR ESTADO EN MEMORIA (Para velocidad)
+        if session_id:
+            with USERS_LOCK:
+                ACTIVE_USERS[session_id] = {
+                    'email': db_email,
+                    'name': final_username,
+                    'avatar': avatar_url,
+                    'is_superadmin': is_superadmin,
+                    'last_ping': time.time(),
+                    'is_speaker': is_speaker,
+                    'initial': final_username[0].upper() if final_username else '?',
+                    'song': current_song,
+                    'artist': current_artist,
+                    'path': current_path,
+                    'time': current_time,
+                    'duration': total_duration,
+                    'needs_registration': needs_registration,
+                    'is_playing': is_playing,
+                    'volume': current_volume,
+                    'queue_length': queue_length,
+                    'current_index': current_index,
+                    'library_mode': library_mode,
+                    'device_name': device_name,
+                    'device_type': device_type,
+                    'media_type': current_media_type
                 }
-            else:
-                REMOTE_CONTROL_LINKS.pop(session_id, None)
 
-    response = progress_status.copy()
-    response['last_command'] = LAST_ALEXA_COMMAND
-    response['online_users'] = online_list
-    response['controlled_target'] = linked_target
+        # 4. PREPARAR LISTA
+        online_list = []
+        linked_target = None
+        with USERS_LOCK:
+            for sid, data in ACTIVE_USERS.items():
+                online_list.append({
+                    'session_id': sid,
+                    'email': data.get('email', ''),
+                    'name': data['name'],
+                    'avatar': data.get('avatar'),
+                    'is_superadmin': data.get('is_superadmin', False),
+                    'initial': data['initial'],
+                    'is_speaker': data['is_speaker'],
+                    'is_me': (sid == session_id),
+                    'song': data.get('song', ''),
+                    'artist': data.get('artist', ''),
+                    'path': data.get('path', ''),
+                    'time': data.get('time', '0'),
+                    'duration': data.get('duration', '0'),
+                    'is_playing': data.get('is_playing', False),
+                    'volume': data.get('volume', '1'),
+                    'queue_length': data.get('queue_length', '0'),
+                    'current_index': data.get('current_index', '0'),
+                    'library_mode': data.get('library_mode', ''),
+                    'device_name': data.get('device_name', ''),
+                    'device_type': data.get('device_type', ''),
+                    'media_type': data.get('media_type', '')
+                })
+
+            if session_id and session_id in REMOTE_CONTROL_LINKS:
+                target_sid = REMOTE_CONTROL_LINKS.get(session_id)
+                target_data = ACTIVE_USERS.get(target_sid)
+                if target_data:
+                    linked_target = {
+                        'session_id': target_sid,
+                        'name': target_data.get('name', ''),
+                        'device_name': target_data.get('device_name', ''),
+                        'device_type': target_data.get('device_type', ''),
+                        'song': target_data.get('song', ''),
+                        'artist': target_data.get('artist', ''),
+                        'path': target_data.get('path', ''),
+                        'time': target_data.get('time', '0'),
+                        'duration': target_data.get('duration', '0'),
+                        'is_playing': target_data.get('is_playing', False),
+                        'volume': target_data.get('volume', '1'),
+                        'queue_length': target_data.get('queue_length', '0'),
+                        'current_index': target_data.get('current_index', '0'),
+                        'library_mode': target_data.get('library_mode', ''),
+                        'media_type': target_data.get('media_type', '')
+                    }
+                else:
+                    REMOTE_CONTROL_LINKS.pop(session_id, None)
+
+        response = progress_status.copy()
+        response['last_command'] = LAST_ALEXA_COMMAND
+        response['online_users'] = online_list
+        response['controlled_target'] = linked_target
     
-    # Retornamos flag global para forzar al frontend de ESTE cliente a registrarse
-    if session_id and session_id in ACTIVE_USERS and db_email:
-        response['my_email'] = db_email
+        # Retornamos flag global para forzar al frontend de ESTE cliente a registrarse
+        if session_id and session_id in ACTIVE_USERS and db_email:
+            response['my_email'] = db_email
     
-    # CHEQUEO DE BUZÃ“N (CONTROL REMOTO)
-    if session_id in PENDING_COMMANDS:
-        commands = PENDING_COMMANDS.get(session_id, [])
-        fresh_commands = [
-            cmd for cmd in commands
-            if time.time() - cmd.get('time', 0) < 15
-        ]
-        if fresh_commands:
-            response['remote_commands'] = fresh_commands
-            first_command = fresh_commands[0]
-            response['remote_command'] = first_command.get('action')
-            response['from_name'] = first_command.get('from_name', 'Alguien')
-            response['from_sid'] = first_command.get('from_sid', '')
-        PENDING_COMMANDS.pop(session_id, None)
+        # CHEQUEO DE BUZÃ“N (CONTROL REMOTO)
+        if session_id in PENDING_COMMANDS:
+            commands = PENDING_COMMANDS.get(session_id, [])
+            fresh_commands = [
+                cmd for cmd in commands
+                if time.time() - cmd.get('time', 0) < 15
+            ]
+            if fresh_commands:
+                response['remote_commands'] = fresh_commands
+                first_command = fresh_commands[0]
+                response['remote_command'] = first_command.get('action')
+                response['from_name'] = first_command.get('from_name', 'Alguien')
+                response['from_sid'] = first_command.get('from_sid', '')
+            PENDING_COMMANDS.pop(session_id, None)
     
-    return jsonify(response)
+        return jsonify(response)
+
+    except Exception as e:
+        print(f"Error en /status: {e}")
+        fallback_resp = progress_status.copy()
+        fallback_resp.update({
+            "ok": True,
+            "error": str(e),
+            "online_users": [],
+            "last_command": LAST_ALEXA_COMMAND,
+            "controlled_target": None
+        })
+        return jsonify(fallback_resp), 200
 
 @api_bp.route('/api/user/profile', methods=['POST'])
 def update_profile():

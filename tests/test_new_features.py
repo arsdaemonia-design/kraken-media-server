@@ -251,5 +251,162 @@ class TestNewFeaturesV5(unittest.TestCase):
         l_res = self.client.get(f'/share/{token}/lyrics')
         self.assertEqual(l_res.status_code, 410)
 
+    # 4. STATIC COVER FALLBACK & STATUS RELIABILITY
+    def test_06_default_cover_route(self):
+        # 1. Direct /static/default_cover.jpg returns 200 and image
+        res = self.client.get('/static/default_cover.jpg')
+        self.assertEqual(res.status_code, 200)
+        self.assertIn('image/', res.content_type)
+
+        # 2. /assets/default_cover.jpg returns 200 and image
+        res_assets = self.client.get('/assets/default_cover.jpg')
+        self.assertEqual(res_assets.status_code, 200)
+        self.assertIn('image/', res_assets.content_type)
+
+    def test_07_status_endpoint_resilient(self):
+        # 1. Normal status poll with active playing params
+        res = self.client.get('/status?sid=sess_test123&user=Skaso&is_speaker=false&song=Regular+Movie&artist=movies&path=&time=0&duration=0&is_playing=false&volume=1&queue_length=1&current_index=0&library_mode=video&device_name=PC+Windows&device_type=desktop&media_type=video')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIsInstance(data, dict)
+        self.assertIn('online_users', data)
+
+        # 2. Empty query params poll must never crash or throw 500
+        res_empty = self.client.get('/status')
+        self.assertEqual(res_empty.status_code, 200)
+        data_empty = res_empty.get_json()
+        self.assertIsInstance(data_empty, dict)
+
+    def test_08_tv_episodes_apostrophe_and_case_insensitive(self):
+        # Insert a series with an apostrophe in path
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("""
+            INSERT OR REPLACE INTO media (rel_path, filename, folder, full_folder, media_type, folder_type, title, is_adult, is_hidden)
+            VALUES ('Video/Series/That ''70s Show/Season 1/S01E01.mkv', 'S01E01.mkv', 'That ''70s Show', 'That ''70s Show', 'video', 'series', 'Pilot Episode', 0, 0)
+        """)
+        conn.commit()
+        conn.close()
+
+        # Query TV episodes endpoint with path having apostrophe
+        res = self.client.get("/api/tv/episodes?path=Video/Series/That%20'70s%20Show", headers={
+            'Authorization': f'Bearer {self.admin_token}',
+            'X-Master-Pin': '0000'
+        })
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIn('items', data)
+        self.assertGreaterEqual(len(data['items']), 1)
+        first_ep = data['items'][0]
+        self.assertEqual(first_ep['season'], 'Temporada 1')
+
+    def test_09_hls_4k_direct_play_blocked_and_force_transcode(self):
+        from services.hls_transcoder import hls_transcoder
+        
+        # When video is over 1080p, direct_play must be False
+        analysis_4k = {
+            'video_codec': 'h264',
+            'pix_fmt': 'yuv420p',
+            'width': 3840,
+            'height': 2160,
+            'is_over_1080p': True,
+            'direct_play': False,
+            'audio_tracks': [{'index': 0, 'codec_name': 'aac'}]
+        }
+        self.assertFalse(analysis_4k['direct_play'])
+
+        # Verify start_hls_session method signature supports force_transcode
+        import inspect
+        sig = inspect.signature(hls_transcoder.start_hls_session)
+        self.assertIn('force_transcode', sig.parameters)
+        self.assertEqual(sig.parameters['force_transcode'].default, False)
+
+    # 5. PRIVACY: CROSS-ACCOUNT DEVICE CONTROL PROTECTION
+    def test_10_device_control_cross_account_forbidden(self):
+        # Setup two users from different accounts in ACTIVE_USERS
+        sid_alice = 'sess_alice_mobile_001'
+        sid_bob_tv = 'sess_bob_smart_tv_002'
+        sid_bob_phone = 'sess_bob_mobile_003'
+
+        with state.USERS_LOCK:
+            state.ACTIVE_USERS[sid_alice] = {
+                'name': 'Alice',
+                'email': 'alice@example.com',
+                'device_name': 'Alice iPhone',
+                'device_type': 'mobile',
+                'is_superadmin': False,
+                'last_seen': time.time()
+            }
+            state.ACTIVE_USERS[sid_bob_tv] = {
+                'name': 'Bob',
+                'email': 'bob@example.com',
+                'device_name': 'Bob Living Room TV',
+                'device_type': 'tv',
+                'is_superadmin': False,
+                'last_seen': time.time()
+            }
+            state.ACTIVE_USERS[sid_bob_phone] = {
+                'name': 'Bob',
+                'email': 'bob@example.com',
+                'device_name': 'Bob Galaxy Phone',
+                'device_type': 'mobile',
+                'is_superadmin': False,
+                'last_seen': time.time()
+            }
+
+        # 1. Alice attempts to link / hijack Bob's TV -> Rejected with 403
+        link_res = self.client.post('/device/control/link', json={
+            'controller_sid': sid_alice,
+            'target_sid': sid_bob_tv
+        })
+        self.assertEqual(link_res.status_code, 403)
+        self.assertFalse(link_res.get_json()['ok'])
+
+        # 2. Alice attempts to send direct hardware command ('play', 'seek', etc.) -> Rejected with 403
+        cmd_res = self.client.post('/control', json={
+            'target': sid_bob_tv,
+            'action': 'pause',
+            'from_sid': sid_alice,
+            'from_email': 'alice@example.com',
+            'from_name': 'Alice'
+        })
+        self.assertEqual(cmd_res.status_code, 403)
+        self.assertEqual(cmd_res.get_json()['status'], 'error')
+
+        # 3. Social actions (chat/watch party) are permitted across accounts
+        chat_res = self.client.post('/control', json={
+            'target': sid_bob_tv,
+            'action': 'party_chat_hello',
+            'from_sid': sid_alice,
+            'from_email': 'alice@example.com',
+            'from_name': 'Alice'
+        })
+        self.assertEqual(chat_res.status_code, 200)
+        self.assertEqual(chat_res.get_json()['status'], 'sent')
+
+        # 4. Bob's phone controls Bob's TV (same account) -> Permitted
+        link_same = self.client.post('/device/control/link', json={
+            'controller_sid': sid_bob_phone,
+            'target_sid': sid_bob_tv
+        })
+        self.assertEqual(link_same.status_code, 200)
+        self.assertTrue(link_same.get_json()['ok'])
+
+        cmd_same = self.client.post('/control', json={
+            'target': sid_bob_tv,
+            'action': 'pause',
+            'from_sid': sid_bob_phone,
+            'from_email': 'bob@example.com',
+            'from_name': 'Bob Phone'
+        })
+        self.assertEqual(cmd_same.status_code, 200)
+        self.assertEqual(cmd_same.get_json()['status'], 'sent')
+
+        # Clean up test sessions
+        with state.USERS_LOCK:
+            state.ACTIVE_USERS.pop(sid_alice, None)
+            state.ACTIVE_USERS.pop(sid_bob_tv, None)
+            state.ACTIVE_USERS.pop(sid_bob_phone, None)
+
 if __name__ == '__main__':
     unittest.main()

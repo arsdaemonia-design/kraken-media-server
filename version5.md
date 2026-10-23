@@ -195,6 +195,44 @@ Tras una auditoría de seguridad estática y dinámica previa a distribución, s
 8. **Claridad Terminológica**:
    * Los enlaces compartidos utilizan un token ofuscado y opaco de alta entropía (128 bits criptográficos mediante `secrets.token_urlsafe(16)`), el cual funciona como una llave bearer de acceso temporal de un solo título.
 
+### 3.7. Correcciones Críticas de Estabilidad, UI y Privacidad de Dispositivos
+
+1. **Resolución de Bucle Infinito 404 (`/static/default_cover.jpg`)**:
+   * **Causa**: Fallbacks de carátulas en componentes HTML/JS solicitaban `/static/default_cover.jpg`, ruta que no existía en disco ni en el enrutador Flask, disparando ráfagas continuas de peticiones HTTP/3 404.
+   * **Corrección**:
+     - Se crearon los archivos físicos de imagen por defecto en `assets/default_cover.jpg` y `static/default_cover.jpg`.
+     - Se añadieron endpoints dedicados `@api_bp.route('/static/default_cover.jpg')` y `@api_bp.route('/assets/default_cover.jpg')` que sirven la imagen con cabeceras de caché.
+     - Se reforzaron los manejadores `onerror` en `downloader-tools.js`, `playlists-batch.js` y `templates/index.html` con `this.onerror=null;` para romper cualquier cascada recursiva en el navegador.
+
+2. **Resiliencia de Radar `/status` ante Respuestas HTTP 502 / HTML**:
+   * **Causa**: Si Cloudflare o el proxy inverso respondía con un error 502 Bad Gateway (HTML), el bucle de sondeo cada 2 segundos en `app-init.js` fallaba con `SyntaxError: JSON.parse: unexpected character at line 1 column 1`, pudiendo congelar hilos de la UI.
+   * **Corrección**:
+     - En `routes/api.py`, la función `/status` fue envuelta en un bloque `try...except` global que garantiza un retorno HTTP 200 con payload JSON de contingencia.
+     - En `assets/js/app-init.js`, se añadió validación `if (!res.ok) return;` y bloque `try...catch` protector antes de parsear el JSON.
+
+3. **Manejo de Apóstrofes y Navegación de Series ("El Show de los 70's")**:
+   * **Causa**: Nombres de series con comillas simples o apóstrofes (`'70s`) rompían la sintaxis de atributos HTML `onclick="openFolder('...')"` y consultas SQL sensibles a mayúsculas/minúsculas.
+   * **Corrección**:
+     - Se reemplazó la interpolación de texto en línea por atributos de datos HTML5 (`data-folder-path`, `data-path`) en `assets/js/library-render.js`, `hero_series.js` y `video-catalog.js`.
+     - Se incorporaron las funciones globales seguras `window.openFolderPath(path)` y `window.goToSeason(name)` en `state.js`.
+     - En `routes/tv_api.py`, la consulta SQL en `/api/tv/episodes` se actualizó con `COLLATE NOCASE`.
+
+4. **Transcodificación 4K y Fallback Forzado en Android TV**:
+   * **Causa**: En Android TV, archivos de video con resolución 4K (>1080p) con bitrate elevado generaban `ERROR_CODE_IO_UNSPECIFIED` en reproducción directa sin activar el reintento transcodificado.
+   * **Corrección**:
+     - En `services/hls_transcoder.py`: Forzado estricto de `direct_play = False` para cualquier video >1080p, aplicando filtro `-vf scale='min(1920,iw)':-2`.
+     - Se agregó soporte para el parámetro `force_transcode=1` en `/api/hls/play` y `/api/hls/reconnect`.
+     - En KrakenTV (`PlayerActivity.kt` y `KrakenApi.kt`): Se incorporaron códigos IO (`ERROR_CODE_IO_UNSPECIFIED`) al detector `isCodecOrFormatError` y se implementó reintento con `forceTranscode = true`.
+
+5. **Privacidad: Aislamiento de Dispositivos y Modal de Segunda Pantalla**:
+   * **Causa**: Dispositivos Smart TV con sesiones activas en el servidor eran interpretados como públicos por cualquier cliente conectado, provocando que amigos remotos recibieran alertas como *"🟢 VIENDO EN PANTALLA Kraken TV ¿Deseas usar este celular como segunda pantalla?"*.
+   * **Corrección**:
+     - En `assets/js/radar-remote.js`: Se aisló `checkActiveCompanionPrompt()`, la píldora persistente de chat y el modal Connect (`showConnectModal`) exigiendo validación estricta de cuenta propia (`isMyAccount` / `isSameUser`), excepto cuando los usuarios participan en una sala explícita de Watch Party.
+     - En `routes/api.py`: Se aseguraron los endpoints `/control` y `/device/control/link` exigiendo que el solicitante comparta el mismo correo de cuenta o sea SuperAdmin para enviar órdenes a un dispositivo físico ajeno, retornando `HTTP 403 Forbidden` ante intentos no autorizados.
+
+> [!NOTE]
+> Durante la resolución de las observaciones de auditoría y privacidad de dispositivos, no se generaron nuevos ejecutables `.exe` ni instaladores, a fin de asegurar y validar la totalidad de las correcciones en el código fuente y batería de pruebas antes de proceder con el empaquetado final.
+
 ## 4. Binarios Empaquetados y Distribución
 
 Todos los entregables de la versión 5.0.1 se encuentran compilados y verificados en sus rutas finales:

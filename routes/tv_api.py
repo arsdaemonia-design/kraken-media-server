@@ -239,7 +239,7 @@ def tv_series_episodes():
             FROM media m
             LEFT JOIN user_progress p ON p.media_id = m.id AND p.user_email = ?
             WHERE m.media_type = 'video'
-              AND substr(replace(m.rel_path, '\\', '/'), 1, ?) = ?
+              AND substr(replace(m.rel_path, '\\', '/'), 1, ?) = ? COLLATE NOCASE
               AND COALESCE(m.is_hidden, 0) = 0
         """
         args = [_email, len(series_path) + 1, series_path + "/"]

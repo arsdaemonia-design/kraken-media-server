@@ -124,13 +124,13 @@ class HLSTranscoder:
             friendly_container = ['.mp4', '.webm', '.m4v']
             is_friendly_container = any(input_file.lower().endswith(ext) for ext in friendly_container)
             first_audio_friendly = (not audio_streams) or (audio_streams[0].get('codec_name') in friendly_audio)
-            # Para Direct Play: H.264 > 1080p (4K AVC) desborda decodificadores de hardware en Smart TVs / Android TV
+            # Para Direct Play: resoluciones mayores a 1080p (4K/UHD) desbordan buffers y decodificadores en TV/Web
             direct_play = (
                 is_friendly_container
                 and (video_codec in browser_friendly_video)
                 and (pix_fmt in ('yuv420p', 'yuvj420p', None))
                 and first_audio_friendly
-                and not (video_codec == 'h264' and is_over_1080p)
+                and not is_over_1080p
             )
             
             lang_map = {
@@ -249,8 +249,8 @@ class HLSTranscoder:
 
         if needs_video_reencode:
             cmd += encoder_settings
-            # Solo escalar si es H.264 > 1080p porque los decodificadores de hardware de Smart TVs no soportan 4K en H.264
-            if analysis.get('is_over_1080p') and analysis.get('video_codec') == 'h264':
+            # Solo escalar si es resolución mayor a 1080p (4K) para que los decodificadores de hardware de Smart TVs / TV boxes no colapsen
+            if analysis.get('is_over_1080p'):
                 cmd += ["-vf", "scale='min(1920,iw)':-2"]
             cmd += ["-g", "48", "-force_key_frames", "expr:gte(t,n_forced*2)"]
             if video_encoder == "libx264":
@@ -323,6 +323,7 @@ class HLSTranscoder:
         hls_mode="stream",
         hls_segment_type="mpegts",
         start_time=0.0,
+        force_transcode=False,
     ):
         """Prepara e inicia el proceso FFmpeg para HLS."""
         print(f"[HLS] Input file: {input_file}")
@@ -351,7 +352,7 @@ class HLSTranscoder:
 
         force_hls_for_audio = normalized_audio_index > 0
 
-        if analysis.get('direct_play') and not force_hls_for_audio and (not start_time or start_time <= 0):
+        if analysis.get('direct_play') and not force_transcode and not force_hls_for_audio and (not start_time or start_time <= 0):
             print("[HLS] MP4/WebM nativo detectado, bypass HLS (Direct Play)")
             return "DIRECT", audio_tracks, normalized_audio_index, None
 
@@ -416,4 +417,6 @@ class HLSTranscoder:
             return process, audio_tracks, normalized_audio_index, None
         except Exception as e:
             print(f"[HLS] Fallo al iniciar FFmpeg: {e}")
-            return None, audio_tracks, normalized_audio_index, str(e)
+            return None, [], 0, str(e)
+
+hls_transcoder = HLSTranscoder()

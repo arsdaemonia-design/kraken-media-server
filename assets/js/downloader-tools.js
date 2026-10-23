@@ -639,7 +639,7 @@ function showDuplicatesPanel() {
                         const matchLabel = group.kind === 'exact' ? 'Byte a byte' : (strongMatch ? 'Mismo tamaño + álbum + duración' : 'Duración ±2 s');
                         const compactInfo = item => `
                             <div style="display:flex;align-items:flex-start;gap:0.6rem;min-width:0;">
-                                <img src="/caratula/${encodeURIComponent(item.path)}" onerror="this.src='/static/default_cover.jpg'" style="width:2.5rem;height:2.5rem;border-radius:0.4rem;object-fit:cover;background:#000;flex-shrink:0;">
+                                <img src="/caratula/${encodeURIComponent(item.path)}" onerror="this.onerror=null; this.src='/static/default_cover.jpg'" style="width:2.5rem;height:2.5rem;border-radius:0.4rem;object-fit:cover;background:#000;flex-shrink:0;">
                                 <div style="min-width:0;flex:1;">
                                     <div style="font-size:0.75rem;color:#fff;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(item.title || item.filename || 'Sin título')}</div>
                                     <div style="font-size:0.6875rem;color:#34d399;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(item.artist || 'Artista desconocido')}</div>

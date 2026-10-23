@@ -5,7 +5,7 @@ a = Analysis(
     ['app_offline.py'],
     pathex=[],
     binaries=[],
-    datas=[('templates', 'templates'), ('assets', 'assets'), ('routes', 'routes'), ('services', 'services'), ('sw.js', '.'), ('config.py', '.'), ('state.py', '.'), ('utils.py', '.'), ('app.py', '.'), ('alexa_handlers.py', '.'), ('ffmpeg.exe', '.'), ('ffprobe.exe', '.'), ('cloudflared-windows-amd64.exe', '.')],
+    datas=[('templates', 'templates'), ('assets', 'assets'), ('static', 'static'), ('routes', 'routes'), ('services', 'services'), ('sw.js', '.'), ('config.py', '.'), ('state.py', '.'), ('utils.py', '.'), ('app.py', '.'), ('alexa_handlers.py', '.'), ('ffmpeg.exe', '.'), ('ffprobe.exe', '.'), ('cloudflared-windows-amd64.exe', '.')],
     hiddenimports=[
         'flask', 'flask_compress', 'flask_ask_sdk',
         'yt_dlp', 'yt_dlp.YoutubeDL',

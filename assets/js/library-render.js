@@ -1346,7 +1346,7 @@ function filterNetflixRows(category) {
                             .filter(n => groups[n].isSeason)
                             .map(name => {
                                 const isActive = currentFolderView === name;
-                                return `<button onclick="goToSeason('${name}')" class="px-3 py-1.5 rounded-full text-xs font-bold transition ${isActive ? 'bg-emerald-600 text-white' : 'bg-white/10 text-white/70 hover:bg-white/20'}">${name}</button>`;
+                                return `<button onclick="goToSeason(this.dataset.seasonName)" data-season-name="${escapeHtml(name)}" class="px-3 py-1.5 rounded-full text-xs font-bold transition ${isActive ? 'bg-emerald-600 text-white' : 'bg-white/10 text-white/70 hover:bg-white/20'}">${escapeHtml(name)}</button>`;
                             }).join('');
 
                         container.innerHTML += `
@@ -1814,12 +1814,13 @@ function filterNetflixRows(category) {
 
                 // Lógica para movie vs series: movie_folder = 1 click, series_folder = navegar
                 const clickAction = isMovieFolder
-                    ? `playNow('${escapeStr(f.path)}')`
-                    : (f.type === 'folder' ? `currentPath='${escapeStr(f.path)}'; renderLib();` : `playNow(this.dataset.path)`);
+                    ? `playNow(this.dataset.path)`
+                    : (f.type === 'folder' ? `openFolderPath(this.dataset.path)` : `playNow(this.dataset.path)`);
                 const folderIcon = isMovieFolder ? 'fa-play ml-1' : 'fa-folder-open';
                 const movieDetailPath = ((f.path || '').replace(/\\/g, '/').split('/').slice(0, 3).join('/') + '/');
                 const movieInfoHoverBtn = (currentLibrary === 'video' && isMovieFolder) ? `
-                <button onclick="event.stopPropagation(); currentPath='${escapeStr(movieDetailPath)}'; renderLib();"
+                <button onclick="event.stopPropagation(); openFolderPath(this.dataset.moviePath)"
+                        data-movie-path="${escapeHtml(movieDetailPath)}"
                         class="px-3 py-1.5 rounded-full bg-white/15 hover:bg-white/25 border border-white/25 text-white text-[11px] font-bold transition-all duration-200 mb-1">
                     <i class="fa-solid fa-circle-info mr-1"></i> Más información
                 </button>` : '';

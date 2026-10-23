@@ -1026,20 +1026,16 @@
                 const uDevName = (u.device_name || '').toLowerCase().trim();
                 const uDevType = (u.device_type || '').toLowerCase().trim();
 
-                // 1. Mismo usuario / misma cuenta (dispositivos propios: cel, tablet, laptop)
-                const isSameUser = (myEmail && uEmail && uEmail === myEmail) ||
-                                   (myName && uName && uName === myName);
-
-                // 2. Pantallas y altavoces compartidos dedicados (Android TV, Chromecast, Parlante de sala)
-                // OJO: Si pertenece a otro usuario (!isSameUser), NO debe ser una laptop/PC de escritorio o móvil personal
-                const isPersonalDevOfOtherUser = !isSameUser && (uDevType === 'desktop' || uDevType === 'mobile' || uDevType === 'browser');
-                const isSharedSpeakerOrTv = !isPersonalDevOfOtherUser && (
-                    uDevType === 'tv' || 
-                    /tv|proyector|soundbar/i.test(uDevType) ||
-                    (/tv|sala|comedor|recamara|proyector|altavoz|parlante|soundbar|living/i.test(uDevName) && !/windows|mac|iphone|ipad|android\s*(phone|mobile)/i.test(uDevName))
+                // Dispositivos propios: cel, tablet, laptop, Smart TV de la MISMA cuenta
+                const isSameUser = Boolean(
+                    u.is_me ||
+                    (myEmail && uEmail && uEmail === myEmail) ||
+                    (myName && uName && uName === myName)
                 );
 
-                return isSameUser || isSharedSpeakerOrTv;
+                // En Spotify Connect solo se listan dispositivos propios de la cuenta.
+                // Los invitados o amigos remotos NUNCA ven ni controlan altavoces o pantallas ajenas.
+                return isSameUser;
             });
 
             let devicesListHtml = '';
@@ -2934,13 +2930,28 @@
 
             // En el dispositivo remoto/acompañante (celular o tablet donde NO se está viendo el video):
             // Se muestra si hay una sesión activa de TV o de Watch Party
+            const myEmail = (window.MY_EMAIL || '').toLowerCase().trim();
+            const myName = (window.MY_NAME || '').toLowerCase().trim();
+
             const activeTv = (LAST_USERS_DATA || []).find(u => {
                 if (!u || !u.session_id || u.session_id === MY_SESSION_ID) return false;
-                const isMyAccount = (u.email && u.email.toLowerCase() === (window.MY_EMAIL || '').toLowerCase()) ||
-                                    (u.name && u.name.toLowerCase() === (window.MY_NAME || '').toLowerCase());
+                const uEmail = (u.email || '').toLowerCase().trim();
+                const uName = (u.name || '').toLowerCase().trim();
+
+                const isMyAccount = Boolean(
+                    u.is_me ||
+                    (myEmail && uEmail && uEmail === myEmail) ||
+                    (myName && uName && uName === myName)
+                );
+                const isParty = Boolean(
+                    window.KRAKEN_SYNC_WATCH_PARTY && (u.party_title || u.friendName)
+                );
+
+                if (!isMyAccount && !isParty) return false;
+
                 const isTvOrSpeaker = u.is_speaker || u.device_type === 'tv' || /tv|sala|comedor|smart|chromecast/i.test(u.device_name || '');
                 const isPlayingVideo = u.media_type === 'video' || (Number(u.time || 0) > 0 && Number(u.duration || 0) > 1200);
-                return (isMyAccount || isTvOrSpeaker) && isPlayingVideo;
+                return (isTvOrSpeaker || isParty) && isPlayingVideo;
             }) || window.KRAKEN_PLAYBACK_TARGET;
 
             const isParty = !!(window.KRAKEN_SYNC_WATCH_PARTY && window.KRAKEN_SYNC_WATCH_PARTY.targetSid);
@@ -3119,11 +3130,30 @@
 
             const tvPlayback = users.find(u => {
                 if (!u || !u.session_id || u.session_id === MY_SESSION_ID) return false;
-                const isMyAccount = (u.email && u.email.toLowerCase() === myEmail) || (u.name && u.name.toLowerCase() === myName);
+
+                const uEmail = (u.email || '').toLowerCase().trim();
+                const uName = (u.name || '').toLowerCase().trim();
+
+                // 1. Solo puede ser segunda pantalla si es un dispositivo de MI PROPIA CUENTA
+                const isMyAccount = Boolean(
+                    u.is_me ||
+                    (myEmail && uEmail && uEmail === myEmail) ||
+                    (myName && uName && uName === myName)
+                );
+
+                // 2. O si estamos explícitamente en una sesión de Watch Party activa compartida
+                const isSharedWatchParty = Boolean(
+                    window.KRAKEN_SYNC_WATCH_PARTY && (u.party_title || u.friendName)
+                );
+
+                if (!isMyAccount && !isSharedWatchParty) {
+                    return false;
+                }
+
                 const isTvOrSpeaker = u.is_speaker || u.device_type === 'tv' || /tv|sala|comedor|smart|chromecast/i.test(u.device_name || '');
                 const isPlayingVideo = u.media_type === 'video' || (Number(u.time || 0) > 0 && Number(u.duration || 0) > 1200);
 
-                return (isMyAccount || isTvOrSpeaker) && isPlayingVideo && !!u.song;
+                return (isTvOrSpeaker || isSharedWatchParty) && isPlayingVideo && !!u.song;
             });
 
             if (!tvPlayback) return;

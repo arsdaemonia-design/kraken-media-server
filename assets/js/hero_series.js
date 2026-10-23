@@ -113,7 +113,7 @@
                                 <button onclick="event.stopPropagation(); playShuffleSeries('${escapeStr(heroItem.path)}')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs md:text-sm py-2.5 md:py-3 px-6 md:px-8 rounded-full shadow-lg hover:scale-105 transition flex items-center justify-center gap-2 border border-emerald-400/30">
                                     <i class="fa-solid fa-shuffle"></i> Aleatorio
                                 </button>
-                                <button onclick="event.stopPropagation(); currentPath='${escapeStr(heroItem.path)}'; renderLib();" class="bg-white/10 hover:bg-white/20 backdrop-blur text-white font-bold text-xs md:text-sm py-2.5 md:py-3 px-6 md:px-8 rounded-full shadow-lg hover:scale-105 transition flex items-center justify-center gap-2 border border-white/10">
+                                <button onclick="event.stopPropagation(); openFolderPath(this.dataset.seriesPath);" data-series-path="${escapeHtml(heroItem.path)}" class="bg-white/10 hover:bg-white/20 backdrop-blur text-white font-bold text-xs md:text-sm py-2.5 md:py-3 px-6 md:px-8 rounded-full shadow-lg hover:scale-105 transition flex items-center justify-center gap-2 border border-white/10">
                                     <i class="fa-solid fa-list"></i> Episodios
                                 </button>
                             ` : ''}
@@ -213,7 +213,7 @@ function buildFullCastGrid(cast) {
             </button>`;
         }
 
-        return `<button onclick="event.stopPropagation(); currentPath='${escapeStr(heroItem.path)}'; renderLib();" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-sm md:text-base py-2.5 md:py-3 px-7 md:px-10 rounded-full shadow-xl hover:scale-105 transition flex items-center justify-center gap-2">
+        return `<button onclick="event.stopPropagation(); openFolderPath(this.dataset.seriesPath);" data-series-path="${escapeHtml(heroItem.path)}" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-sm md:text-base py-2.5 md:py-3 px-7 md:px-10 rounded-full shadow-xl hover:scale-105 transition flex items-center justify-center gap-2">
             <i class="fa-solid fa-play"></i> Reproducir
         </button>`;
     }

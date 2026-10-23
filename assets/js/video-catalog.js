@@ -324,11 +324,11 @@ function appendNetflixHero(container, heroItem) {
         : `/caratula/${(heroSource._normalizedPath || heroSource.path || '').split('/').map(p => encodeURIComponent(p)).join('/')}`;
     const isHeroMovie = heroItem.folder_type === 'movie';
     const heroClickAction = isHeroMovie
-        ? `playNow('${escapeStr(heroItem.path)}')`
-        : (heroItem.type === 'folder' ? `currentPath='${escapeStr(heroItem.path)}'; renderLib();` : `playNow('${escapeStr(heroItem.path)}')`);
+        ? `playNow(this.dataset.path)`
+        : (heroItem.type === 'folder' ? `openFolderPath(this.dataset.path)` : `playNow(this.dataset.path)`);
 
     const heroPlaceholderId = 'hero-placeholder-' + Date.now();
-    container.innerHTML += `<div id="${heroPlaceholderId}" class="relative w-full h-[16vh] min-h-[140px] md:h-[22vh] md:min-h-[180px] rounded-2xl md:rounded-3xl overflow-hidden shadow-2xl group border border-white/5 flex-shrink-0 mb-4 cursor-pointer transition-all duration-500" onclick="${heroClickAction}">
+    container.innerHTML += `<div id="${heroPlaceholderId}" data-path="${escapeHtml(heroItem.path)}" class="relative w-full h-[16vh] min-h-[140px] md:h-[22vh] md:min-h-[180px] rounded-2xl md:rounded-3xl overflow-hidden shadow-2xl group border border-white/5 flex-shrink-0 mb-4 cursor-pointer transition-all duration-500" onclick="${heroClickAction}">
         <img src="${heroCover}" class="absolute inset-0 w-full h-full object-cover opacity-60 group-hover:opacity-75 group-hover:scale-105 transition duration-1000" onerror="this.style.display='none'">
         <div class="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/60 to-transparent"></div>
         <div class="absolute inset-0 bg-gradient-to-r from-[#0a0a0a]/90 via-[#0a0a0a]/40 to-transparent"></div>
@@ -855,7 +855,7 @@ function renderVideoDetailHeroAndSeasonControls(container, filtered) {
     container.innerHTML += `
         <div class="w-full flex items-center justify-between gap-2 px-2 md:px-0 mt-1 mb-4 overflow-x-auto no-scrollbar">
             <div class="flex items-center gap-3">
-                <button onclick="currentPath='${escapeStr(baseShowPath)}'; currentFolderView=null; renderLib();" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-xs md:text-sm py-2.5 px-5 rounded-full transition flex items-center gap-2">
+                <button onclick="openFolderPath(this.dataset.basePath)" data-base-path="${escapeHtml(baseShowPath)}" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-xs md:text-sm py-2.5 px-5 rounded-full transition flex items-center gap-2">
                     <i class="fa-solid fa-folder-open"></i> Explorar Temporadas
                 </button>
                 ${seasonSelect}

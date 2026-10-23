@@ -16,7 +16,7 @@ PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
 ; Output directory for the generated installer executable
 OutputDir=dist
-OutputBaseFilename=Kraken_Media_Server_Installer_v4.83
+OutputBaseFilename=Kraken_Media_Server_Installer_v5.0.1
 Compression=lzma
 SolidCompression=no
 WizardStyle=modern

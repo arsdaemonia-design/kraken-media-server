@@ -359,3 +359,32 @@ function escapeHtml(str) {
  * Retorna la clase CSS de gradiente predeterminada para tarjetas sin carátula.
  */
 function getRandomGradient() { return `rand-grad-0`; }
+
+/**
+ * `openFolderPath(path)`
+ * Navegación segura hacia una carpeta o serie sin colisión de comillas simples o dobles en atributos onclick.
+ */
+window.openFolderPath = function(target) {
+    let targetPath = '';
+    if (typeof target === 'string') {
+        targetPath = target;
+    } else if (target && target.dataset && target.dataset.folderPath) {
+        targetPath = target.dataset.folderPath;
+    }
+    window.currentPath = targetPath || '';
+    window.currentFolderView = null;
+    if (typeof renderLib === 'function') {
+        renderLib();
+    }
+};
+
+window.goToSeason = function(seasonName) {
+    const safeSeason = (typeof seasonName === 'string') ? seasonName : (seasonName?.dataset?.seasonName || '');
+    if (!safeSeason) return;
+    const safeName = safeSeason.replace(/[^a-zA-Z0-9]/g, '-');
+    const el = document.getElementById('season-' + safeName);
+    if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    window.currentFolderView = safeSeason;
+};

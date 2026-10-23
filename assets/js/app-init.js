@@ -93,7 +93,18 @@ function initApp() {
             });
 
             const res = await fetch(`/status?${params.toString()}`);
-            const d = await res.json();
+            if (!res.ok) {
+                return;
+            }
+            let d;
+            try {
+                d = await res.json();
+            } catch (jsonErr) {
+                return;
+            }
+            if (!d || typeof d !== 'object') {
+                return;
+            }
 
             // --- ASIGNAR IDENTIDAD DEL USUARIO (desde JWT local o CF legacy) ---
             if (d.my_email) {
