@@ -1,3 +1,15 @@
+
+function showServerUrlHelp(e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    const box = document.getElementById('server-url-tooltip-box');
+    if (box) box.classList.toggle('hidden');
+}
+
+function showSetupUrlHelp(e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    const box = document.getElementById('setup-url-tooltip-box');
+    if (box) box.classList.toggle('hidden');
+}
 /**
  * ============================================================================
  * KRAKEN MEDIA SERVER — admin-settings.js
@@ -114,7 +126,12 @@ async function submitSetupWizard() {
         const res = await fetch('/api/setup', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, pin, media_path: mediaPath }) // 🔥 JSON MODIFICADO 🔥
+            body: JSON.stringify({ 
+                email, 
+                pin, 
+                media_path: mediaPath,
+                public_url: document.getElementById('setup-public-url')?.value.trim() || undefined
+            }) // 🔥 JSON MODIFICADO 🔥
         });
         const d = await res.json();
 
@@ -206,6 +223,23 @@ function showFirstTimeSetup(d) {
                     <input type="text" id="setup-media-path" value="${d.current_media_path || ''}" placeholder="Ej: D:\\Mis Discos\\Kraken" 
                            class="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition">
                 </div>
+                <div>
+                    <div class="flex items-center justify-between mb-2 ml-1">
+                        <label class="block text-xs font-bold text-emerald-400 uppercase tracking-widest">
+                            <i class="fa-solid fa-globe mr-1"></i> URL Pública / Dominio (Opcional)
+                        </label>
+                        <button type="button" onclick="showSetupUrlHelp(event)" class="text-zinc-400 hover:text-emerald-400 text-xs px-2 py-0.5 rounded-full bg-white/5 border border-white/10 transition flex items-center gap-1 cursor-pointer">
+                            <i class="fa-solid fa-circle-question text-emerald-400"></i>
+                            <span class="text-[10px]">¿Qué es esto?</span>
+                        </button>
+                    </div>
+                    <input type="text" id="setup-public-url" value="${d.public_url || ''}" placeholder="Ej: https://kraken.ederzu.com" 
+                           class="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition text-sm">
+                    <div id="setup-url-tooltip-box" class="hidden mt-2 p-3 bg-zinc-900 border border-emerald-500/30 rounded-xl text-[11px] text-zinc-300 leading-relaxed shadow-lg">
+                        <strong class="text-emerald-400 block mb-1">Para acceso remoto o túneles:</strong>
+                        Si tienes Cloudflare Tunnel, DuckDNS o un dominio configurado para acceder desde internet, escríbelo aquí. Si no tienes uno o solo lo usarás en casa, déjalo vacío y Kraken se adaptará a tu red local.
+                    </div>
+                </div>
                 
                 <button onclick="submitFirstTimeSetup()" id="setup-submit-btn"
                         class="w-full bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-bold py-4 rounded-xl shadow-lg shadow-emerald-900/50 hover:shadow-emerald-900/80 transition-all hover:scale-[1.02] flex items-center justify-center gap-2">
@@ -255,7 +289,13 @@ async function submitFirstTimeSetup() {
         const res = await fetch('/api/setup/firsttime', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password, pin: masterPin, media_path: mediaPath })
+            body: JSON.stringify({ 
+                username, 
+                password, 
+                pin: masterPin, 
+                media_path: mediaPath,
+                public_url: document.getElementById('setup-public-url')?.value.trim() || undefined
+            })
         });
         const d = await res.json();
 
@@ -308,6 +348,30 @@ function showAdminPanel(pin) {
                                     <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Ruta de Archivos</label>
                                     <input type="text" id="settings-media-path" value="${d.current_media_path || ''}" placeholder="Ej: D:\\Mis Discos" 
                                            class="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition">
+                                </div>
+                                <div>
+                                    <div class="flex items-center justify-between mb-2">
+                                        <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest">
+                                            URL Pública / Dominio (Opcional)
+                                        </label>
+                                        <button type="button" onclick="showServerUrlHelp(event)" class="text-zinc-400 hover:text-emerald-400 text-xs px-2 py-0.5 rounded-full bg-white/5 border border-white/10 hover:border-emerald-500/40 transition flex items-center gap-1 cursor-pointer">
+                                            <i class="fa-solid fa-circle-question text-emerald-400"></i>
+                                            <span class="text-[10px]">¿Qué es esto?</span>
+                                        </button>
+                                    </div>
+                                    <input type="text" id="settings-public-url" value="${d.public_url || ''}" placeholder="Ej: https://kraken.ederzu.com" 
+                                           class="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition text-sm">
+                                    <div id="server-url-tooltip-box" class="hidden mt-2 p-3 bg-zinc-800/90 border border-emerald-500/30 rounded-xl text-[11px] text-zinc-300 leading-relaxed shadow-xl">
+                                        <div class="flex items-start gap-2">
+                                            <i class="fa-solid fa-shield-halved text-emerald-400 mt-0.5 shrink-0"></i>
+                                            <div>
+                                                <strong class="text-white block mb-1">Conexión Externa y Enlaces Compartidos:</strong>
+                                                Este campo es <em>opcional</em>. Se utiliza para generar enlaces de música compartida (<code class="text-emerald-300">/share/...</code>) y enviar contenido a Chromecast fuera de tu red local cuando tienes un túnel (Cloudflare Tunnel, Tailscale, DuckDNS) o tu propio dominio apuntando a Kraken.<br><br>
+                                                <span class="text-zinc-400">• Si usas túnel o dominio (ej. <strong>https://kraken.ederzu.com</strong>), ponlo aquí.<br>
+                                                • Si no cuentas con túnel o solo usas Kraken en tu casa o red Wi-Fi local, <strong>déjalo en blanco</strong> y funcionará automáticamente con tu IP local.</span>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                                 
                                 <div>

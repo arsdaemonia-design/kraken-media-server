@@ -2600,6 +2600,12 @@ def setup_firsttime():
         
         if media_path:
             _save_runtime_config('media_path', media_path)
+            
+        public_url = (data.get('public_url') or '').strip().rstrip('/')
+        if public_url:
+            if not public_url.startswith(('http://', 'https://')):
+                public_url = f"https://{public_url}"
+            _save_runtime_config('public_url', public_url)
         
         # Crear usuario admin con contraseña
         safe_name = username.lower().replace(' ', '_')
