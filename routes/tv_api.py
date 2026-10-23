@@ -219,7 +219,7 @@ def tv_backdrop(media_id):
 
 @tv_bp.route("/api/tv/episodes")
 def tv_series_episodes():
-    """Return seasons and episodes for the selected series directory."""
+    """Return seasons and episodes for the selected series directory, with progress and metadata."""
     series_path = request.args.get("path", "").replace("\\", "/").strip("/")
     parts = series_path.split("/")
     if not series_path or any(part in ("", ".", "..") for part in parts):
@@ -232,32 +232,144 @@ def tv_series_episodes():
             return jsonify({"error": "Sesión requerida"}), 401
 
         query = """
-            SELECT id, rel_path, filename, title, is_adult, tmdb_rating
-            FROM media
-            WHERE media_type = 'video' AND folder_type = 'series'
-              AND substr(replace(rel_path, '\\', '/'), 1, ?) = ?
-              AND COALESCE(is_hidden, 0) = 0
+            SELECT m.id, m.rel_path, m.filename, m.title, m.is_adult, m.tmdb_rating,
+                   m.tmdb_poster, m.tmdb_id, m.tmdb_title, m.tmdb_overview, m.tmdb_year,
+                   m.tmdb_genres, m.genre, m.duration_sec,
+                   p.progress_seconds, p.duration_seconds, p.is_finished, p.last_watched
+            FROM media m
+            LEFT JOIN user_progress p ON p.media_id = m.id AND p.user_email = ?
+            WHERE m.media_type = 'video'
+              AND substr(replace(m.rel_path, '\\', '/'), 1, ?) = ?
+              AND COALESCE(m.is_hidden, 0) = 0
         """
-        args = [len(series_path) + 1, series_path + "/"]
+        args = [_email, len(series_path) + 1, series_path + "/"]
         query, args = _apply_tv_visibility(query, args, kid_mode, has_pin)
-        rows = conn.execute(query + " ORDER BY rel_path LIMIT 500", args).fetchall()
+        rows = conn.execute(query + " ORDER BY m.rel_path LIMIT 500", args).fetchall()
 
         episodes = []
+        series_info = {
+            "title": os.path.basename(series_path),
+            "overview": None,
+            "year": None,
+            "genres": [],
+            "poster": None,
+            "backdrop_url": None,
+            "tmdb_id": None
+        }
+
+        for row in rows:
+            if not series_info["overview"] and row["tmdb_overview"]:
+                series_info["overview"] = row["tmdb_overview"]
+            if not series_info["year"] and row["tmdb_year"]:
+                series_info["year"] = row["tmdb_year"]
+            if (series_info["title"] == os.path.basename(series_path) or not series_info["title"]) and row["tmdb_title"]:
+                series_info["title"] = row["tmdb_title"]
+            if not series_info["poster"] and row["tmdb_poster"]:
+                series_info["poster"] = row["tmdb_poster"]
+            if not series_info["tmdb_id"] and row["tmdb_id"]:
+                series_info["tmdb_id"] = row["tmdb_id"]
+            if not series_info["genres"] and (row["tmdb_genres"] or row["genre"]):
+                series_info["genres"] = _tv_genres(row["tmdb_genres"], row["genre"])
+
+        if not series_info["poster"]:
+            series_poster = os.path.basename(series_path) + ".jpg"
+            if os.path.isfile(os.path.join(config.THUMBNAILS_FOLDER, series_poster)):
+                series_info["poster"] = series_poster
+
+        if series_info["tmdb_id"]:
+            try:
+                from services.video_tagger import TMDB_API_KEY, TMDB_BASE_URL
+                tmdb_resp = requests.get(
+                    f"{TMDB_BASE_URL}/tv/{series_info['tmdb_id']}",
+                    params={"api_key": TMDB_API_KEY, "language": "es-MX"},
+                    timeout=3
+                )
+                if tmdb_resp.status_code == 200:
+                    bd = tmdb_resp.json().get("backdrop_path")
+                    if bd:
+                        series_info["backdrop_url"] = f"https://image.tmdb.org/t/p/w1280{bd}"
+                    if not series_info["overview"]:
+                        series_info["overview"] = tmdb_resp.json().get("overview")
+            except Exception:
+                pass
+
+        last_watched_ep = None
+        first_unfinished_ep = None
+
         for row in rows:
             rel_path = (row["rel_path"] or "").replace("\\", "/").strip("/")
             relative = rel_path[len(series_path):].strip("/")
             path_parts = relative.split("/")
-            if path_parts and path_parts[0].lower() in {"temporadas", "seasons", "season"}:
-                season = path_parts[1] if len(path_parts) > 2 else "Episodios"
+            raw_season = path_parts[0] if len(path_parts) > 1 else "Episodios"
+            if path_parts and path_parts[0].lower() in {"temporadas", "seasons", "season"} and len(path_parts) > 2:
+                raw_season = path_parts[1]
+
+            s_match = re.search(r'(?:temporada|seasons?|temp|s)\s*0*(\d+)', raw_season, re.IGNORECASE)
+            if s_match:
+                season = f"Temporada {int(s_match.group(1))}"
+                season_num = int(s_match.group(1))
             else:
-                season = path_parts[0] if len(path_parts) > 1 else "Episodios"
-            episodes.append({
+                season = raw_season if raw_season.lower() not in {"series", "videos"} else "Episodios"
+                season_num = None
+
+            filename = os.path.splitext(os.path.basename(rel_path))[0]
+            display_title = row["title"] or filename
+
+            ep_match = re.search(r'[sS]\d+[eE](\d+)', filename)
+            if ep_match:
+                ep_num = int(ep_match.group(1))
+            else:
+                alt_match = re.search(r'\b(?:e|ep|cap|capitulo)\s*0*(\d+)\b', filename, re.IGNORECASE)
+                ep_num = int(alt_match.group(1)) if alt_match else None
+
+            progress_sec = row["progress_seconds"] or 0
+            dur_sec = row["duration_seconds"] or row["duration_sec"] or 0
+            is_finished = bool(row["is_finished"])
+            last_watched = row["last_watched"] or 0
+
+            ep_obj = {
                 "id": row["id"],
-                "title": os.path.splitext(os.path.basename(rel_path))[0] or row["title"] or row["filename"],
+                "title": display_title,
                 "path": rel_path,
                 "season": season,
-            })
-        return jsonify({"items": episodes, "series_path": series_path})
+                "season_number": season_num,
+                "episode_number": ep_num,
+                "thumbnail": f"/api/tv/thumbnail/{rel_path}",
+                "poster": row["tmdb_poster"] or rel_path,
+                "progress_seconds": progress_sec,
+                "duration_seconds": dur_sec,
+                "is_finished": is_finished,
+                "last_watched": last_watched,
+            }
+            episodes.append(ep_obj)
+
+            if last_watched > 0:
+                if last_watched_ep is None or last_watched > last_watched_ep["last_watched"]:
+                    last_watched_ep = ep_obj
+            if not is_finished and first_unfinished_ep is None and progress_sec > 0:
+                first_unfinished_ep = ep_obj
+
+        resume_ep = None
+        if last_watched_ep and not last_watched_ep["is_finished"]:
+            resume_ep = last_watched_ep
+        elif last_watched_ep and last_watched_ep["is_finished"]:
+            idx = next((i for i, e in enumerate(episodes) if e["id"] == last_watched_ep["id"]), -1)
+            if idx >= 0 and idx + 1 < len(episodes):
+                resume_ep = episodes[idx + 1]
+        if not resume_ep and episodes:
+            resume_ep = first_unfinished_ep or episodes[0]
+
+        return jsonify({
+            "items": episodes,
+            "series_path": series_path,
+            "series_title": series_info["title"],
+            "overview": series_info["overview"],
+            "year": series_info["year"],
+            "genres": series_info["genres"],
+            "poster": series_info["poster"],
+            "backdrop_url": series_info["backdrop_url"],
+            "resume_episode": resume_ep,
+        })
     finally:
         conn.close()
 
@@ -331,6 +443,41 @@ def tv_poster(filename):
             canvas = Image.new("RGB", (185, 278), (12, 18, 17))
             canvas.paste(image, ((185 - image.width) // 2, (278 - image.height) // 2))
             canvas.save(cache_path, "JPEG", quality=82, optimize=True)
+        response = send_file(cache_path, mimetype="image/jpeg", conditional=True, max_age=31536000)
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+    except Exception:
+        return source
+
+
+@tv_bp.route("/api/tv/thumbnail/<path:filename>")
+def tv_thumbnail(filename):
+    """Serve a 16:9 cached 320x180 JPEG thumbnail for TV episode cards."""
+    decoded = filename.lstrip("/\\")
+    cache_dir = os.path.join(config.THUMBNAILS_FOLDER, "tv_thumbs")
+    cache_path = os.path.join(cache_dir, hashlib.sha256(decoded.encode("utf-8", errors="ignore")).hexdigest() + ".jpg")
+    if os.path.isfile(cache_path):
+        return send_file(cache_path, mimetype="image/jpeg", conditional=True, max_age=31536000)
+
+    source = caratula(decoded)
+    if source.status_code != 200:
+        return source
+    try:
+        source.direct_passthrough = False
+        raw_image = source.get_data()
+        source.close()
+        os.makedirs(cache_dir, exist_ok=True)
+        with Image.open(io.BytesIO(raw_image)) as image:
+            image = image.convert("RGB")
+            target_w, target_h = 320, 180
+            img_w, img_h = image.size
+            scale = max(target_w / img_w, target_h / img_h)
+            new_w, new_h = int(img_w * scale), int(img_h * scale)
+            image = image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            left = (new_w - target_w) // 2
+            top = (new_h - target_h) // 2
+            image = image.crop((left, top, left + target_w, top + target_h))
+            image.save(cache_path, "JPEG", quality=82, optimize=True)
         response = send_file(cache_path, mimetype="image/jpeg", conditional=True, max_age=31536000)
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response

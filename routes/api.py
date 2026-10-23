@@ -976,6 +976,7 @@ def delete_playlist():
 _NO_COVER_CACHE = set()
 
 @api_bp.route('/caratula/<path:filename>')
+@api_bp.route('/api/caratula/<path:filename>')
 def caratula(filename):
     decoded = unquote(filename).lstrip('/\\')
 
