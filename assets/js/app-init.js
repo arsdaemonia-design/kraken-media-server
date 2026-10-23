@@ -92,7 +92,10 @@ function initApp() {
                 media_type: playbackSnapshot.media_type
             });
 
-            const res = await fetch(`/status?${params.toString()}`);
+            const authHeaders = (window.krakenAuth && typeof window.krakenAuth.getAuthHeaders === 'function')
+                ? window.krakenAuth.getAuthHeaders()
+                : {};
+            const res = await fetch(`/status?${params.toString()}`, { headers: authHeaders });
             if (!res.ok) {
                 return;
             }
