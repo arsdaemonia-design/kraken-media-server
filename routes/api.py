@@ -157,6 +157,8 @@ def _save_runtime_config(key, value):
                             f.write(f"KRAKEN_MEDIA_PATH = os.getenv('KRAKEN_MEDIA_PATH', r'{safe_path}')\n")
                         elif key == 'pin' and line.startswith('MASTER_PIN'):
                             f.write(f"MASTER_PIN = os.getenv('MASTER_PIN', '{value}')\n")
+                        elif key == 'public_url' and line.startswith('PUBLIC_SERVER_URL'):
+                            f.write(f"PUBLIC_SERVER_URL = os.getenv('PUBLIC_SERVER_URL', '{value}')\n")
                         else:
                             f.write(line)
             except Exception:
