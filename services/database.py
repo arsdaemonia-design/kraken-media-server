@@ -139,6 +139,19 @@ def init_db():
     )
     ''')
     
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS invites (
+        code TEXT PRIMARY KEY,
+        created_at REAL NOT NULL,
+        duration_minutes INTEGER DEFAULT 0,
+        expires_at REAL,
+        is_beta BOOLEAN DEFAULT 0,
+        trial_hours REAL DEFAULT 0,
+        used_at REAL,
+        used_by TEXT
+    )
+    ''')
+    
     conn.commit()
     
     # Add 'language' column to media table if it doesn't exist

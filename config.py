@@ -20,7 +20,7 @@ RUNTIME_CONFIG_FILE = os.path.join(app_data_dir, 'runtime_config.json')
 DEFAULT_RUNTIME = {
     'media_path': r'F:\Kraken Media Server\descargas',
     'pin': '3041',
-    'public_url': 'https://kraken.ederzu.com'
+    'public_url': os.getenv('PUBLIC_SERVER_URL', '')
 }
 
 def load_runtime_config():
@@ -109,8 +109,8 @@ LASTFM_API_KEY = os.getenv('LASTFM_API_KEY', 'dfc4823f36b21278278f577357d8e7e7')
 
 # Cast / Public URL — usado para que Chromecast acceda a los streams via HTTPS
 # El Chromecast no puede acceder a localhost, necesita una URL pública
-CAST_PUBLIC_URL = os.getenv('CAST_PUBLIC_URL', 'https://kraken.ederzu.com')
-PUBLIC_SERVER_URL = os.getenv('PUBLIC_SERVER_URL', 'https://kraken.ederzu.com')
+CAST_PUBLIC_URL = os.getenv('CAST_PUBLIC_URL', '')
+PUBLIC_SERVER_URL = os.getenv('PUBLIC_SERVER_URL', '')
 
 # Timeout Configs
 LASTFM_TIMEOUT = 3

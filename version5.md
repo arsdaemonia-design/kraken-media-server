@@ -130,22 +130,87 @@ Anteriormente, al generar un enlace para compartir desde la PC donde corre el se
 
 ---
 
+---
+
+### 3.5. Rediseño Integral de Series y Episodios en Android TV (`KrakenTV`)
+* **Problema Identificado**:
+  * La vista anterior de series en la TV abría un diálogo flotante (`AlertDialog`) que desajustaba el motor de foco de Leanback.
+  * El control remoto (D-Pad) se congelaba y quedaba atrapado entre los botones de temporada y el grid de episodios.
+  * Las tarjetas de episodios eran gigantescas (2 columnas enormes), los títulos se encimaban o cortaban, y las carátulas fallaban en cargar (mostrando íconos verdes genéricos) debido a que solicitaban `/api/caratula/...` inexistente en el servidor.
+  * No existía la función de "Seguir viendo" / "Continuar viendo" dentro de la serie.
+* **Solución Implementada**:
+  1. **Pantalla Completa Nativa (`SeriesDetailActivity`)**:
+     * Diseño inmersivo idéntico al Hero de la versión Web (`hero_series.js`):
+       * Backdrop de alta resolución en el fondo con gradientes oscuros OLED (95% a transparente).
+       * Encabezado con título de la serie, año, calificación TMDB (⭐), número de temporadas y total de episodios.
+       * Chips de género y sinopsis completa legible desde el sillón.
+  2. **Botón Principal de "Continuar viendo"**:
+     * El servidor calcula el último episodio visto y el segundo exacto donde se quedó el usuario.
+     * Si hay progreso, el botón principal muestra: `▶ Continuar viendo T1:E3` con subtítulo `04:12 (62%)`.
+     * Si no se ha iniciado la serie, muestra: `▶ Ver primer episodio`.
+     * Al hacer clic, arranca la reproducción directamente en el minuto exacto guardado.
+  3. **Botón "Episodio Aleatorio"**:
+     * Permite reproducir un capítulo al azar de cualquier temporada de la serie (ideal para series como *Bluey*, *Los Simpson*, sitcoms, etc.).
+  4. **Navegación Fluida con D-Pad (Sin Trampas de Foco)**:
+     * El foco inicial se sitúa en el botón de "Continuar viendo".
+     * Flecha Abajo salta de manera limpia a las píldoras de temporadas.
+     * Al cambiar de temporada con Izquierda/Derecha, el riel de episodios inferior se actualiza de inmediato.
+     * Flecha Abajo desde temporadas ingresa directamente al primer episodio.
+     * Flecha Arriba desde cualquier episodio regresa limpiamente al selector de temporadas.
+     * Botón Atrás del control remoto cierra la actividad y regresa con total suavidad al catálogo principal sin cierres forzados ni pantallas negras.
+  5. **Tarjetas de Episodios 16:9 Panorámicas**:
+     * Dimensiones uniformes (`250dp x 140dp`) en formato 16:9.
+     * Servidas con el nuevo endpoint `/api/tv/thumbnail/...` (recortado inteligente a 320x180, cacheado en disco).
+     * Badge en la esquina superior con el número de episodio (`E01`, `E02`...).
+     * Etiqueta de duración (`24 min`).
+     * Barra de progreso verde esmeralda si el episodio está a medias.
+     * Badge `✓ Visto` si el capítulo ya fue completado.
+
+---
+
+## 3.6. Auditoría de Seguridad y Correcciones Críticas (Revisión de Producción)
+
+Tras una auditoría de seguridad estática y dinámica previa a distribución, se identificaron y solventaron las siguientes vulnerabilidades y mejoras arquitectónicas:
+
+1. **[P1] Cierre de Bypass +18 y Contenido Oculto en Enlaces Compartidos (`/api/share/create`)**:
+   * **Vulnerabilidad**: Anteriormente el endpoint aceptaba cualquier identificador o ruta sin comprobar flags de protección ni restringir el tipo de archivo.
+   * **Corrección**:
+     * Se limitó el alcance de compartir **exclusivamente a pistas de audio** (`media_type == 'audio'` y extensiones de sonido válidas). Cualquier intento de compartir video es rechazado con `HTTP 400 Bad Request`.
+     * Se prohíbe de forma tajante compartir contenido clasificado como adulto (`is_adult = 1`) o contenido privado/oculto (`is_hidden = 1`), respondiendo `HTTP 403 Forbidden`.
+2. **[P1] Validación de Duración en Backend (Protección contra Enlaces Eternos)**:
+   * **Vulnerabilidad**: La interfaz web limitaba la selección hasta 7 días, pero la API aceptaba cualquier número positivo enviado por POST.
+   * **Corrección**: Validación estricta en el servidor que exige $1.0 \le 	ext{horas} \le 168.0$ (7 días máximo). Cualquier valor inferior a 1 hora, superior a 168 horas o con formato inválido es rechazado de inmediato con `HTTP 400 Bad Request`.
+3. **[P1] Anonimización de Credenciales Bearer en Logs**:
+   * **Vulnerabilidad**: El token completo se imprimía en texto plano en el registro del servidor.
+   * **Corrección**: El token opera como credencial bearer de acceso, por lo que ahora los logs enmascaran la firma registrando únicamente una huella parcial (`token[:4] + '...' + token[-4:]`).
+4. **Persistencia de Invitaciones Beta ante Reinicios**:
+   * **Mejora**: Las invitaciones se almacenaban previamente solo en el diccionario en memoria `state.STREAM_TOKENS['_invite_codes']`. Si el servidor se reiniciaba antes del canje, el código se perdía.
+   * **Corrección**: Se creó la tabla SQLite `invites` (`code`, `created_at`, `duration_minutes`, `expires_at`, `is_beta`, `trial_hours`, `used_at`, `used_by`). Los códigos se almacenan y consumen directamente en base de datos con respaldo sincronizado en memoria.
+5. **Consistencia de Códigos HTTP (410 Gone)**:
+   * **Corrección**: Todas las rutas públicas asociadas a un token (`/share/<token>`, `/share/<token>/stream`, `/share/<token>/cover` y `/share/<token>/lyrics`) responden unánimemente con `HTTP 410 Gone` al cumplirse el tiempo de expiración.
+6. **Corrección de Valor Predeterminado de URL Pública**:
+   * **Corrección**: Se modificaron los valores por defecto en [`config.py`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/config.py) (`PUBLIC_SERVER_URL = ''`, `CAST_PUBLIC_URL = ''`) para que, si el usuario no tiene túnel ni dominio configurado y deja el campo en blanco, el sistema genere de manera transparente enlaces con la IP y puerto de la red local (`http://192.168.x.x:5000/share/...`).
+7. **Filtrado Preciso de Errores en Reproductor Android TV (Fallback 4K Inteligente)**:
+   * **Corrección**: En [`PlayerActivity.kt`](file:///E:/Kraken%20Media%20Server/KrakenTV/app/src/main/java/com/kraken/tv/PlayerActivity.kt), el reintento con transcodificación HLS a 1080p ahora solo se activa ante errores genuinos de códec, contenedor o capacidad del decodificador de hardware (`ERROR_CODE_DECODING_FAILED`, `ERROR_CODE_DECODER_INIT_FAILED`, `ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED`, etc.). Errores de red o conexión (`ERROR_CODE_IO_NETWORK_CONNECTION_FAILED`) informan al usuario sin reiniciar el transcodificador innecesariamente.
+8. **Claridad Terminológica**:
+   * Los enlaces compartidos utilizan un token ofuscado y opaco de alta entropía (128 bits criptográficos mediante `secrets.token_urlsafe(16)`), el cual funciona como una llave bearer de acceso temporal de un solo título.
+
 ## 4. Binarios Empaquetados y Distribución
 
 Todos los entregables de la versión 5.0.1 se encuentran compilados y verificados en sus rutas finales:
 
-| Componente | Archivo Generado | Tamaño | Ruta en Disco |
-| :--- | :--- | :---: | :--- |
-| **Instalador Oficial Windows** | `Kraken_Media_Server_Installer_v5.0.1.exe` | ~278.9 MB | [`dist/Kraken_Media_Server_Installer_v5.0.1.exe`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/dist/Kraken_Media_Server_Installer_v5.0.1.exe) |
-| **Ejecutable Standalone** | `KrakenOffline.exe` | ~28.8 MB | [`dist/KrakenOffline/KrakenOffline.exe`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/dist/KrakenOffline/KrakenOffline.exe) |
-| **APK Android TV (Oficial)** | `KrakenMS_v5.0.1.apk` | ~8.7 MB | [`E:\Kraken Media Server\KrakenMS_v5.0.1.apk`](file:///E:/Kraken%20Media%20Server/KrakenMS_v5.0.1.apk) |
-| **APK Android TV (Copia dist)** | `KrakenMS.apk` | ~8.7 MB | [`dist/KrakenMS.apk`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/dist/KrakenMS.apk) |
+| Componente | Archivo Generado | Tamaño | Fecha / Hora de Compilación | Ruta en Disco |
+| :--- | :--- | :---: | :---: | :--- |
+| **Instalador Oficial Windows** | `Kraken_Media_Server_Installer_v5.0.1.exe` | 278.9 MB | 22/10/2026 07:41 p. m. | [`dist/Kraken_Media_Server_Installer_v5.0.1.exe`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/dist/Kraken_Media_Server_Installer_v5.0.1.exe) |
+| **Ejecutable Standalone** | `KrakenOffline.exe` | Carpeta dist | 22/10/2026 07:35 p. m. | [`dist/KrakenOffline/KrakenOffline.exe`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/dist/KrakenOffline/KrakenOffline.exe) |
+| **APK Android TV (Oficial)** | `KrakenMS_v5.0.1.apk` | 9.45 MB | 22/10/2026 07:31 p. m. | [`E:\Kraken Media Server\KrakenMS_v5.0.1.apk`](file:///E:/Kraken%20Media%20Server/KrakenMS_v5.0.1.apk) |
+| **APK Android TV (Raíz)** | `KrakenMS.apk` | 9.45 MB | 22/10/2026 07:31 p. m. | [`E:\Kraken Media Server\KrakenMS.apk`](file:///E:/Kraken%20Media%20Server/KrakenMS.apk) |
 
 ---
 
 ## 5. Pruebas Automatizadas Ejecutadas
 
-Durante la sesión se implementó una suite de pruebas sincrónicas sobre el cliente de pruebas de Flask (`test_new_features.py`) con los siguientes resultados:
+Durante la sesión se implementó una suite de pruebas sincrónicas sobre el cliente de pruebas de Flask ([`tests/test_new_features.py`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/tests/test_new_features.py)) con los siguientes resultados:
 
 1. `POST /api/admin/invite` (Creación de invitación beta de 48h): **PASS (HTTP 200)**.
 2. `POST /api/admin/invite/validate` (Validación de invitación beta sin consumirla): **PASS (HTTP 200)**.

@@ -3713,9 +3713,8 @@ def adult_list_items():
 @api_bp.route('/api/admin/invite', methods=['POST'])
 @require_admin
 def admin_create_invite():
-    """Genera código de invitación con expiración configurable y soporte para cuentas Beta."""
+    """Genera código de invitación con expiración configurable y soporte para cuentas Beta (persistente en DB)."""
     data = request.get_json() or {}
-    # Duración en minutos del código de invitación: 0 = nunca expira
     duration_minutes = data.get('duration_minutes', 0)
     is_beta = data.get('is_beta', False)
     trial_hours = float(data.get('trial_hours', 0))
@@ -3725,14 +3724,28 @@ def admin_create_invite():
         is_beta = True
     
     code = generate_invite_code()
+    expires_at = time.time() + (duration_minutes * 60) if duration_minutes > 0 else None
+
+    # Guardar en base de datos para persistencia ante reinicios del servidor
+    try:
+        conn = get_db()
+        c_db = conn.cursor()
+        c_db.execute("""
+            INSERT OR REPLACE INTO invites (code, created_at, duration_minutes, expires_at, is_beta, trial_hours)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (code, time.time(), duration_minutes, expires_at, int(is_beta), trial_hours))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        security_logger.error(f"Error persisting invite code {code}: {e}")
+
     if '_invite_codes' not in state.STREAM_TOKENS:
         state.STREAM_TOKENS['_invite_codes'] = {}
     
-    # Guardar tiempo de creación, duración y configuración beta
     state.STREAM_TOKENS['_invite_codes'][code] = {
         'created_at': time.time(),
         'duration_minutes': duration_minutes,
-        'expires_at': time.time() + (duration_minutes * 60) if duration_minutes > 0 else None,
+        'expires_at': expires_at,
         'is_beta': bool(is_beta),
         'trial_hours': trial_hours
     }
@@ -3743,7 +3756,7 @@ def admin_create_invite():
         'trial_hours': trial_hours
     }
     if duration_minutes > 0:
-        response['expires_at'] = state.STREAM_TOKENS['_invite_codes'][code]['expires_at']
+        response['expires_at'] = expires_at
         response['duration_text'] = f'{duration_minutes} minutos' if duration_minutes < 60 else f'{duration_minutes // 60} horas'
     if is_beta:
         if trial_hours >= 24:
@@ -3757,39 +3770,73 @@ def admin_create_invite():
 @api_bp.route('/api/admin/invite', methods=['DELETE'])
 @require_admin
 def admin_delete_invite():
-    """Invalidar todos los códigos de invitación."""
+    """Invalidar todos los códigos de invitación tanto en DB como en memoria."""
+    try:
+        conn = get_db()
+        c_db = conn.cursor()
+        c_db.execute("DELETE FROM invites")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        security_logger.error(f"Error deleting invites from DB: {e}")
     if '_invite_codes' in state.STREAM_TOKENS:
         state.STREAM_TOKENS['_invite_codes'] = {}
     return jsonify({'ok': True})
 
 @api_bp.route('/api/admin/invite/validate', methods=['POST'])
 def validate_invite_code():
-    """Validar código de invitación sin consumirlo."""
+    """Validar código de invitación sin consumirlo (persistente en base de datos)."""
     data = request.get_json() or {}
     code = data.get('code', '').strip().upper()
     
     if not code:
         return jsonify({'valid': False, 'error': 'Código requerido'}), 400
     
-    codes = state.STREAM_TOKENS.get('_invite_codes', {})
+    code_data = None
+    try:
+        conn = get_db()
+        c_db = conn.cursor()
+        c_db.execute("SELECT * FROM invites WHERE code = ?", (code,))
+        inv_row = c_db.fetchone()
+        conn.close()
+        if inv_row:
+            if inv_row['used_at']:
+                return jsonify({'valid': False, 'error': 'Código ya utilizado'}), 403
+            code_data = {
+                'expires_at': inv_row['expires_at'],
+                'is_beta': bool(inv_row['is_beta']),
+                'trial_hours': inv_row['trial_hours'] or 0
+            }
+    except Exception:
+        pass
+
+    if not code_data:
+        codes = state.STREAM_TOKENS.get('_invite_codes', {})
+        if code in codes:
+            code_data = codes[code]
     
-    if code not in codes:
+    if not code_data:
         return jsonify({'valid': False, 'error': 'Código inválido'}), 404
     
-    code_data = codes[code]
     if isinstance(code_data, dict) and code_data.get('expires_at'):
         if time.time() > code_data['expires_at']:
-            del state.STREAM_TOKENS['_invite_codes'][code]
+            if '_invite_codes' in state.STREAM_TOKENS and code in state.STREAM_TOKENS['_invite_codes']:
+                del state.STREAM_TOKENS['_invite_codes'][code]
             return jsonify({'valid': False, 'error': 'Código expirado'}), 410
     
-    # Código válido - no lo consumimos, solo validamos
     response = {'valid': True}
     if isinstance(code_data, dict):
         if code_data.get('expires_at'):
             response['expires_at'] = code_data['expires_at']
         if code_data.get('is_beta'):
             response['is_beta'] = True
-            response['trial_hours'] = code_data.get('trial_hours', 0)
+            trial_h = code_data.get('trial_hours', 0)
+            response['trial_hours'] = trial_h
+            if trial_h >= 24:
+                days = trial_h / 24.0
+                response['trial_text'] = f"{int(days) if days.is_integer() else days} días"
+            else:
+                response['trial_text'] = f"{int(trial_h) if trial_h.is_integer() else trial_h} horas"
     
     return jsonify(response)
 
@@ -3941,19 +3988,33 @@ def auth_register():
     trial_expires_at = None
 
     if invite_code:
-        # Validar código de invitación
-        codes = state.STREAM_TOKENS.get('_invite_codes', {})
-        if invite_code not in codes:
-            conn.close()
-            return jsonify({"error": "Código de invitación inválido"}), 403
-        
-        # Verificar expiración
-        code_data = codes[invite_code]
-        if isinstance(code_data, dict) and code_data.get('expires_at'):
-            if time.time() > code_data['expires_at']:
-                del state.STREAM_TOKENS['_invite_codes'][invite_code]
+        code_data = None
+        c.execute("SELECT * FROM invites WHERE code = ?", (invite_code,))
+        inv_row = c.fetchone()
+        if inv_row:
+            if inv_row['used_at']:
+                conn.close()
+                return jsonify({"error": "Código de invitación ya utilizado"}), 403
+            if inv_row['expires_at'] and time.time() > inv_row['expires_at']:
                 conn.close()
                 return jsonify({"error": "Código de invitación expirado"}), 403
+            code_data = {
+                'is_beta': bool(inv_row['is_beta']),
+                'trial_hours': inv_row['trial_hours'] or 0
+            }
+        else:
+            codes = state.STREAM_TOKENS.get('_invite_codes', {})
+            if invite_code in codes:
+                code_data = codes[invite_code]
+                if isinstance(code_data, dict) and code_data.get('expires_at'):
+                    if time.time() > code_data['expires_at']:
+                        del state.STREAM_TOKENS['_invite_codes'][invite_code]
+                        conn.close()
+                        return jsonify({"error": "Código de invitación expirado"}), 403
+
+        if not code_data:
+            conn.close()
+            return jsonify({"error": "Código de invitación inválido"}), 403
         
         if isinstance(code_data, dict):
             if code_data.get('is_beta') or code_data.get('trial_hours'):
@@ -3961,8 +4022,9 @@ def auth_register():
                 trial_hours = float(code_data.get('trial_hours', 24))
                 trial_expires_at = time.time() + (trial_hours * 3600)
 
-        # Consumir el código (un solo uso)
-        del state.STREAM_TOKENS['_invite_codes'][invite_code]
+        c.execute("UPDATE invites SET used_at = ?, used_by = ? WHERE code = ?", (time.time(), email if 'email' in locals() else username, invite_code))
+        if '_invite_codes' in state.STREAM_TOKENS and invite_code in state.STREAM_TOKENS['_invite_codes']:
+            del state.STREAM_TOKENS['_invite_codes'][invite_code]
     
     # Crear email local
     safe_name = username.lower().replace(' ', '_')
@@ -4767,9 +4829,15 @@ def api_create_share_link():
     data = request.get_json() or {}
     media_id = data.get('media_id')
     path = data.get('path')
-    expires_in_hours = float(data.get('expires_in_hours', 24))
-    if expires_in_hours <= 0:
-        expires_in_hours = 24.0
+
+    # [AUDIT P1] Validación estricta de duración en backend (1h a 168h / 7 días máximo)
+    try:
+        expires_in_hours = float(data.get('expires_in_hours', 24))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Duración inválida'}), 400
+
+    if expires_in_hours < 1.0 or expires_in_hours > 168.0:
+        return jsonify({'error': 'La duración del enlace debe estar entre 1 y 168 horas (7 días máximo)'}), 400
 
     conn = get_db()
     c = conn.cursor()
@@ -4777,13 +4845,13 @@ def api_create_share_link():
     media = None
     if media_id:
         try:
-            c.execute("SELECT * FROM media WHERE id = ?", (int(media_id),))
+            c.execute("SELECT id, title, artist, album, rel_path, media_type, is_adult, is_hidden, filename, duration_sec FROM media WHERE id = ?", (int(media_id),))
             media = c.fetchone()
         except Exception:
             pass
     if not media and path:
         norm = path.replace('\\', '/').lstrip('/')
-        c.execute("SELECT * FROM media WHERE rel_path = ? OR rel_path = ? OR filename = ?", 
+        c.execute("SELECT id, title, artist, album, rel_path, media_type, is_adult, is_hidden, filename, duration_sec FROM media WHERE rel_path = ? OR rel_path = ? OR filename = ?", 
                   (norm, path, os.path.basename(path)))
         media = c.fetchone()
         
@@ -4791,16 +4859,28 @@ def api_create_share_link():
         conn.close()
         return jsonify({'error': 'Pista multimedia no encontrada'}), 404
 
+    # [AUDIT P1] Prohibir estrictamente saltarse la protección de contenido oculto o +18
+    if bool(media['is_hidden']) or bool(media['is_adult']):
+        conn.close()
+        return jsonify({'error': 'No se permite compartir contenido protegido o privado'}), 403
+
+    # [AUDIT P1] Restringir compartir exclusivamente a archivos de audio
+    media_type = (media['media_type'] or '').lower()
+    rel_path_lower = (media['rel_path'] or '').lower()
+    is_audio_file = rel_path_lower.endswith(('.mp3', '.flac', '.m4a', '.wav', '.ogg', '.opus', '.aac'))
+    if media_type != 'audio' and not is_audio_file:
+        conn.close()
+        return jsonify({'error': 'Solo se permite compartir archivos de audio en enlaces públicos'}), 400
+
     actual_media_id = media['id']
-    media_type = media['media_type'] or ('audio' if media['rel_path'].lower().endswith(('.mp3', '.flac', '.m4a', '.wav', '.ogg', '.opus', '.aac')) else 'video')
     
     token = secrets.token_urlsafe(16)
     expires_at = time.time() + (expires_in_hours * 3600)
     
     c.execute("""
         INSERT INTO shared_links (token, media_id, created_by, created_at, expires_at, views_count, media_type)
-        VALUES (?, ?, ?, ?, ?, 0, ?)
-    """, (token, actual_media_id, user_email, time.time(), expires_at, media_type))
+        VALUES (?, ?, ?, ?, ?, 0, 'audio')
+    """, (token, actual_media_id, user_email, time.time(), expires_at))
     conn.commit()
     conn.close()
     
@@ -4809,7 +4889,9 @@ def api_create_share_link():
     base_url = public_url if public_url else request.host_url.rstrip('/')
     share_url = f"{base_url}/share/{token}"
     
-    security_logger.info(f'SHARE LINK CREATED: by={user_email} token={token} media_id={actual_media_id} exp_hours={expires_in_hours}')
+    # [AUDIT P1] Ocultar token bearer en logs para evitar filtración de credenciales
+    token_masked = token[:4] + '...' + token[-4:]
+    security_logger.info(f'SHARE LINK CREATED: by={user_email} token={token_masked} media_id={actual_media_id} exp_hours={expires_in_hours}')
     return jsonify({
         'ok': True,
         'token': token,
@@ -4819,9 +4901,8 @@ def api_create_share_link():
         'duration_hours': expires_in_hours,
         'title': media['title'] or media['filename'],
         'artist': media['artist'] or 'Desconocido',
-        'media_type': media_type
+        'media_type': 'audio'
     })
-
 
 @api_bp.route('/api/share/list', methods=['GET'])
 def api_list_shares():
@@ -4970,8 +5051,10 @@ def share_stream(token):
     row = c.fetchone()
     conn.close()
 
-    if not row or time.time() > row['expires_at']:
-        return "Enlace expirado o no válido", 403
+    if not row:
+        return "Enlace no encontrado", 404
+    if time.time() > row['expires_at']:
+        return "Enlace expirado", 410
 
     rel_path = row['rel_path'].replace('\\', '/').lstrip('/')
     base_dir = Path(config.DOWNLOAD_FOLDER).resolve()
@@ -5046,8 +5129,10 @@ def share_cover(token):
     row = c.fetchone()
     conn.close()
 
-    if not row or time.time() > row['expires_at']:
+    if not row:
         return "No disponible", 404
+    if time.time() > row['expires_at']:
+        return "Enlace expirado", 410
 
     return caratula(row['rel_path'])
 
@@ -5066,7 +5151,9 @@ def share_lyrics(token):
     row = c.fetchone()
     conn.close()
 
-    if not row or time.time() > row['expires_at']:
-        return jsonify({'found': False, 'error': 'Enlace expirado'})
+    if not row:
+        return jsonify({'found': False, 'error': 'No disponible'}), 404
+    if time.time() > row['expires_at']:
+        return jsonify({'found': False, 'error': 'Enlace expirado'}), 410
 
     return lyrics(row['rel_path'])
