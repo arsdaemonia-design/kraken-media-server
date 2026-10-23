@@ -3,6 +3,7 @@ import os
 import time
 import json
 import unittest
+import urllib.parse
 
 # Ensure server module is in sys.path
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -13,6 +14,8 @@ from app import app
 from services.database import get_db
 from services.auth import create_token
 import state
+import config
+from routes.api import get_master_pin
 
 class TestNewFeaturesV5(unittest.TestCase):
     @classmethod
@@ -433,6 +436,37 @@ class TestNewFeaturesV5(unittest.TestCase):
             state.ACTIVE_USERS.pop(sid_alice, None)
             state.ACTIVE_USERS.pop(sid_bob_tv, None)
             state.ACTIVE_USERS.pop(sid_bob_phone, None)
+
+    # 11. SERIES EPISODES WITH APOSTROPHES & TITLE NORMALIZATION
+    def test_11_series_episodes_with_apostrophe(self):
+        # Query series with apostrophe: "Video/Series/El Show de los 70's (tmdb-52)"
+        series_path = "Video/Series/El Show de los 70's (tmdb-52)"
+        res = self.client.get(
+            f"/api/tv/episodes?path={urllib.parse.quote(series_path)}",
+            headers={
+                'Authorization': f'Bearer {self.admin_token}',
+                'X-Master-Pin': get_master_pin()
+            }
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIn('items', data)
+        self.assertGreater(len(data['items']), 0)
+        self.assertIn('series_title', data)
+        # Verify title cleanup does not produce raw 'Ingles]'
+        sample = data['items'][0]
+        self.assertFalse(sample['title'].strip().lower().endswith('ingles]'))
+        self.assertTrue(any(e['season'].startswith('Temporada') for e in data['items']))
+
+    @classmethod
+    def tearDownClass(cls):
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("DELETE FROM media WHERE rel_path IN ('vault/secret_adult.mp4', 'movies/regular_movie.mp4', 'test_song.mp3')")
+        c.execute("DELETE FROM users WHERE email LIKE 'tester_%'")
+        c.execute("DELETE FROM invites WHERE code LIKE 'test_%' OR trial_hours = 48")
+        conn.commit()
+        conn.close()
 
 if __name__ == '__main__':
     unittest.main()

@@ -110,7 +110,7 @@
                             ${actionBtn}
                             ${infoButton}
                             ${!isMovie ? `
-                                <button onclick="event.stopPropagation(); playShuffleSeries('${escapeStr(heroItem.path)}')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs md:text-sm py-2.5 md:py-3 px-6 md:px-8 rounded-full shadow-lg hover:scale-105 transition flex items-center justify-center gap-2 border border-emerald-400/30">
+                                <button onclick="event.stopPropagation(); playShuffleSeries(this.dataset.seriesPath);" data-series-path="${escapeHtml(heroItem.path)}" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs md:text-sm py-2.5 md:py-3 px-6 md:px-8 rounded-full shadow-lg hover:scale-105 transition flex items-center justify-center gap-2 border border-emerald-400/30">
                                     <i class="fa-solid fa-shuffle"></i> Aleatorio
                                 </button>
                                 <button onclick="event.stopPropagation(); openFolderPath(this.dataset.seriesPath);" data-series-path="${escapeHtml(heroItem.path)}" class="bg-white/10 hover:bg-white/20 backdrop-blur text-white font-bold text-xs md:text-sm py-2.5 md:py-3 px-6 md:px-8 rounded-full shadow-lg hover:scale-105 transition flex items-center justify-center gap-2 border border-white/10">
@@ -129,7 +129,7 @@
         if (!tmdbData) return '';
         const infoKey = `hero_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         _heroInfoStore[infoKey] = { heroItem, tmdbData, resumeData, isMovie };
-        return `<button onclick="event.stopPropagation(); openHeroInfoModal('${escapeStr(infoKey)}')" class="bg-gradient-to-r from-emerald-500/25 via-cyan-500/15 to-emerald-500/25 hover:from-emerald-400/40 hover:to-cyan-400/30 text-emerald-100 hover:text-white font-extrabold text-sm md:text-base py-2.5 md:py-3 px-7 md:px-10 rounded-full shadow-[0_0_0_rgba(16,185,129,0)] hover:shadow-[0_0_24px_rgba(16,185,129,0.28)] hover:scale-105 transition-all duration-300 flex items-center justify-center gap-2 border border-emerald-300/35">
+        return `<button onclick="event.stopPropagation(); openHeroInfoModal(this.dataset.infoKey)" data-info-key="${escapeHtml(infoKey)}" class="bg-gradient-to-r from-emerald-500/25 via-cyan-500/15 to-emerald-500/25 hover:from-emerald-400/40 hover:to-cyan-400/30 text-emerald-100 hover:text-white font-extrabold text-sm md:text-base py-2.5 md:py-3 px-7 md:px-10 rounded-full shadow-[0_0_0_rgba(16,185,129,0)] hover:shadow-[0_0_24px_rgba(16,185,129,0.28)] hover:scale-105 transition-all duration-300 flex items-center justify-center gap-2 border border-emerald-300/35">
             <i class="fa-solid fa-circle-info"></i> Más información
         </button>`;
     }
@@ -195,12 +195,12 @@ function buildFullCastGrid(cast) {
             const hasRealMovieProgress = isMovie && ep.progress_seconds > 0 && !ep.is_finished;
 
             if (isMovie && !hasRealMovieProgress) {
-                return `<button onclick="event.stopPropagation(); playNow('${escapeStr(heroItem.path)}')" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-sm md:text-base py-2.5 md:py-3 px-7 md:px-10 rounded-full shadow-xl hover:scale-105 transition flex items-center justify-center gap-2">
+                return `<button onclick="event.stopPropagation(); playNow(this.dataset.path)" data-path="${escapeHtml(heroItem.path)}" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-sm md:text-base py-2.5 md:py-3 px-7 md:px-10 rounded-full shadow-xl hover:scale-105 transition flex items-center justify-center gap-2">
                     <i class="fa-solid fa-play"></i> Reproducir
                 </button>`;
             }
 
-            return `<button onclick="event.stopPropagation(); playNow('${escapeStr(epPath)}')" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-sm md:text-base py-2.5 md:py-3 px-7 md:px-10 rounded-full shadow-xl hover:scale-105 transition flex items-center justify-center gap-2 relative overflow-hidden">
+            return `<button onclick="event.stopPropagation(); playNow(this.dataset.path)" data-path="${escapeHtml(epPath)}" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-sm md:text-base py-2.5 md:py-3 px-7 md:px-10 rounded-full shadow-xl hover:scale-105 transition flex items-center justify-center gap-2 relative overflow-hidden">
                 <div class="absolute bottom-0 left-0 h-[3px] bg-emerald-500 transition-all" style="width:${progressPct}%"></div>
                 <i class="fa-solid fa-play"></i> ${isMovie ? 'Continuar' : 'Continuar ' + escapeHtml(label)}
                 ${(!isMovie && resumeData.watched_count > 0) ? `<span class="text-[10px] opacity-60 ml-1">(${resumeData.watched_count}/${resumeData.total_episodes})</span>` : ''}
@@ -208,7 +208,7 @@ function buildFullCastGrid(cast) {
         }
 
         if (isMovie) {
-            return `<button onclick="event.stopPropagation(); playNow('${escapeStr(heroItem.path)}')" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-sm md:text-base py-2.5 md:py-3 px-7 md:px-10 rounded-full shadow-xl hover:scale-105 transition flex items-center justify-center gap-2">
+            return `<button onclick="event.stopPropagation(); playNow(this.dataset.path)" data-path="${escapeHtml(heroItem.path)}" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-sm md:text-base py-2.5 md:py-3 px-7 md:px-10 rounded-full shadow-xl hover:scale-105 transition flex items-center justify-center gap-2">
                 <i class="fa-solid fa-play"></i> Reproducir
             </button>`;
         }
@@ -306,7 +306,8 @@ function buildFullCastGrid(cast) {
 
     // PUBLIC: open details panel (inline when video host exists, modal fallback otherwise)
     window.openHeroInfoModal = function (infoKey) {
-        const info = _heroInfoStore[infoKey];
+        const key = (typeof infoKey === 'string') ? infoKey : (infoKey?.dataset?.infoKey || '');
+        const info = _heroInfoStore[key];
         if (!info) return;
 
         const { heroItem, tmdbData, resumeData, isMovie } = info;
@@ -457,12 +458,14 @@ function buildFullCastGrid(cast) {
      * and starts playback of a random selection.
      */
     window.playShuffleSeries = function (path) {
+        const rawPath = (typeof path === 'string') ? path : (path?.dataset?.seriesPath || path?.dataset?.path || '');
+        if (!rawPath) return;
         if (typeof libData === 'undefined' || !libData.files) {
             console.error('[HERO] libData not available');
             return;
         }
 
-        const normalizedPath = path.replace(/\\/g, '/').replace(/\/$/, '');
+        const normalizedPath = rawPath.replace(/\\/g, '/').replace(/\/$/, '');
         
         // Find all videos in this folder or subfolders (entire show)
         const episodes = libData.files.filter(f => {

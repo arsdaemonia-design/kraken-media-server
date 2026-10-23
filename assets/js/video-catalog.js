@@ -18,7 +18,8 @@ function setupNetflixRootFilters(categoriesArray, genresArray) {
      * Aplica o limpia el filtro de género en la portada de video estilo Netflix.
      */
     window.filterByGenre = function (genre) {
-        window.netflixGenreFilter = (window.netflixGenreFilter === genre) ? null : genre;
+        const targetGenre = (typeof genre === 'string') ? genre : (genre?.dataset?.genre ?? null);
+        window.netflixGenreFilter = (window.netflixGenreFilter === targetGenre) ? null : targetGenre;
         window.netflixGridRenderLimit = 84;
         if (window.netflixGenreFilter) videoUIState.recommendationsOpen = false;
         renderLib();
@@ -46,6 +47,7 @@ function setupNetflixRootFilters(categoriesArray, genresArray) {
      * Cambia la categoría activa en la vista de video y actualiza el Hero banner y la cuadrícula.
      */
     window.changeNetflixCategory = async function (newCat) {
+        newCat = (typeof newCat === 'string') ? newCat : (newCat?.dataset?.category || '');
         window.hideDropdownByType('category');
         if (newCat === '🔞 Adult') {
             const isUnlocked = Boolean(libData?.adult_unlocked || (libData?.files || []).some(f => f.is_adult));
@@ -157,22 +159,22 @@ function setupNetflixRootFilters(categoriesArray, genresArray) {
 
     const categoryMenuHtml = categoriesArray.map(cat => {
         const isActive = cat === window.netflixActiveCategory;
-        return `<button onclick="changeNetflixCategory('${cat}')"
+        return `<button onclick="changeNetflixCategory(this.dataset.category)" data-category="${escapeHtml(cat)}"
             class="w-full text-left px-4 py-2.5 text-sm font-bold transition-colors
             ${isActive
                 ? 'bg-emerald-500 text-white'
                 : 'text-zinc-300 hover:bg-white/10 hover:text-white'
-            }">${cat}</button>`;
+            }">${escapeHtml(cat)}</button>`;
     }).join('');
 
     const genreMenuHtml = genresArray.map(g => {
         const isActive = window.netflixGenreFilter === g;
-        return `<button onclick="filterByGenre('${g.replace(/'/g, "\\'")}')"
+        return `<button onclick="filterByGenre(this.dataset.genre)" data-genre="${escapeHtml(g)}"
             class="w-full text-left px-4 py-2.5 text-sm font-bold transition-colors
             ${isActive
                 ? 'bg-emerald-500 text-white'
                 : 'text-zinc-300 hover:bg-white/10 hover:text-white'
-            }">${g}</button>`;
+            }">${escapeHtml(g)}</button>`;
     }).join('');
 
     return { categoryMenuHtml, genreMenuHtml };
@@ -769,12 +771,12 @@ function renderVideoPathHeader(container, shouldForceVideoList) {
  * Muestra la cabecera detallada de una serie/película y el selector de temporadas.
  */
 function renderVideoDetailHeroAndSeasonControls(container, filtered) {
-    const navParts = currentPath.split('/').filter(Boolean);
+    const navParts = (currentPath || '').replace(/\\/g, '/').split('/').filter(Boolean);
     const isShowDetail = navParts.length >= 3;
     if (!isShowDetail) return;
 
     const baseShowPath = navParts.slice(0, 3).join('/') + '/';
-    const showFiles = filtered.filter(f => f.path.startsWith(baseShowPath));
+    const showFiles = filtered.filter(f => (f.path || '').replace(/\\/g, '/').startsWith(baseShowPath));
     if (showFiles.length === 0) return;
 
     const showTitle = navParts[2];
@@ -877,7 +879,12 @@ function renderVideoDetailHeroAndSeasonControls(container, filtered) {
  * Agrupa subcarpetas y archivos de video dentro del directorio actual de navegación.
  */
 function buildVideoDirectoryGroups(filtered, isSearching) {
-    const relevantFiles = filtered.filter(f => f.path.startsWith(currentPath));
+    const basePath = (currentPath || '').replace(/\\/g, '/');
+    const normalizedBasePath = basePath.endsWith('/') ? basePath : (basePath ? basePath + '/' : '');
+    const relevantFiles = filtered.filter(f => {
+        const p = (f.path || '').replace(/\\/g, '/');
+        return p.startsWith(normalizedBasePath);
+    });
     const groups = {};
     const directFiles = [];
 
@@ -885,11 +892,12 @@ function buildVideoDirectoryGroups(filtered, isSearching) {
         directFiles.push(...relevantFiles);
     } else {
         relevantFiles.forEach(f => {
-            const rel = f.path.substring(currentPath.length);
-            const parts = rel.split('/');
+            const p = (f.path || '').replace(/\\/g, '/');
+            const rel = p.substring(normalizedBasePath.length);
+            const parts = rel.split('/').filter(Boolean);
             if (parts.length === 1) {
                 directFiles.push(f);
-            } else {
+            } else if (parts.length > 1) {
                 const subFolder = parts[0];
                 if (!groups[subFolder]) groups[subFolder] = { isSeason: true, files: [] };
                 if (parts.length > 2) groups[subFolder].isSeason = false;

@@ -591,14 +591,23 @@ def generar_biblioteca_viva(owner_email='public'):
             continue
         # Reconstruir el diccionario que el cliente espera
         is_video = (row['media_type'] == 'video')
+        display_title = row['title']
+        if is_video and (not display_title or re.match(r"^(?:ingles|latino|castellano|español|dual|subs?)[\]\)]*$", str(display_title).strip(), re.I)):
+            base = os.path.splitext(row['filename'] or os.path.basename(row['rel_path'] or ''))[0]
+            cleaned = re.sub(r"\[.*?\]|\(.*?\)", "", base).strip()
+            cleaned = re.sub(r"\b(?:720p|1080p|2160p|4k|x264|x265|hevc|web-dl|webrip|bluray|nf|amzn)\b", "", cleaned, flags=re.I).strip()
+            cleaned = re.sub(r"(\w)_(\w)", r"\1'\2", cleaned)
+            cleaned = re.sub(r"_(\d+)", r"'\1", cleaned)
+            cleaned = re.sub(r"\s+", " ", cleaned).strip(" -_")
+            display_title = cleaned or base
         f = {
             'id': row['id'],
-            'path': row['rel_path'],
+            'path': (row['rel_path'] or '').replace('\\', '/'),
             'filename': row['filename'],
             'folder': row['folder'],
-            'full_folder': row['full_folder'],
+            'full_folder': (row['full_folder'] or '').replace('\\', '/'),
             'type': row['media_type'],
-            'title': row['title'],
+            'title': display_title,
             'artist': row['artist'],
             'album': row['album'],
             'genre': row['tmdb_genres'] if is_video and row['tmdb_genres'] else row['genre'],

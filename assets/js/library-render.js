@@ -636,7 +636,8 @@ function filterNetflixRows(category) {
                 // Cuando currentPath tiene una ruta (ej: Video/Series/Gantz/Temporada 1/)
                 // pero no estamos en modo folders, igualmente filtramos
                 else if (typeof currentPath !== 'undefined' && currentPath !== '' && currentPath !== null) {
-                    source = source.filter(f => f.path.startsWith(currentPath));
+                    const normCurrent = currentPath.replace(/\\/g, '/');
+                    source = source.filter(f => (f.path || '').replace(/\\/g, '/').startsWith(normCurrent));
                     isExplorerFiltering = true;
                 }
 
@@ -1330,9 +1331,9 @@ function filterNetflixRows(category) {
                      * `loadMoreSeasonEpisodes(showPathEncoded, seasonEncoded, step = SEASON_EPISODE_BATCH)`
                      * Carga más episodios dentro de la lista de una temporada extensa.
                      */
-                    window.loadMoreSeasonEpisodes = function (showPathEncoded, seasonEncoded, step = SEASON_EPISODE_BATCH) {
-                        const showPath = decodeURIComponent(showPathEncoded || '');
-                        const seasonName = decodeURIComponent(seasonEncoded || '');
+                    window.loadMoreSeasonEpisodes = function (showPathArg, seasonArg, step = SEASON_EPISODE_BATCH) {
+                        const showPath = (typeof showPathArg === 'string' && showPathArg.includes('/')) ? showPathArg : (showPathArg?.dataset?.showPath || decodeURIComponent(showPathArg || ''));
+                        const seasonName = (typeof seasonArg === 'string' && seasonArg) ? seasonArg : (seasonArg?.dataset?.seasonName || decodeURIComponent(seasonArg || ''));
                         const safeStep = Number(step) > 0 ? Number(step) : SEASON_EPISODE_BATCH;
                         const key = `${showPath}::${seasonName}`;
                         const prev = Math.max(SEASON_EPISODE_BATCH, Number(window.seasonEpisodeRenderLimits[key] || SEASON_EPISODE_BATCH));
@@ -1400,7 +1401,9 @@ function filterNetflixRows(category) {
                                 const pendingEpisodes = sortedFiles.length - seasonLimit;
                                 container.innerHTML += `
                                     <div class="col-span-full flex justify-center mt-2 mb-1">
-                                        <button onclick="loadMoreSeasonEpisodes('${encodedPath}','${encodedSeason}',${SEASON_EPISODE_BATCH})"
+                                        <button onclick="loadMoreSeasonEpisodes(this.dataset.showPath, this.dataset.seasonName, ${SEASON_EPISODE_BATCH})"
+                                            data-show-path="${escapeHtml(currentPath)}"
+                                            data-season-name="${escapeHtml(name)}"
                                             class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 border border-white/10 text-white/90 text-xs font-bold transition">
                                             ➕ Cargar más en ${escapeHtml(name)} (${Math.min(SEASON_EPISODE_BATCH, pendingEpisodes)} más)
                                         </button>
@@ -1743,7 +1746,8 @@ function filterNetflixRows(category) {
                 if (pName) {
                     // Usamos data-path para pasar la ruta SIN escapar al JS
                     removeBtn = `<button 
-            onclick="event.stopPropagation(); quitarDeListaRow('${escapeStr(pName)}', this.dataset.path, event)" 
+            onclick="event.stopPropagation(); quitarDeListaRow(this.dataset.playlist, this.dataset.path, event)" 
+            data-playlist="${escapeHtml(pName)}"
             data-path="${escapeHtml(f.path)}"
             class="w-7 h-7 bg-black/60 backdrop-blur rounded-full flex items-center justify-center text-white hover:scale-110 hover:text-orange-500 transition" 
             title="Quitar de '${escapeHtml(pName)}'">
@@ -1914,7 +1918,7 @@ function filterNetflixRows(category) {
         
         <!-- Info -->
         <div class="flex-1 min-w-0">
-            <h4 class="text-white font-semibold text-sm truncate group-hover:text-emerald-400 transition">${f.title}${favHeart}</h4>
+            <h4 class="text-white font-semibold text-sm truncate group-hover:text-emerald-400 transition">${escapeHtml(f.title || f.filename || 'Episodio')}${favHeart}</h4>
             <p class="text-zinc-500 text-xs mt-0.5">${duration}${f.size ? ' · ' + f.size : ''}</p>
         </div>
         

@@ -67,6 +67,20 @@ def _tv_series_root(parts):
     return "/".join(parts[:3]) if len(parts) >= 3 else "/".join(parts[:-1])
 
 
+def _clean_tv_episode_title(raw_title, filename):
+    """Normalize episode titles when the database holds raw language or codec tags."""
+    text = str(raw_title or "").strip()
+    if not text or re.match(r"^(?:ingles|latino|castellano|español|dual|subs?)[\]\)]*$", text, re.IGNORECASE):
+        base = os.path.splitext(os.path.basename(filename))[0]
+        cleaned = re.sub(r"\[.*?\]|\(.*?\)", "", base).strip()
+        cleaned = re.sub(r"\b(?:720p|1080p|2160p|4k|x264|x265|hevc|web-dl|webrip|bluray|nf|amzn)\b", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"(\w)_(\w)", r"\1'\2", cleaned)
+        cleaned = re.sub(r"_(\d+)", r"'\1", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" -_")
+        return cleaned or base
+    return text
+
+
 def _tv_user_context(conn):
     email = get_user_from_request(request)
     if not email:
@@ -313,7 +327,7 @@ def tv_series_episodes():
                 season_num = None
 
             filename = os.path.splitext(os.path.basename(rel_path))[0]
-            display_title = row["title"] or filename
+            display_title = _clean_tv_episode_title(row["title"], rel_path)
 
             ep_match = re.search(r'[sS]\d+[eE](\d+)', filename)
             if ep_match:

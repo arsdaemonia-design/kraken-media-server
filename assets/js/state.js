@@ -368,8 +368,12 @@ window.openFolderPath = function(target) {
     let targetPath = '';
     if (typeof target === 'string') {
         targetPath = target;
-    } else if (target && target.dataset && target.dataset.folderPath) {
-        targetPath = target.dataset.folderPath;
+    } else if (target && target.dataset) {
+        targetPath = target.dataset.folderPath || target.dataset.path || target.dataset.seriesPath || target.dataset.moviePath || target.dataset.basePath || '';
+    }
+    targetPath = (targetPath || '').replace(/\\/g, '/');
+    if (targetPath && !targetPath.endsWith('/')) {
+        targetPath += '/';
     }
     window.currentPath = targetPath || '';
     window.currentFolderView = null;

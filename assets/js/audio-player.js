@@ -422,6 +422,8 @@ function playContext() {
      * Encola y reproduce inmediatamente un archivo de audio o abre el reproductor si es video.
      */
     function playNow(path, resumeSeconds) {
+        const targetPath = (typeof path === 'string') ? path : (path?.dataset?.path || path?.dataset?.seriesPath || path?.dataset?.moviePath || '');
+        path = (targetPath || '').replace(/\\/g, '/');
         if (selectionMode) { selectRow(path); return; }
 
         if (window.KRAKEN_PLAYBACK_TARGET && window.KRAKEN_PLAYBACK_TARGET.session_id) {
