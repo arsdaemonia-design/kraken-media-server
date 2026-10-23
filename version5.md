@@ -100,15 +100,24 @@ Permite compartir una canción puntual con amigos o familiares mediante un enlac
 
 ---
 
-### 3.3. Configuración de Dominio Público
-Anteriormente, al generar un enlace desde la PC donde corre el servidor, se construía la URL utilizando `127.0.0.1:5000`, la cual resultaba inaccesible fuera de la red local.
+### 3.3. Configuración de Dominio Público y Asistente de Primera Vez
+Anteriormente, al generar un enlace para compartir desde la PC donde corre el servidor, se construía la URL utilizando `127.0.0.1:5000`, la cual resultaba inaccesible para usuarios fuera de la red local.
 
 * **Solución Implementada**:
-  * Se añadió el campo **"URL Pública del Servidor"** en la pestaña *General* de Configuración de Administrador.
-  * Al ingresar un dominio como `kraken.ederzu.com` (o `https://kraken.ederzu.com`), el backend almacena la preferencia en `runtime_config.json`.
-  * Los generadores de enlaces compartidos y el protocolo Google Cast utilizan prioritariamente esta URL pública:
-    $$\text{URL Generada} = \text{Dominio Público} + \text{"/share/"} + \text{Token}$$
-  * Si no se especifica dominio público, el servidor recurre automáticamente a la dirección de la petición local como contingencia.
+  * **Integración en Doble Interfaz**:
+    1. **Panel de Configuración de Administrador** ([`admin-settings.js`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/assets/js/admin-settings.js)): Campo *URL Pública / Dominio (Opcional)* en la pestaña *General*.
+    2. **Modal de Configuración Inicial (Primera Vez)** (`showFirstTimeSetup` y `showSetupWizard`): Campo *URL Pública / Dominio (Opcional)* para instalaciones nuevas.
+  * **Botón Interactivo de Ayuda y Tooltip `(?)`**:
+    * Al tocar el botón `(?) ¿Qué es esto?`, se despliega un mensaje explicativo detallando que este ajuste es **100% opcional** y está pensado para usuarios que disponen de un túnel (Cloudflare Tunnel, Tailscale, DuckDNS) o dominio propio apuntando a su servidor (ej. `https://kraken.ederzu.com`).
+    * Se aclara explícitamente que si el usuario no cuenta con un túnel o solo usa Kraken en su red doméstica/Wi-Fi, debe **dejarlo en blanco** y Kraken continuará operando de manera transparente en red local.
+  * **Sincronización Bidireccional (`config.py` <-> `runtime_config.json`)**:
+    * En [`config.py`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/config.py) se formalizó la variable `PUBLIC_SERVER_URL = _runtime.get('public_url', os.getenv('PUBLIC_SERVER_URL', 'https://kraken.ederzu.com'))`.
+    * Al guardar cambios desde la interfaz web, el backend almacena el valor en `runtime_config.json` y sincroniza automáticamente la línea correspondiente en `config.py`.
+  * **Generación Dinámica de Enlaces Compartidos**:
+    $$\text{URL Generada} = \text{Dominio Público Cifrado} + \text{"/share/"} + \text{Token}$$
+    * Con dominio activo: `https://kraken.ederzu.com/share/<token>`
+    * Sin dominio: `http://192.168.x.x:5000/share/<token>` (o IP de origen).
+  * **Cache-Buster**: Actualizado a `?v=5.0.1.2` en [`templates/index.html`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/templates/index.html) para invalidar cachés viejos del navegador.
 
 ---
 
