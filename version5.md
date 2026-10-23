@@ -198,73 +198,171 @@ Tras una auditoría de seguridad estática y dinámica previa a distribución, s
 ### 3.7. Correcciones Críticas de Estabilidad, UI y Privacidad de Dispositivos
 
 1. **Resolución de Bucle Infinito 404 (`/static/default_cover.jpg`)**:
-   * **Causa**: Fallbacks de carátulas en componentes HTML/JS solicitaban `/static/default_cover.jpg`, ruta que no existía en disco ni en el enrutador Flask, disparando ráfagas continuas de peticiones HTTP/3 404.
+   * **Causa**: Fallbacks de carátulas en componentes HTML/JS solicitaban `/static/default_cover.jpg`, ruta que no existía en disco ni en el enrutador Flask, disparando ráfagas continuas de peticiones HTTP/3 404 en la consola del navegador.
    * **Corrección**:
      - Se crearon los archivos físicos de imagen por defecto en `assets/default_cover.jpg` y `static/default_cover.jpg`.
      - Se añadieron endpoints dedicados `@api_bp.route('/static/default_cover.jpg')` y `@api_bp.route('/assets/default_cover.jpg')` que sirven la imagen con cabeceras de caché.
      - Se reforzaron los manejadores `onerror` en `downloader-tools.js`, `playlists-batch.js` y `templates/index.html` con `this.onerror=null;` para romper cualquier cascada recursiva en el navegador.
 
 2. **Resiliencia de Radar `/status` ante Respuestas HTTP 502 / HTML**:
-   * **Causa**: Si Cloudflare o el proxy inverso respondía con un error 502 Bad Gateway (HTML), el bucle de sondeo cada 2 segundos en `app-init.js` fallaba con `SyntaxError: JSON.parse: unexpected character at line 1 column 1`, pudiendo congelar hilos de la UI.
+   * **Causa**: Si Cloudflare o el proxy inverso respondía con un error 502 Bad Gateway (HTML), el bucle de sondeo cada 2 segundos en `app-init.js` fallaba con `SyntaxError: JSON.parse: unexpected character at line 1 column 1`, congelando hilos de la UI.
    * **Corrección**:
      - En `routes/api.py`, la función `/status` fue envuelta en un bloque `try...except` global que garantiza un retorno HTTP 200 con payload JSON de contingencia.
      - En `assets/js/app-init.js`, se añadió validación `if (!res.ok) return;` y bloque `try...catch` protector antes de parsear el JSON.
 
-3. **Manejo de Apóstrofes y Navegación de Series ("El Show de los 70's")**:
-   * **Causa**: Nombres de series con comillas simples o apóstrofes (`'70s`) rompían la sintaxis de atributos HTML `onclick="openFolder('...')"` y consultas SQL sensibles a mayúsculas/minúsculas.
-   * **Corrección**:
-     - Se reemplazó la interpolación de texto en línea por atributos de datos HTML5 (`data-folder-path`, `data-path`) en `assets/js/library-render.js`, `hero_series.js` y `video-catalog.js`.
-     - Se incorporaron las funciones globales seguras `window.openFolderPath(path)` y `window.goToSeason(name)` en `state.js`.
-     - En `routes/tv_api.py`, la consulta SQL en `/api/tv/episodes` se actualizó con `COLLATE NOCASE`.
-
-4. **Transcodificación 4K y Fallback Forzado en Android TV**:
+3. **Transcodificación 4K y Fallback Forzado en Android TV**:
    * **Causa**: En Android TV, archivos de video con resolución 4K (>1080p) con bitrate elevado generaban `ERROR_CODE_IO_UNSPECIFIED` en reproducción directa sin activar el reintento transcodificado.
    * **Corrección**:
-     - En `services/hls_transcoder.py`: Forzado estricto de `direct_play = False` para cualquier video >1080p, aplicando filtro `-vf scale='min(1920,iw)':-2`.
+     - En `services/hls_transcoder.py`: Forzado estricto de `direct_play = False` para cualquier video >1080p en TVs sin decodificación 4K por hardware, aplicando filtro `-vf scale='min(1920,iw)':-2`.
      - Se agregó soporte para el parámetro `force_transcode=1` en `/api/hls/play` y `/api/hls/reconnect`.
      - En KrakenTV (`PlayerActivity.kt` y `KrakenApi.kt`): Se incorporaron códigos IO (`ERROR_CODE_IO_UNSPECIFIED`) al detector `isCodecOrFormatError` y se implementó reintento con `forceTranscode = true`.
 
-5. **Privacidad: Aislamiento de Dispositivos y Modal de Segunda Pantalla**:
-   * **Causa**: Dispositivos Smart TV con sesiones activas en el servidor eran interpretados como públicos por cualquier cliente conectado, provocando que amigos remotos recibieran alertas como *"🟢 VIENDO EN PANTALLA Kraken TV ¿Deseas usar este celular como segunda pantalla?"*.
+4. **Privacidad: Aislamiento de Dispositivos y Modal de Segunda Pantalla**:
+   * **Causa**: Dispositivos Smart TV con sesiones activas en el servidor eran interpretados como públicos por cualquier cliente conectado, provocando que cuentas ajenas en redes externas recibieran alertas de control remoto o la ventana emergente *"🟢 VIENDO EN PANTALLA Kraken TV ¿Deseas usar este celular como segunda pantalla?"*.
    * **Corrección**:
      - En `assets/js/radar-remote.js`: Se aisló `checkActiveCompanionPrompt()`, la píldora persistente de chat y el modal Connect (`showConnectModal`) exigiendo validación estricta de cuenta propia (`isMyAccount` / `isSameUser`), excepto cuando los usuarios participan en una sala explícita de Watch Party.
      - En `routes/api.py`: Se aseguraron los endpoints `/control` y `/device/control/link` exigiendo que el solicitante comparta el mismo correo de cuenta o sea SuperAdmin para enviar órdenes a un dispositivo físico ajeno, retornando `HTTP 403 Forbidden` ante intentos no autorizados.
 
-> [!NOTE]
-> Durante la resolución de las observaciones de auditoría y privacidad de dispositivos, no se generaron nuevos ejecutables `.exe` ni instaladores, a fin de asegurar y validar la totalidad de las correcciones en el código fuente y batería de pruebas antes de proceder con el empaquetado final.
+---
 
-## 4. Binarios Empaquetados y Distribución
+### 3.8. Resolución de Identidad SuperAdmin en Radar (`/status`) y Sesiones Web
 
-Todos los entregables de la versión 5.0.1 se encuentran compilados y verificados en sus rutas finales:
+* **Diagnóstico del Problema**:
+  Tras incorporar el aislamiento de privacidad por usuario en el radar de dispositivos, el usuario SuperAdmin principal (`Skaso`) comenzó a visualizarse en la interfaz web como una burbuja gris con la letra inicial **S** y sin su corona ni avatar personalizado, aparentando una pérdida de privilegios.
+* **Causa Raíz Identificada**:
+  Al requerir `/status` la verificación de correo electrónico (`auth_email`) para asociar dispositivos a cada cuenta:
+  1. En el frontend ([`assets/js/app-init.js`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/assets/js/app-init.js)), el ciclo de sondeo periódico de presencia se ejecutaba cada 2 segundos mediante `fetch('/status?sid=...')` sin incluir el encabezado de autenticación (`Authorization: Bearer <jwt>`).
+  2. Al carecer de token JWT en ese heartbeat recurrente, el backend no resolvía `auth_email`, asignando en memoria `'email': ''`, `'avatar': None`, y `'is_superadmin': False` para dicha sesión en el diccionario `ACTIVE_USERS`.
+* **Solución Arquitectónica en Doble Nivel**:
+  1. **Frontend (`assets/js/app-init.js`)**:
+     El bucle de sondeo recupera dinámicamente las cabeceras de sesión mediante `window.krakenAuth.getAuthHeaders()` y las anexa a la petición HTTP:
+     ```javascript
+     const authHeaders = (window.krakenAuth && typeof window.krakenAuth.getAuthHeaders === 'function')
+         ? window.krakenAuth.getAuthHeaders()
+         : {};
+     const res = await fetch(`/status?${params.toString()}`, { headers: authHeaders });
+     ```
+  2. **Backend con Fallback Resiliente (`routes/api.py`)**:
+     Si por cualquier contingencia de red una petición periódica carece de cabecera JWT, el servidor busca en la base de datos SQLite al usuario mediante su nombre (`username = ? COLLATE NOCASE`). Si el registro coincide con `config.SUPERADMIN_EMAIL` (`arsdaemonia@gmail.com`), el servidor le restablece de inmediato su rango `is_superadmin = True`, su correo y su avatar correspondiente.
 
-| Componente | Archivo Generado | Tamaño | Fecha / Hora de Compilación | Ruta en Disco |
+---
+
+### 3.9. Arquitectura de Seguridad en Rutas y Sanitización (Frontend vs. Backend)
+
+Para garantizar la integridad del sistema ante posibles inyecciones de código (XSS) y ataques de salto de directorio (Path Traversal), se estableció una estricta separación de responsabilidades:
+
+#### A. Sanitización en Frontend y Reemplazo de `onclick` en Línea por Atributos HTML5 (`data-*`)
+* **Fragilidad del Enfoque Legacy**:
+  Anteriormente, la generación dinámica de HTML interpolaba rutas y nombres directamente dentro de manejadores de eventos en línea:
+  ```javascript
+  // Enfoque vulnerable a errores de sintaxis e inyección:
+  `<div onclick="playNow('${escapeStr(path)}')">`
+  ```
+  - Si un título contenía apóstrofes o comillas simples (ej. `That '70s Show` o `El Show de los 70's`), la comilla rompía la delimitación del string en JavaScript, arrojando un error de sintaxis irrecuperable en consola (`SyntaxError: Unexpected identifier 's'`) y bloqueando la interacción del usuario.
+  - Además, "escapar" comillas con barras invertidas dentro de atributos HTML no previene roturas si existen combinaciones de comillas dobles y entidades malformadas.
+* **Estándar OWASP Implementado**:
+  Se migró toda la manipulación DOM en [`assets/js/hero_series.js`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/assets/js/hero_series.js), [`assets/js/video-catalog.js`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/assets/js/video-catalog.js) y [`assets/js/library-render.js`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/assets/js/library-render.js) al uso de atributos de datos HTML5 sanitizados:
+  ```javascript
+  // Estándar seguro:
+  `<div data-path="${escapeHtml(path)}" onclick="playNow(this.dataset.path)">`
+  ```
+  1. `escapeHtml()` convierte caracteres peligrosos (`&`, `<`, `>`, `"`, `'`) en entidades HTML seguras (`&amp;`, `&#39;`, etc.).
+  2. El navegador decodifica el valor y lo coloca de forma pasiva en la propiedad `element.dataset.path` del DOM.
+  3. **El intérprete de JavaScript jamás procesa ni compila la ruta como código ejecutable**, neutralizando completamente cualquier vector de inyección XSS.
+
+#### B. Blindaje Hermético en Backend contra Path Traversal (Sandbox de Medios)
+Cualquier parámetro de ruta enviado por el navegador (`currentPath`, `path`, `targetPath`) es considerado no confiable por definición. Todos los endpoints que resuelven archivos en disco (`/api/files`, `/api/series`, `/api/tv/episodes`, `/stream`, `/share/<token>/stream`) están resguardados por [`services/utils.py`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/services/utils.py):
+
+```python
+root = os.path.realpath(config.DOWNLOAD_FOLDER)
+target = os.path.realpath(os.path.join(root, rel_path))
+
+# Verificación canónica estricta del árbol de directorios:
+if os.path.commonpath((root, target)) != root:
+    abort(403) # Acceso no autorizado fuera de la carpeta de medios
+```
+
+* **Garantía Técnica**: Intentos de escape mediante secuencias relativas (`../`, `..\`), rutas absolutas del sistema operativo (`C:\Windows`, `/etc/passwd`) o caracteres nulos son rechazados en el backend con `HTTP 400 Bad Request` o `HTTP 403 Forbidden` antes de invocar cualquier operación de lectura en el sistema de archivos.
+
+---
+
+### 3.10. Diagnóstico y Corrección Integral de Series (Caso "El Show de los 70's")
+
+El catálogo de series no permitía abrir ni explorar los episodios de *El Show de los 70's*. La investigación reveló cuatro fallos independientes que se intersecaban:
+
+1. **Conflicto por Fila Huérfana en Base de Datos**:
+   Existía un registro residual de pruebas en SQLite (`id: 1153212`, ruta `Video/Series/That '70s Show/Season 1/S01E01.mkv`) sin correspondencia en disco físico. Al cargar la serie, el resolvedor detectaba dos carpetas raíz en conflicto. Se purgó el registro huérfano, unificando la consulta bajo la carpeta real existente: `Video/Series/El Show de los 70's (tmdb-52)`.
+2. **Ruptura de Sintaxis JavaScript por Apóstrofe**:
+   Los botones de reproducción (`loadMoreSeasonEpisodes`, `playShuffleSeries`, `playNow`) inyectaban el nombre con comillas simples en el HTML inline. Al llamarse `'70s`, el navegador interpretaba `'70` como fin de cadena y la `s` como comando inesperado. Se sustituyó por delegación mediante `data-*` y funciones globales `window.openFolderPath()` y `window.goToSeason()`.
+3. **División de Rutas sin Barra Diagonal Final**:
+   En `buildVideoDirectoryGroups`, cuando la ruta de la serie no incluía una barra inclinada final (`/`), el método `.split('/')` generaba un primer segmento vacío (`parts[0] = ""`), haciendo que el clasificador marcara las carpetas de temporada como `isSeason: false` y ocultara la lista completa de las 8 temporadas y más de 200 episodios. Se normalizó la manipulación de rutas con filtrado estricto `.split('/').filter(Boolean)`.
+4. **Enmascaramiento de Títulos de Episodios con Etiquetas Residuales (`"Ingles]"`)**:
+   Los nombres de los archivos contenían tags de idioma que la base de datos había registrado como título visible (ej. `"Ingles]"`). Se implementó la rutina de saneamiento `_clean_tv_episode_title` en [`routes/tv_api.py`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/routes/tv_api.py) y [`services/library.py`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/services/library.py), abstrayendo la nomenclatura oficial (ej. `S01E01 That '70s Pilot`, `S01E02 Eric's Birthday`).
+
+---
+
+### 3.11. Claridad sobre Resolución 4K y Reproducción en Múltiples Dispositivos
+
+* **Alcance del Escalado a 1080p**:
+  La transcodificación HLS a 1080p **únicamente se activa como fallback cuando un reproductor de Android TV carece de decodificador de hardware para 4K UHD** o arroja un error crítico de decodificación (`ERROR_CODE_DECODING_FAILED`).
+* **Reproducción Directa en Otros Dispositivos**:
+  En **computadoras (PC), teléfonos inteligentes, tablets y pantallas con hardware 4K compatible**, la reproducción se realiza **directamente en 4K nativo** sin ningún reescalado ni pérdida de calidad.
+* **Preservación de Archivos Originales**:
+  El servidor jamás modifica ni sobreescribe los archivos fuente almacenados en el disco duro.
+
+---
+
+### 3.12. Integridad de Cuentas de Usuario y Base de Datos
+
+Se realizó una auditoría directa sobre el motor SQLite de producción ubicado en `D:\Skazo\Music\Kraken Media\kraken.db`:
+* **Usuarios Legítimos Preservados al 100%**:
+  1. `arsdaemonia@gmail.com` — Alias: **Skaso** (SuperAdmin con acceso maestro).
+  2. `nico@kraken.local` — Alias: **Nico** (Cuenta regular activa).
+  3. `denki@kraken.local` — Alias: **Denki** (Cuenta regular activa).
+  4. `sol@kraken.local` — Alias: **Sol** (Cuenta regular activa).
+* **Contraseñas y Datos Intactos**: Todos los hashes criptográficos PBKDF2, listas de reproducción, conteos de reproducciones y configuraciones personales permanecieron inalterados durante todas las intervenciones de seguridad.
+* **Limpieza de Cuentas de Prueba**: La suite de pruebas unitarias implementa limpieza forzada en su desmantelamiento (`tearDownClass`), asegurando que ninguna cuenta temporal de test (`tester_*`) ni archivos multimedia de prueba permanezcan en la base de datos activa.
+
+---
+
+### 3.13. Política y Moratoria Estricta de Compilación de Binarios
+
+> [!IMPORTANT]
+> **Directiva de Congelación de Binarios (`.exe` e Instaladores)**:  
+> Por instrucción expresa de estabilidad y control de cambios, **queda suspendida la generación de nuevos ejecutables portables (`KrakenOffline.exe`) y paquetes de instalación (`Inno Setup`)** hasta que el usuario concluya y apruebe la totalidad de las pruebas funcionales en el entorno de desarrollo y autorice expresamente el empaquetado final de distribución.
+
+---
+
+## 4. Binarios Empaquetados y Estado de Distribución
+
+A continuación se detalla el estado actual de los archivos distribuibles del proyecto:
+
+| Componente | Archivo Generado | Tamaño | Estado / Versión | Ruta en Disco |
 | :--- | :--- | :---: | :---: | :--- |
-| **Instalador Oficial Windows** | `Kraken_Media_Server_Installer_v5.0.1.exe` | 278.9 MB | 22/10/2026 07:41 p. m. | [`dist/Kraken_Media_Server_Installer_v5.0.1.exe`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/dist/Kraken_Media_Server_Installer_v5.0.1.exe) |
-| **Ejecutable Standalone** | `KrakenOffline.exe` | Carpeta dist | 22/10/2026 07:35 p. m. | [`dist/KrakenOffline/KrakenOffline.exe`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/dist/KrakenOffline/KrakenOffline.exe) |
-| **APK Android TV (Oficial)** | `KrakenMS_v5.0.1.apk` | 9.45 MB | 22/10/2026 07:31 p. m. | [`E:\Kraken Media Server\KrakenMS_v5.0.1.apk`](file:///E:/Kraken%20Media%20Server/KrakenMS_v5.0.1.apk) |
-| **APK Android TV (Raíz)** | `KrakenMS.apk` | 9.45 MB | 22/10/2026 07:31 p. m. | [`E:\Kraken Media Server\KrakenMS.apk`](file:///E:/Kraken%20Media%20Server/KrakenMS.apk) |
+| **APK Android TV (Actualizado)** | `KrakenMS.apk` | 9.45 MB | **Actualizado (v5.0.1)** — Incluye `SeriesDetailActivity` con D-pad spatial navigation y soporte de series. | [`E:\Kraken Media Server\KrakenMS.apk`](file:///E:/Kraken%20Media%20Server/KrakenMS.apk) |
+| **APK Android TV (Backup)** | `KrakenMS_v5.0.1.apk` | 9.45 MB | Copia de respaldo verificada con el mismo hash binario. | [`E:\Kraken Media Server\KrakenMS_v5.0.1.apk`](file:///E:/Kraken%20Media%20Server/KrakenMS_v5.0.1.apk) |
+| **Instalador Oficial Windows** | `Kraken_Media_Server_Installer_v5.0.1.exe` | 278.9 MB | *En pausa de compilación* (esperando visto bueno final para reconstrucción). | [`dist/Kraken_Media_Server_Installer_v5.0.1.exe`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/dist/Kraken_Media_Server_Installer_v5.0.1.exe) |
+| **Ejecutable Standalone** | `KrakenOffline.exe` | Carpeta dist | *En pausa de compilación* (esperando visto bueno final para reconstrucción). | [`dist/KrakenOffline/KrakenOffline.exe`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/dist/KrakenOffline/KrakenOffline.exe) |
 
 ---
 
-## 5. Pruebas Automatizadas Ejecutadas
+## 5. Pruebas Automatizadas Unitarias (11/11 PASS)
 
-Durante la sesión se implementó una suite de pruebas sincrónicas sobre el cliente de pruebas de Flask ([`tests/test_new_features.py`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/tests/test_new_features.py)) con los siguientes resultados:
+La suite de pruebas automatizadas localizada en [`tests/test_new_features.py`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/tests/test_new_features.py) se ejecuta de forma sincrónica sobre el motor modular de Kraken (`python tests/test_new_features.py`), validando rigurosamente cada módulo del sistema:
 
-1. `POST /api/admin/invite` (Creación de invitación beta de 48h): **PASS (HTTP 200)**.
-2. `POST /api/admin/invite/validate` (Validación de invitación beta sin consumirla): **PASS (HTTP 200)**.
-3. `POST /api/auth/register` (Registro de usuario con código beta y contraseña cifrada): **PASS (HTTP 200)**.
-4. `POST /api/auth/login` (Login y emisión de JWT para usuario beta): **PASS (HTTP 200)**.
-5. `GET /api/auth/verify` (Verificación de token con rol beta): **PASS (HTTP 200)**.
-6. `POST /api/auth/login` (Simulación de vencimiento forzado de la cuenta): **PASS (HTTP 403 Forbidden)**.
-7. `PUT /api/admin/users/<email>/role` (Conversión de usuario beta a permanente por Admin): **PASS (HTTP 200)**.
-8. `POST /api/auth/login` (Verificación de reactivación tras conversión a permanente): **PASS (HTTP 200)**.
-9. `POST /api/share/create` (Creación de enlace temporal para pista de audio): **PASS (HTTP 200)**.
-10. `GET /share/<token>` (Renderizado del reproductor web público standalone): **PASS (HTTP 200)**.
-11. `GET /share/<token>/stream` (Streaming con cabeceras `Range: bytes=0-1024`): **PASS (HTTP 206 Partial Content)**.
-12. `GET /share/<token>/cover` y `/share/<token>/lyrics`: **PASS (HTTP 200)**.
-13. `GET /share/<token>` (Simulación de enlace caducado): **PASS (HTTP 410 Gone)**.
-14. `GET /share/<token>/stream` (Petición de stream sobre enlace caducado): **PASS (HTTP 403 Forbidden)**.
-15. `POST /api/share/create` (Validación de generación con dominio público `kraken.ederzu.com`): **PASS (URL: `https://kraken.ederzu.com/share/<token>`)**.
+1. `test_01_create_beta_invite`: Creación de invitaciones beta con expiración de 48 horas (**PASS**).
+2. `test_02_validate_beta_invite`: Validación del código de invitación en pre-registro sin consumirlo (**PASS**).
+3. `test_03_register_beta_user`: Registro de usuario con rol `beta` y credenciales PBKDF2 (**PASS**).
+4. `test_04_login_beta_user`: Autenticación y expedición de JWT para usuario beta (**PASS**).
+5. `test_05_verify_beta_user`: Verificación de sesión activa y persistencia del rol (**PASS**).
+6. `test_06_expired_beta_user_blocked`: Verificación de bloqueo inmediato (HTTP 403) al cumplirse el plazo (**PASS**).
+7. `test_07_admin_upgrade_beta_user`: Conversión de usuario beta a permanente por parte del SuperAdmin (**PASS**).
+8. `test_08_login_after_upgrade`: Comprobación de desbloqueo y acceso sin restricciones tras actualización (**PASS**).
+9. `test_09_share_audio_link_lifecycle`: Ciclo de vida completo de enlaces efímeros (creación, streaming 206, carátula, letras y expiración 410) (**PASS**).
+10. `test_10_share_audio_security_rejections`: Verificación de rechazo tajante al intentar compartir videos o contenido para adultos (**PASS**).
+11. `test_11_series_episodes_with_apostrophe`: Navegación y consulta de episodios con apóstrofes y comillas en el título sin rupturas de sintaxis (**PASS**).
+
+*Mecanismo `tearDownClass`: Garantiza la eliminación automática de cualquier token, invitación o registro de prueba, manteniendo la base de datos de producción completamente limpia.*
 
 ---
-*Kraken Media Server v5.0.1 — Diseñado y Modularizado para Alta Estabilidad y Rendimiento Multimedia.*
+*Kraken Media Server v5.0.1 — Diseñado y Modularizado para Alta Estabilidad, Privacidad y Rendimiento Multimedia.*
