@@ -1214,10 +1214,14 @@ async function saveSettings(currentPin) {
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Guardando...';
 
     try {
+        const publicUrlInput = document.getElementById('settings-public-url');
+        const publicUrlVal = publicUrlInput ? publicUrlInput.value.trim() : null;
+
         const payload = { pin: currentPin };
         if (newPin) payload.new_pin = newPin;
         if (newMediaPath) payload.media_path = newMediaPath;
         if (subdlApiKey) payload.subdl_api_key = subdlApiKey;
+        if (publicUrlVal !== null) payload.public_url = publicUrlVal;
 
         const res = await fetch('/api/settings', {
             method: 'POST',

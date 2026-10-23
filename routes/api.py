@@ -2565,9 +2565,11 @@ def setup_status():
     needs_setup = row['count'] == 0 if row else True
     runtime = _load_runtime_config()
     
+    public_url = runtime.get('public_url', '') or getattr(config, 'PUBLIC_SERVER_URL', '') or getattr(config, 'CAST_PUBLIC_URL', '')
     return jsonify({
         'is_configured': not needs_setup,
         'current_media_path': runtime.get('media_path', config.DOWNLOAD_FOLDER),
+        'public_url': public_url,
         'has_subdl_api_key': bool(os.getenv('SUBDL_API_KEY') or runtime.get('subdl_api_key')),
         'adult_ratings': getattr(config, 'ADULT_RATINGS', [])
     })
@@ -2644,6 +2646,13 @@ def update_settings():
     if subdl_api_key:
         _save_runtime_config('subdl_api_key', subdl_api_key)
         changes['subdl_api_key'] = 'configured'
+
+    if 'public_url' in data:
+        raw_url = (data.get('public_url') or '').strip().rstrip('/')
+        if raw_url and not raw_url.startswith(('http://', 'https://')):
+            raw_url = f"https://{raw_url}"
+        _save_runtime_config('public_url', raw_url)
+        changes['public_url'] = raw_url
     
     if not changes:
         return jsonify({'error': 'No hay cambios para aplicar'}), 400
@@ -3788,15 +3797,17 @@ def public_config():
 def admin_get_config():
     """Obtener configuración actual (sin datos sensibles)."""
     runtime = _load_runtime_config()
+    public_url = runtime.get('public_url', '') or getattr(config, 'PUBLIC_SERVER_URL', '') or getattr(config, 'CAST_PUBLIC_URL', '')
     return jsonify({
         'media_path': runtime.get('media_path', ''),
-        'has_pin': bool(runtime.get('pin'))
+        'has_pin': bool(runtime.get('pin')),
+        'public_url': public_url
     })
 
 @api_bp.route('/api/admin/config', methods=['PUT'])
 @require_admin
 def admin_update_config():
-    """Actualizar configuración (PIN o media_path)."""
+    """Actualizar configuración (PIN, media_path o public_url)."""
     data = request.get_json() or {}
     
     if 'media_path' in data:
@@ -3806,6 +3817,12 @@ def admin_update_config():
         if len(data['pin']) < 4:
             return jsonify({'error': 'PIN mínimo 4 caracteres'}), 400
         _save_runtime_config('pin', data['pin'])
+
+    if 'public_url' in data:
+        raw_url = (data.get('public_url') or '').strip().rstrip('/')
+        if raw_url and not raw_url.startswith(('http://', 'https://')):
+            raw_url = f"https://{raw_url}"
+        _save_runtime_config('public_url', raw_url)
     
     return jsonify({'ok': True})
 
@@ -4778,7 +4795,9 @@ def api_create_share_link():
     conn.commit()
     conn.close()
     
-    base_url = request.host_url.rstrip('/')
+    runtime = _load_runtime_config()
+    public_url = (runtime.get('public_url') or getattr(config, 'PUBLIC_SERVER_URL', '') or getattr(config, 'CAST_PUBLIC_URL', '') or '').strip().rstrip('/')
+    base_url = public_url if public_url else request.host_url.rstrip('/')
     share_url = f"{base_url}/share/{token}"
     
     security_logger.info(f'SHARE LINK CREATED: by={user_email} token={token} media_id={actual_media_id} exp_hours={expires_in_hours}')
@@ -4827,7 +4846,9 @@ def api_list_shares():
     rows = c.fetchall()
     conn.close()
 
-    base_url = request.host_url.rstrip('/')
+    runtime = _load_runtime_config()
+    public_url = (runtime.get('public_url') or getattr(config, 'PUBLIC_SERVER_URL', '') or getattr(config, 'CAST_PUBLIC_URL', '') or '').strip().rstrip('/')
+    base_url = public_url if public_url else request.host_url.rstrip('/')
     now = time.time()
     items = []
     for r in rows:
