@@ -11,6 +11,18 @@
              */
             async function playVideoMode(file) {
                 window.currentVideoFile = file;
+                // Si estamos dentro de la APK nativa de KrakenTV, abrir el reproductor ExoPlayer nativo:
+                if (window.KrakenTV && typeof window.KrakenTV.playVideo === 'function') {
+                    const resumeSec = Number(window.krakenPendingResumeSeconds || file.progress_seconds || 0);
+                    window.krakenPendingResumeSeconds = 0;
+                    window.KrakenTV.playVideo(
+                        Number(file.id || -1),
+                        String(file.tmdb_title || file.clean_title || file.title || 'Video'),
+                        String(file.path || ''),
+                        Math.max(0, Math.floor(resumeSec))
+                    );
+                    return;
+                }
                 // Si hay un dispositivo remoto conectado (Spotify Connect para Cine):
                 if (window.KRAKEN_PLAYBACK_TARGET && window.KRAKEN_PLAYBACK_TARGET.session_id && window.KRAKEN_PLAYBACK_TARGET.session_id !== MY_SESSION_ID) {
                     if (typeof window.sendFileToControlledDevice === 'function') {
@@ -144,7 +156,13 @@
                     return;
                 }
 
-                fetch(`/api/hls/play?id=${mediaId}&token=${streamToken}&sid=${sid}`)
+                const initialResumeSeconds = Math.max(0, Math.floor(Number(
+                    window.krakenPendingResumeSeconds || (!file.is_finished ? file.progress_seconds : 0) || 0
+                )));
+                window.krakenPendingResumeSeconds = 0;
+                const startParam = initialResumeSeconds > 5 ? `&start=${initialResumeSeconds}` : '';
+
+                fetch(`/api/hls/play?id=${mediaId}&token=${streamToken}&sid=${sid}${startParam}`)
                     .then(r => r.json())
                     .then(data => {
                         console.log("HLS API response:", data);
@@ -638,33 +656,76 @@
                             }
 
                             art = new Artplayer(artConfig);
+                            art._hlsTimeOffset = data.direct_play ? 0 : Number(data.start_time || (initialResumeSeconds > 5 ? initialResumeSeconds : 0));
 
-                            // Reanudar desde el progreso persistido cuando el stream ya tiene duración utilizable.
-                            const pendingResumeSeconds = Number(window.krakenPendingResumeSeconds || 0);
-                            window.krakenPendingResumeSeconds = 0;
-                            if (pendingResumeSeconds > 5) {
-                                let resumeTimer = null;
-                                const applyPendingResume = () => {
-                                    const media = art && art.video;
-                                    const duration = Math.max(Number(data.duration || 0), Number(art?.duration || media?.duration || 0));
-                                    const hlsReady = !art?.hls || art._hlsJumpedToZero;
-                                    if (!media || !hlsReady || !Number.isFinite(duration) || duration <= pendingResumeSeconds + 1) return;
-                                    // En HLS creciente, verificar que el buffer o la playlist ya alcance el punto de resume
-                                    if (art.hls && Number(art?.duration || 0) < pendingResumeSeconds && !art._hlsEndedList) return;
-                                    media.currentTime = Math.min(pendingResumeSeconds, Math.max(0, duration - 1));
-                                    console.log('[VIDEO] Reanudado desde', Math.round(media.currentTime), 'segundos');
-                                    if (resumeTimer) clearInterval(resumeTimer);
-                                    resumeTimer = null;
+                            // Para Direct Play (.mp4/.webm/.m4v), saltar de inmediato vía HTTP 206 Range request.
+                            // Para HLS (.mkv transcodificado), FFmpeg ya arrancó con -ss en start_time, por lo que
+                            // seg_000.ts empieza exactamente en el punto de "Seguir viendo" sin esperar segmentos.
+                            if (data.direct_play && initialResumeSeconds > 5) {
+                                let directResumed = false;
+                                const applyDirectResume = () => {
+                                    if (directResumed || !art || !art.video) return;
+                                    const dur = Number(art.duration || art.video.duration || data.duration || 0);
+                                    if (dur > 0 && initialResumeSeconds < dur - 2) {
+                                        directResumed = true;
+                                        art.video.currentTime = initialResumeSeconds;
+                                        console.log('[DirectPlay] Reanudado al instante en', initialResumeSeconds, 's');
+                                    }
                                 };
-                                resumeTimer = setInterval(applyPendingResume, 500);
-                                setTimeout(() => {
-                                    if (resumeTimer) clearInterval(resumeTimer);
-                                    resumeTimer = null;
-                                }, 60000);
-                                art.on('destroy', () => {
-                                    if (resumeTimer) clearInterval(resumeTimer);
-                                });
+                                art.on('ready', applyDirectResume);
+                                art.on('video:loadedmetadata', applyDirectResume);
+                                art.on('video:canplay', applyDirectResume);
                             }
+
+                            // Función universal para saltar a cualquier segundo real de la película (incluso si el
+                            // segmento HLS aún no ha sido codificado por FFmpeg).
+                            art.seekToMovieTime = async (targetSeconds) => {
+                                const desiredSec = Math.max(0, Math.floor(Number(targetSeconds || 0)));
+                                if (data.direct_play || !art.hls) {
+                                    art.currentTime = desiredSec;
+                                    return;
+                                }
+                                const currentOffset = Number(art._hlsTimeOffset || 0);
+                                const streamBufDur = Number(art.duration || 0);
+                                const relativeSec = desiredSec - currentOffset;
+                                if (relativeSec >= 0 && (relativeSec <= streamBufDur - 1.5 || art._hlsEndedList)) {
+                                    art.currentTime = relativeSec;
+                                    return;
+                                }
+                                // Si el usuario o el Cine Remote salta a una zona aún no codificada (o anterior al offset),
+                                // reiniciamos FFmpeg con -ss en ese segundo exacto.
+                                const oldSid = data.session_id || sid;
+                                const nextSid = Math.random().toString(36).substring(2, 12);
+                                if (loader) loader.classList.remove('hidden', 'opacity-0');
+                                try {
+                                    const idParam = mediaId ? `id=${encodeURIComponent(mediaId)}` : `file=${file.path.split('/').map(p => encodeURIComponent(p)).join('/')}`;
+                                    const tokenParam = (data.token || streamToken) ? `&token=${encodeURIComponent(data.token || streamToken)}` : '';
+                                    const audioParam = Number.isInteger(selectedBackendAudio) ? `&audio_track=${selectedBackendAudio}` : '';
+                                    const resp = await fetch(`/api/hls/play?${idParam}${tokenParam}&sid=${nextSid}${audioParam}&start=${desiredSec}`);
+                                    const nextData = await resp.json().catch(() => ({}));
+                                    if (!resp.ok || nextData.error || !nextData.url) {
+                                        throw new Error(nextData.error || `HTTP ${resp.status}`);
+                                    }
+                                    if (oldSid && oldSid !== nextData.session_id) {
+                                        fetch(`/api/hls/stop?sid=${oldSid}`, { method: 'POST' }).catch(() => {});
+                                    }
+                                    data.session_id = nextData.session_id || nextSid;
+                                    art._hlsTimeOffset = nextData.direct_play ? 0 : desiredSec;
+                                    art._hlsJumpedToZero = false;
+                                    const nextFullUrl = nextData.url.startsWith('/') ? (window.location.origin + nextData.url) : nextData.url;
+                                    if (typeof art.switchUrl === 'function') {
+                                        art.switchUrl(nextFullUrl);
+                                    } else {
+                                        art.url = nextFullUrl;
+                                    }
+                                } catch (err) {
+                                    console.warn('[HLS Seek] Error saltando a segmento remoto:', err);
+                                    if (loader) {
+                                        loader.classList.add('opacity-0');
+                                        setTimeout(() => loader.classList.add('hidden'), 300);
+                                    }
+                                }
+                            };
 
                             // ═══════ CONTROL AUTO-HIDE UNIVERSAL (Móvil / Tablet / Desktop / Fullscreen) ═══════
                             if (art.template && art.template.$player) {
@@ -921,7 +982,7 @@
                                 if (normalized === normalizeAudioIndex(selectedBackendAudio)) return;
                                 if (!file || (!file.id && !file.path)) return;
 
-                                const previousTime = Number(art.currentTime || 0);
+                                const previousTime = Math.floor(Number(art._hlsTimeOffset || 0) + Number(art.currentTime || 0));
                                 const wasPlaying = !art.paused;
                                 const oldSid = data.session_id || sid;
                                 const nextSid = Math.random().toString(36).substring(2, 12);
@@ -931,7 +992,8 @@
                                 try {
                                     const idParam = mediaId ? `id=${encodeURIComponent(mediaId)}` : `file=${file.path.split('/').map(p => encodeURIComponent(p)).join('/')}`;
                                     const tokenParam = (data.token || streamToken) ? `&token=${encodeURIComponent(data.token || streamToken)}` : '';
-                                    const resp = await fetch(`/api/hls/play?${idParam}${tokenParam}&sid=${nextSid}&audio_track=${normalized}`);
+                                    const startQuery = previousTime > 2 ? `&start=${previousTime}` : '';
+                                    const resp = await fetch(`/api/hls/play?${idParam}${tokenParam}&sid=${nextSid}&audio_track=${normalized}${startQuery}`);
                                     const nextData = await resp.json().catch(() => ({}));
                                     if (!resp.ok) {
                                         throw new Error(nextData.error || `HTTP ${resp.status}`);
@@ -950,9 +1012,8 @@
                                         ? nextData.selected_audio_track
                                         : normalized;
 
-                                    if (previousTime > 2) {
-                                        window.krakenPendingResumeSeconds = previousTime;
-                                    }
+                                    art._hlsTimeOffset = nextData.direct_play ? 0 : (previousTime > 2 ? previousTime : 0);
+                                    art._hlsJumpedToZero = false;
                                     const nextFullUrl = nextData.url.startsWith('/') ? (window.location.origin + nextData.url) : nextData.url;
                                     if (typeof art.switchUrl === 'function') {
                                         art.switchUrl(nextFullUrl);
@@ -962,7 +1023,7 @@
 
                                     const restorePlayback = () => {
                                         try {
-                                            if (previousTime > 0 && (!art.hls || art.duration >= previousTime)) {
+                                            if (nextData.direct_play && previousTime > 0) {
                                                 art.currentTime = previousTime;
                                             }
                                         } catch (_) { }
@@ -998,13 +1059,13 @@
                             art.on('ready', () => {
                                 refreshAudioTracks();
                                 art.on('video:play', () => {
-                                    if (typeof broadcastWatchPartySync === 'function') broadcastWatchPartySync('play', art.currentTime);
+                                    if (typeof broadcastWatchPartySync === 'function') broadcastWatchPartySync('play', Number(art._hlsTimeOffset || 0) + Number(art.currentTime || 0));
                                 });
                                 art.on('video:pause', () => {
-                                    if (typeof broadcastWatchPartySync === 'function') broadcastWatchPartySync('pause', art.currentTime);
+                                    if (typeof broadcastWatchPartySync === 'function') broadcastWatchPartySync('pause', Number(art._hlsTimeOffset || 0) + Number(art.currentTime || 0));
                                 });
                                 art.on('video:seeked', () => {
-                                    if (typeof broadcastWatchPartySync === 'function') broadcastWatchPartySync('seek', art.currentTime);
+                                    if (typeof broadcastWatchPartySync === 'function') broadcastWatchPartySync('seek', Number(art._hlsTimeOffset || 0) + Number(art.currentTime || 0));
                                 });
                                 // Aplicar preferencias de velocidad y volumen por defecto
                                 const rate = Number(getVideoPrefs().defaultRate != null ? getVideoPrefs().defaultRate : 1);
@@ -1318,16 +1379,19 @@ art.on('ended', () => {
                             art.on('video:timeupdate', () => {
                                 if (_endedTriggered) return;
 
+                                const hlsOffset = Number(art._hlsTimeOffset || 0);
+                                const realCurrentTime = hlsOffset + Number(art.currentTime || 0);
                                 const knownTotalDuration = Number(data.duration || file.duration || 0);
                                 const streamDuration = Number(art.duration || 0);
-                                const effectiveDuration = Math.max(knownTotalDuration, streamDuration);
+                                const effectiveDuration = Math.max(knownTotalDuration, hlsOffset + streamDuration);
 
-                                // Si el stream es HLS creciente y conocemos la duración real de la película/episodio,
-                                // mostrar la duración real en el reloj del reproductor en lugar de la duración parcial del buffer.
-                                if (knownTotalDuration > 0 && streamDuration > 0 && knownTotalDuration > streamDuration + 5) {
+                                // Si el stream es HLS creciente o con offset de resume y conocemos la duración real,
+                                // mostrar el tiempo real de la película y la duración real en el reloj del reproductor.
+                                if ((knownTotalDuration > 0 && streamDuration > 0 && knownTotalDuration > streamDuration + 5) || hlsOffset > 0) {
                                     const timeEl = art.template && art.template.$time;
                                     if (timeEl) {
-                                        timeEl.textContent = `${formatVideoClock(art.currentTime)} / ${formatVideoClock(knownTotalDuration)}`;
+                                        const displayTotal = effectiveDuration > 0 ? effectiveDuration : streamDuration;
+                                        timeEl.textContent = `${formatVideoClock(realCurrentTime)} / ${formatVideoClock(displayTotal)}`;
                                     }
                                 }
 
@@ -1335,12 +1399,12 @@ art.on('ended', () => {
                                 const canCheckEnd = !art.hls || knownTotalDuration > 30 || art._hlsEndedList;
 
                                 // Mostrar overlay de siguiente episodio usando la duración real total
-                                if (canCheckEnd && effectiveDuration > 30 && art.currentTime >= effectiveDuration - NEXT_EP_SECONDS && !_nextEpShown) {
+                                if (canCheckEnd && effectiveDuration > 30 && realCurrentTime >= effectiveDuration - NEXT_EP_SECONDS && !_nextEpShown) {
                                     showNextEpisodeOverlay();
                                 }
 
                                 // Safety net: auto-avance si el video llega al final real sin disparar ended
-                                if (canCheckEnd && _videoPlaybackStarted && effectiveDuration > 30 && art.currentTime >= effectiveDuration - 0.5 && (Date.now() - _watchStartedAt) >= 30000) {
+                                if (canCheckEnd && _videoPlaybackStarted && effectiveDuration > 30 && realCurrentTime >= effectiveDuration - 0.5 && (Date.now() - _watchStartedAt) >= 30000) {
                                     _endedTriggered = true;
                                     removeNextEpOverlay();
                                     console.log('[ArtPlayer] timeupdate safety -> near end, triggering playNext');

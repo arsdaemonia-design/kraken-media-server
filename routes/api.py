@@ -1662,15 +1662,22 @@ def biblioteca():
     is_kid_mode = False
     
     if user_email:
-        conn = get_db()
-        c = conn.cursor()
-        c.execute("SELECT is_kid_mode FROM users WHERE email = ?", (user_email,))
-        user_row = c.fetchone()
-        if user_row:
-            is_kid_mode = bool(user_row['is_kid_mode'])
-        conn.close()
+        conn = None
+        try:
+            conn = get_db()
+            c = conn.cursor()
+            c.execute("SELECT is_kid_mode FROM users WHERE email = ?", (user_email,))
+            user_row = c.fetchone()
+            if user_row:
+                is_kid_mode = bool(user_row['is_kid_mode'])
+        except Exception as e:
+            print(f"⚠️ Warning verificando kid_mode en /biblioteca: {e}")
+        finally:
+            if conn:
+                conn.close()
 
-    # Si forzamos actualización, limpiamos solo el caché de ESTE usuario
+    # Si forzamos actualización, limpiamos solo el caché de ESTE usuario (resguardando copia previa si DB está ocupada)
+    previous_cached = BIB_CACHE_BY_OWNER.get(owner_email)
     if force and owner_email in BIB_CACHE_BY_OWNER:
         del BIB_CACHE_BY_OWNER[owner_email]
 
@@ -1678,15 +1685,25 @@ def biblioteca():
     if owner_email in BIB_CACHE_BY_OWNER:
         data = BIB_CACHE_BY_OWNER[owner_email]
     else:
-        # Generar exclusiva para este usuario (Playlists privadas)
-        data = generar_biblioteca_viva(owner_email)
-        
-        # Si está en modo niños, filtrar contenido
-        if is_kid_mode:
-            data = filtrar_contenido_kid_mode(data)
-        
-        BIB_CACHE_BY_OWNER[owner_email] = data
-        BIB_CACHE_TIME = time.time()
+        try:
+            # Generar exclusiva para este usuario (Playlists privadas)
+            data = generar_biblioteca_viva(owner_email)
+            
+            # Si está en modo niños, filtrar contenido
+            if is_kid_mode:
+                data = filtrar_contenido_kid_mode(data)
+            
+            BIB_CACHE_BY_OWNER[owner_email] = data
+            BIB_CACHE_TIME = time.time()
+        except Exception as e:
+            print(f"⚠️ Error recargando /biblioteca desde SQLite: {e}")
+            if previous_cached:
+                data = previous_cached
+                BIB_CACHE_BY_OWNER[owner_email] = previous_cached
+            elif BIB_CACHE_BY_OWNER:
+                data = next(iter(BIB_CACHE_BY_OWNER.values()))
+            else:
+                raise
 
     # Adult Vault - Filtrar en una copia superficial para no mutar BIB_CACHE_BY_OWNER en memoria
     import config
@@ -2076,54 +2093,73 @@ def status():
         # Solo asociar a cuenta en DB si hay email autenticado (JWT o Cloudflare)
         db_email = auth_email if auth_email else ''
 
-        # 2. CONSULTAR/CREAR USUARIO EN BD (Resuelve por email autenticado, username o SuperAdmin local)
+        # 2. CONSULTAR/CREAR USUARIO EN BD (Resuelve por email autenticado o sesión local válida)
         if session_id:
-            try:
-                conn = get_db()
-                c = conn.cursor()
-                user_row = None
-                if db_email:
-                    c.execute("SELECT email, username, avatar_url, is_superadmin FROM users WHERE email = ?", (db_email,))
-                    user_row = c.fetchone()
-                if not user_row and user_name_fallback and user_name_fallback not in ('Invitado', '', 'Anónimo'):
-                    c.execute("SELECT email, username, avatar_url, is_superadmin FROM users WHERE username = ? COLLATE NOCASE", (user_name_fallback,))
-                    user_row = c.fetchone()
-                if not user_row and not db_email and config.SUPERADMIN_EMAIL:
-                    c.execute("SELECT email, username, avatar_url, is_superadmin FROM users WHERE email = ?", (config.SUPERADMIN_EMAIL,))
-                    user_row = c.fetchone()
+            # Fast-path en memoria: si la sesión ya fue validada y está en ACTIVE_USERS, evitar abrir/escribir SQLite cada 3s
+            cached_user = None
+            with USERS_LOCK:
+                cached_user = ACTIVE_USERS.get(session_id)
+            if cached_user and cached_user.get('email') and (not db_email or cached_user.get('email', '').lower() == db_email.lower()):
+                db_email = cached_user.get('email') or db_email
+                final_username = cached_user.get('name') or final_username
+                avatar_url = cached_user.get('avatar')
+                is_superadmin = bool(cached_user.get('is_superadmin'))
+                needs_registration = bool(cached_user.get('needs_registration'))
+            else:
+                conn = None
+                try:
+                    conn = get_db()
+                    c = conn.cursor()
+                    user_row = None
+                    if db_email:
+                        c.execute("SELECT email, username, avatar_url, is_superadmin, sid FROM users WHERE email = ? COLLATE NOCASE", (db_email,))
+                        user_row = c.fetchone()
+                        if not user_row and user_name_fallback and user_name_fallback not in ('Invitado', '', 'Anónimo'):
+                            c.execute("SELECT email, username, avatar_url, is_superadmin, sid FROM users WHERE username = ? COLLATE NOCASE", (user_name_fallback,))
+                            user_row = c.fetchone()
+                    elif _get_client_ip() in ('127.0.0.1', '::1') and user_name_fallback and user_name_fallback not in ('Invitado', '', 'Anónimo'):
+                        c.execute("SELECT email, username, avatar_url, is_superadmin, sid FROM users WHERE username = ? COLLATE NOCASE", (user_name_fallback,))
+                        user_row = c.fetchone()
 
-                if user_row:
-                    db_email = user_row['email'] or db_email
-                    final_username = user_row['username'] or final_username
-                    avatar_url = user_row['avatar_url']
-                    is_superadmin = bool(user_row['is_superadmin'])
+                    if user_row:
+                        db_email = user_row['email'] or db_email
+                        final_username = user_row['username'] or final_username
+                        avatar_url = user_row['avatar_url']
+                        is_superadmin = bool(user_row['is_superadmin'])
 
-                    # Auto-Promoción a Super Admin via Config
-                    if config.SUPERADMIN_EMAIL and db_email.lower() == config.SUPERADMIN_EMAIL.lower() and not is_superadmin:
-                        is_superadmin = True
-                        c.execute("UPDATE users SET is_superadmin = 1 WHERE email = ?", (db_email,))
+                        db_dirty = False
+                        # Auto-Promoción a Super Admin via Config
+                        if config.SUPERADMIN_EMAIL and db_email.lower() == config.SUPERADMIN_EMAIL.lower() and not is_superadmin:
+                            is_superadmin = True
+                            c.execute("UPDATE users SET is_superadmin = 1 WHERE email = ?", (db_email,))
+                            db_dirty = True
 
-                    c.execute("UPDATE users SET sid = ? WHERE email = ?", (session_id, db_email))
-                    conn.commit()
+                        if user_row['sid'] != session_id:
+                            c.execute("UPDATE users SET sid = ? WHERE email = ?", (session_id, db_email))
+                            db_dirty = True
+                        if db_dirty:
+                            conn.commit()
 
-                    # Exigir registro si no tienen avatar (perfil incompleto)
-                    if not avatar_url:
+                        # Exigir registro si no tienen avatar (perfil incompleto)
+                        if not avatar_url:
+                            needs_registration = True
+                    elif db_email:
                         needs_registration = True
-                elif db_email:
-                    needs_registration = True
 
-                    is_admin = 1 if (config.SUPERADMIN_EMAIL and db_email.lower() == config.SUPERADMIN_EMAIL.lower()) else 0
-                    is_superadmin = bool(is_admin)
+                        is_admin = 1 if (config.SUPERADMIN_EMAIL and db_email.lower() == config.SUPERADMIN_EMAIL.lower()) else 0
+                        is_superadmin = bool(is_admin)
 
-                    c.execute("INSERT INTO users (email, sid, username, is_superadmin, created_at) VALUES (?, ?, ?, ?, ?)", 
-                              (db_email, session_id, final_username, is_admin, time.time()))
-                    conn.commit()
-                else:
-                    if not final_username or final_username == 'Invitado':
-                        final_username = device_name or 'Invitado'
-                conn.close()
-            except Exception as e:
-                print(f"Error en Radar DB: {e}")
+                        c.execute("INSERT INTO users (email, sid, username, is_superadmin, created_at) VALUES (?, ?, ?, ?, ?)", 
+                                  (db_email, session_id, final_username, is_admin, time.time()))
+                        conn.commit()
+                    else:
+                        if not final_username or final_username == 'Invitado':
+                            final_username = device_name or 'Invitado'
+                except Exception as e:
+                    print(f"Error en Radar DB: {e}")
+                finally:
+                    if conn:
+                        conn.close()
 
         # 3. ACTUALIZAR ESTADO EN MEMORIA (Para velocidad)
         if session_id:
@@ -2269,8 +2305,17 @@ def update_profile():
             
         conn.commit()
         conn.close()
-        
-        return jsonify({"ok": True, "message": "Profile updated"})
+
+        with USERS_LOCK:
+            for sid, u_data in ACTIVE_USERS.items():
+                if (u_data.get('email') or '').lower() == email.lower():
+                    if username:
+                        u_data['name'] = username
+                        u_data['initial'] = username[0].upper()
+                    if avatar_url:
+                        u_data['avatar'] = avatar_url
+
+        return jsonify({"ok": True, "message": "Profile updated", "username": username, "avatar_url": avatar_url})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -2910,20 +2955,7 @@ def auto_tag_library_videos():
         conn = get_db()
         c = conn.cursor()
         
-        # Obtener videos sin metadata TMDB (primero agregar columnas si no existen)
-        for col_sql in (
-            "ALTER TABLE media ADD COLUMN tmdb_id INTEGER DEFAULT 0",
-            "ALTER TABLE media ADD COLUMN tmdb_title TEXT",
-            "ALTER TABLE media ADD COLUMN tmdb_year TEXT",
-            "ALTER TABLE media ADD COLUMN tmdb_overview TEXT",
-            "ALTER TABLE media ADD COLUMN tmdb_genres TEXT",
-            "ALTER TABLE media ADD COLUMN tmdb_poster TEXT",
-        ):
-            try:
-                c.execute(col_sql)
-            except Exception:
-                pass
-        
+        # Obtener videos sin metadata TMDB
         c.execute('''
             SELECT rel_path, title, folder_type FROM media 
             WHERE media_type = 'video' 
@@ -3185,6 +3217,10 @@ def auto_tag_library_videos():
         })
         
     except Exception as e:
+        try:
+            conn.close()
+        except Exception:
+            pass
         state.RESCAN_STATUS["active"] = False
         state.RESCAN_STATUS["stage"] = "error"
         print(f"Error en auto_tag_library_videos: {e}")
@@ -3598,11 +3634,20 @@ def admin_update_user_profile(email):
     conn.commit()
     conn.close()
 
+    with USERS_LOCK:
+        for sid, u_data in ACTIVE_USERS.items():
+            if (u_data.get('email') or '').lower() == email.lower():
+                if username:
+                    u_data['name'] = username
+                    u_data['initial'] = username[0].upper()
+                if avatar_url:
+                    u_data['avatar'] = avatar_url
+
     security_logger.info(
         f'USER PROFILE UPDATED BY ADMIN: email={email} '
         f'updated_username={bool(username)} updated_avatar={bool(avatar_url)}'
     )
-    return jsonify({'ok': True})
+    return jsonify({'ok': True, 'username': username, 'avatar_url': avatar_url})
 
 
 @api_bp.route('/api/admin/users/<email>/kidmode', methods=['PUT'])
@@ -3641,7 +3686,8 @@ def admin_toggle_kid_mode(email):
 def admin_update_user_role(email):
     """Actualizar rol de usuario (usuario permanente o beta con expiración)."""
     data = request.get_json() or {}
-    new_role = data.get('role', 'user')  # 'user' o 'beta'
+    action = data.get('action', '')
+    new_role = 'user' if action == 'convert_permanent' else data.get('role', 'user')  # 'user' o 'beta'
     trial_hours = float(data.get('trial_hours', 0))
     if not trial_hours and data.get('trial_days'):
         trial_hours = float(data.get('trial_days')) * 24.0
@@ -4061,6 +4107,15 @@ def auth_register():
     role = 'user'
     trial_expires_at = None
 
+    # Crear email local y verificar que no exista antes de consumir la invitación
+    safe_name = username.lower().replace(' ', '_')
+    email = f"{safe_name}@kraken.local"
+
+    c.execute("SELECT email FROM users WHERE email = ? OR username = ? COLLATE NOCASE", (email, username))
+    if c.fetchone():
+        conn.close()
+        return jsonify({"error": "Este nombre de usuario ya está registrado"}), 409
+
     if invite_code:
         code_data = None
         c.execute("SELECT * FROM invites WHERE code = ?", (invite_code,))
@@ -4096,19 +4151,9 @@ def auth_register():
                 trial_hours = float(code_data.get('trial_hours', 24))
                 trial_expires_at = time.time() + (trial_hours * 3600)
 
-        c.execute("UPDATE invites SET used_at = ?, used_by = ? WHERE code = ?", (time.time(), email if 'email' in locals() else username, invite_code))
+        c.execute("UPDATE invites SET used_at = ?, used_by = ? WHERE code = ?", (time.time(), email, invite_code))
         if '_invite_codes' in state.STREAM_TOKENS and invite_code in state.STREAM_TOKENS['_invite_codes']:
             del state.STREAM_TOKENS['_invite_codes'][invite_code]
-    
-    # Crear email local
-    safe_name = username.lower().replace(' ', '_')
-    email = f"{safe_name}@kraken.local"
-    
-    # Verificar que no exista
-    c.execute("SELECT email FROM users WHERE email = ?", (email,))
-    if c.fetchone():
-        conn.close()
-        return jsonify({"error": "Este nombre de usuario ya está registrado"}), 409
     
     password_hash = hash_password(password)
     is_admin = 1 if not has_admin else 0
@@ -4320,6 +4365,7 @@ def generate_stream_token():
 @api_bp.route('/api/progress', methods=['POST'])
 def save_progress():
     """Save watch progress for the current user. Called silently by ArtPlayer every ~10s."""
+    conn = None
     try:
         user_email = get_user_from_request(request) or 'anonymous'
         data = request.get_json() or {}
@@ -4330,25 +4376,32 @@ def save_progress():
         if not media_id:
             return jsonify({"error": "Missing media_id"}), 400
 
-        is_finished = 1 if (duration > 0 and progress / duration >= 0.93) else 0
-
         conn = get_db()
         c = conn.cursor()
+        if duration <= 0:
+            row_dur = c.execute("SELECT duration_sec FROM media WHERE id = ?", (media_id,)).fetchone()
+            if row_dur and row_dur['duration_sec']:
+                duration = float(row_dur['duration_sec'])
+
+        is_finished = 1 if (duration > 60 and progress / duration >= 0.93) else 0
+
         c.execute("""
             INSERT INTO user_progress (user_email, media_id, progress_seconds, duration_seconds, is_finished, last_watched)
             VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_email, media_id) DO UPDATE SET
                 progress_seconds = excluded.progress_seconds,
-                duration_seconds = excluded.duration_seconds,
-                is_finished = CASE WHEN excluded.is_finished = 1 THEN 1 ELSE user_progress.is_finished END,
+                duration_seconds = CASE WHEN excluded.duration_seconds > user_progress.duration_seconds THEN excluded.duration_seconds ELSE user_progress.duration_seconds END,
+                is_finished = excluded.is_finished,
                 last_watched = excluded.last_watched
         """, (user_email, media_id, progress, duration, is_finished, time.time()))
         conn.commit()
-        conn.close()
         return jsonify({"ok": True})
     except Exception as e:
         print(f"Error saving progress: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"ok": False, "error": str(e)}), 200
+    finally:
+        if conn:
+            conn.close()
 
 
 @api_bp.route('/api/progress/series')
@@ -4356,6 +4409,7 @@ def get_series_resume():
     """Get the resume point for a series (last watched episode for the current user).
        Query: ?tmdb_id=12345
     """
+    conn = None
     try:
         user_email = get_user_from_request(request) or 'anonymous'
         tmdb_id = request.args.get('tmdb_id')
@@ -4376,7 +4430,6 @@ def get_series_resume():
             ORDER BY m.rel_path ASC
         """, (user_email, tmdb_id))
         rows = c.fetchall()
-        conn.close()
 
         if not rows:
             return jsonify({"has_progress": False, "first_episode": None})
@@ -4425,12 +4478,16 @@ def get_series_resume():
         })
     except Exception as e:
         print(f"Error getting series resume: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"has_progress": False, "first_episode": None, "error": str(e)}), 200
+    finally:
+        if conn:
+            conn.close()
 
 
 @api_bp.route('/api/progress/continue-watching')
 def get_continue_watching():
     """Return unfinished video progress for the current user, newest first."""
+    conn = None
     try:
         user_email = get_user_from_request(request) or 'anonymous'
         conn = get_db()
@@ -4452,11 +4509,13 @@ def get_continue_watching():
             LIMIT 24
         """, (user_email,))
         rows = c.fetchall()
-        conn.close()
         return jsonify({"items": [dict(row) for row in rows]})
     except Exception as e:
         print(f"Error getting continue watching: {e}")
-        return jsonify({"items": [], "error": str(e)}), 500
+        return jsonify({"items": [], "error": str(e)}), 200
+    finally:
+        if conn:
+            conn.close()
 
 
 # ============= TMDB EXTENDED DETAILS (Live-Fetch) =============

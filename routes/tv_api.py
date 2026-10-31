@@ -6,6 +6,8 @@ import json
 import mimetypes
 import os
 import re
+import threading
+import unicodedata
 import requests
 
 from flask import Blueprint, jsonify, request, send_file
@@ -17,6 +19,19 @@ from services.auth import get_user_from_request
 from services.database import get_db
 
 tv_bp = Blueprint("tv_api", __name__)
+
+# Semáforo para limitar decodificación/extracción concurrente de carátulas y evitar sobrecarga de disco/RAM
+_COVER_EXTRACT_SEM = threading.BoundedSemaphore(4)
+_TV_NO_COVER_CACHE = set()
+
+
+def _norm_search_text(value):
+    """Strip diacritics/accents and lowercase text for flexible TV search."""
+    if not value:
+        return ""
+    nfd = unicodedata.normalize("NFD", str(value))
+    stripped = "".join(ch for ch in nfd if unicodedata.category(ch) != "Mn")
+    return stripped.casefold()
 
 _KID_BLOCKED_RATINGS = (
     "PG-13", "R", "NC-17", "TV-14", "TV-MA", "18", "16", "16+", "18+",
@@ -512,6 +527,7 @@ def tv_music_library_page():
     category = request.args.get("category", "").strip()
     genre = request.args.get("genre", "").strip()
     conn = get_db()
+    conn.create_function("norm_text", 1, _norm_search_text)
     try:
         email = get_user_from_request(request)
         if not email:
@@ -520,13 +536,18 @@ def tv_music_library_page():
         where = ["media_type = 'audio'", "COALESCE(is_hidden, 0) = 0"]
         args = []
         if query_text:
-            where.append("(title LIKE ? OR artist LIKE ? OR album LIKE ? OR rel_path LIKE ?)")
-            pattern = f"%{query_text}%"
-            args.extend([pattern] * 4)
+            tokens = [t for t in _norm_search_text(query_text).split() if t]
+            for tok in tokens:
+                where.append(
+                    "(norm_text(title) LIKE ? OR norm_text(artist) LIKE ? OR norm_text(album) LIKE ? OR norm_text(rel_path) LIKE ?)"
+                )
+                pattern = f"%{tok}%"
+                args.extend([pattern] * 4)
         if category:
             # Library names are top-level folders relative to Kraken's media root.
-            where.append("(rel_path = ? OR rel_path LIKE ?)")
-            args.extend([category, f"{category}/%"])
+            cat_backslash = category.replace("/", "\\")
+            where.append("(rel_path = ? OR rel_path LIKE ? OR rel_path = ? OR rel_path LIKE ?)")
+            args.extend([category, f"{category}/%", cat_backslash, f"{cat_backslash}\\%"])
         if genre:
             where.append("genre LIKE ?")
             args.append(f"%{genre}%")
@@ -542,46 +563,47 @@ def tv_music_library_page():
             [*args, limit, offset],
         ).fetchall()
 
-        category_rows = conn.execute(
-            "SELECT rel_path FROM media WHERE media_type = 'audio' AND COALESCE(is_hidden, 0) = 0"
-        ).fetchall()
-        categories = sorted({
-            (row["rel_path"] or "").replace("\\", "/").strip("/").split("/")[0]
-            for row in category_rows
-            if (row["rel_path"] or "").strip("/\\")
-        }, key=str.casefold)
-        genre_rows = conn.execute(
-            "SELECT DISTINCT genre FROM media WHERE media_type = 'audio' AND COALESCE(is_hidden, 0) = 0 AND genre IS NOT NULL AND TRIM(genre) != ''"
-        ).fetchall()
-        genres = sorted({part.strip() for row in genre_rows for part in re.split(r"[,;|]", row["genre"] or "") if part.strip()}, key=str.casefold)
-        playlist_columns = {row["name"] for row in conn.execute("PRAGMA table_info(playlist_items)").fetchall()}
-        playlist_path_col = "rel_path" if "rel_path" in playlist_columns else "media_path"
-        playlist_rows = conn.execute(
-            f"""SELECT p.id, p.name, COUNT(m.id) AS track_count
-                FROM playlists p
-                LEFT JOIN playlist_items pi ON pi.playlist_id = p.id
-                LEFT JOIN media m ON m.rel_path = pi.{playlist_path_col}
-                    AND m.media_type = 'audio' AND COALESCE(m.is_hidden, 0) = 0
-                WHERE p.owner_email = ?
-                GROUP BY p.id, p.name ORDER BY p.name COLLATE NOCASE""",
-            (email,),
-        ).fetchall()
+        categories = []
+        genres = []
         playlists = []
-        for playlist in playlist_rows:
-            cover_row = conn.execute(
-                f"""SELECT m.rel_path FROM playlist_items pi
-                    JOIN media m ON m.rel_path = pi.{playlist_path_col}
-                    WHERE pi.playlist_id = ? AND m.media_type = 'audio'
-                        AND COALESCE(m.is_hidden, 0) = 0
-                    ORDER BY pi.position LIMIT 1""",
-                (playlist["id"],),
-            ).fetchone()
-            playlists.append({
-                "id": playlist["id"],
-                "name": playlist["name"],
-                "track_count": playlist["track_count"],
-                "cover": f"/api/tv/music/cover/{cover_row['rel_path']}" if cover_row else None,
-            })
+        if offset == 0:
+            category_rows = conn.execute(
+                "SELECT DISTINCT substr(replace(rel_path, '\\', '/'), 1, instr(replace(rel_path, '\\', '/') || '/', '/') - 1) AS cat FROM media WHERE media_type = 'audio' AND COALESCE(is_hidden, 0) = 0"
+            ).fetchall()
+            categories = sorted({
+                (row["cat"] or "").strip()
+                for row in category_rows
+                if (row["cat"] or "").strip()
+            }, key=str.casefold)
+            genre_rows = conn.execute(
+                "SELECT DISTINCT genre FROM media WHERE media_type = 'audio' AND COALESCE(is_hidden, 0) = 0 AND genre IS NOT NULL AND TRIM(genre) != ''"
+            ).fetchall()
+            genres = sorted({part.strip() for row in genre_rows for part in re.split(r"[,;|]", row["genre"] or "") if part.strip()}, key=str.casefold)
+            playlist_columns = {row["name"] for row in conn.execute("PRAGMA table_info(playlist_items)").fetchall()}
+            playlist_path_col = "rel_path" if "rel_path" in playlist_columns else "media_path"
+            playlist_rows = conn.execute(
+                f"""SELECT p.id, p.name,
+                           COUNT(pi.id) AS track_count,
+                           (SELECT pi2.{playlist_path_col}
+                            FROM playlist_items pi2
+                            WHERE pi2.playlist_id = p.id
+                            ORDER BY pi2.position, pi2.id
+                            LIMIT 1) AS first_rel_path
+                    FROM playlists p
+                    LEFT JOIN playlist_items pi ON pi.playlist_id = p.id
+                    WHERE p.owner_email = ?
+                    GROUP BY p.id, p.name
+                    ORDER BY p.name COLLATE NOCASE""",
+                (email,),
+            ).fetchall()
+            for playlist in playlist_rows:
+                cover_rel = (playlist["first_rel_path"] or "").replace("\\", "/").strip("/")
+                playlists.append({
+                    "id": playlist["id"],
+                    "name": playlist["name"],
+                    "track_count": playlist["track_count"],
+                    "cover": f"/api/tv/music/cover/{cover_rel}" if cover_rel else None,
+                })
         items = []
         for row in rows:
             rel_path = (row["rel_path"] or "").replace("\\", "/").strip("/")
@@ -673,46 +695,66 @@ def tv_music_playlist_page(playlist_id):
 @tv_bp.route("/api/tv/music/cover/<path:filename>")
 def tv_music_cover(filename):
     """Serve a cached square derivative of a cover for the TV music catalog."""
-    email = get_user_from_request(request)
-    if not email:
-        return jsonify({"error": "Sesión requerida"}), 401
-
     decoded = filename.replace("\\", "/").strip("/")
-    conn = get_db()
-    try:
-        row = conn.execute(
-            "SELECT 1 FROM media WHERE media_type = 'audio' AND rel_path = ? AND COALESCE(is_hidden, 0) = 0",
-            (decoded,),
-        ).fetchone()
-        if not row:
-            return jsonify({"error": "Carátula no disponible"}), 404
-    finally:
-        conn.close()
+    norm_key = decoded.casefold()
+    if norm_key in _TV_NO_COVER_CACHE:
+        from flask import Response
+        resp = Response(b"", status=404, mimetype="text/plain")
+        resp.headers["Cache-Control"] = "public, max-age=3600"
+        return resp
 
     cache_dir = os.path.join(config.THUMBNAILS_FOLDER, "tv_music_cache")
     cache_path = os.path.join(cache_dir, hashlib.sha256(decoded.encode("utf-8", errors="ignore")).hexdigest() + ".jpg")
     if os.path.isfile(cache_path):
         return send_file(cache_path, mimetype="image/jpeg", conditional=True, max_age=31536000)
 
-    source = caratula(decoded)
-    if source.status_code != 200:
-        return source
-    try:
-        source.direct_passthrough = False
-        raw_image = source.get_data()
-        source.close()
-        os.makedirs(cache_dir, exist_ok=True)
-        with Image.open(io.BytesIO(raw_image)) as image:
-            image = image.convert("RGB")
-            image.thumbnail((320, 320), Image.Resampling.LANCZOS)
-            canvas = Image.new("RGB", (320, 320), (12, 18, 17))
-            canvas.paste(image, ((320 - image.width) // 2, (320 - image.height) // 2))
-            canvas.save(cache_path, "JPEG", quality=82, optimize=True)
-        response = send_file(cache_path, mimetype="image/jpeg", conditional=True, max_age=31536000)
+    # Si ya existe en audio_cache (360x360 JPEG pregenerado por caratula), servirlo directo sin re-encodificar con PIL
+    audio_cache_dir = os.path.join(config.THUMBNAILS_FOLDER, "audio_cache")
+    audio_hash = hashlib.md5(norm_key.encode("utf-8", errors="ignore")).hexdigest()
+    cached_audio_thumb = os.path.join(audio_cache_dir, f"{audio_hash}.jpg")
+    if os.path.isfile(cached_audio_thumb):
+        response = send_file(cached_audio_thumb, mimetype="image/jpeg", conditional=True, max_age=31536000)
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response
-    except Exception:
-        return source
+
+    with _COVER_EXTRACT_SEM:
+        if os.path.isfile(cache_path):
+            return send_file(cache_path, mimetype="image/jpeg", conditional=True, max_age=31536000)
+        if os.path.isfile(cached_audio_thumb):
+            return send_file(cached_audio_thumb, mimetype="image/jpeg", conditional=True, max_age=31536000)
+
+        source = caratula(decoded)
+        if source.status_code != 200:
+            if len(_TV_NO_COVER_CACHE) < 30000:
+                _TV_NO_COVER_CACHE.add(norm_key)
+            return source
+
+        # Si caratula() acaba de guardar cached_audio_thumb (360x360), servirlo sin volver a procesar con PIL
+        if os.path.isfile(cached_audio_thumb):
+            try:
+                source.close()
+            except Exception:
+                pass
+            response = send_file(cached_audio_thumb, mimetype="image/jpeg", conditional=True, max_age=31536000)
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            return response
+
+        try:
+            source.direct_passthrough = False
+            raw_image = source.get_data()
+            source.close()
+            os.makedirs(cache_dir, exist_ok=True)
+            with Image.open(io.BytesIO(raw_image)) as image:
+                image = image.convert("RGB")
+                image.thumbnail((240, 240), Image.Resampling.BILINEAR)
+                canvas = Image.new("RGB", (240, 240), (12, 18, 17))
+                canvas.paste(image, ((240 - image.width) // 2, (240 - image.height) // 2))
+                canvas.save(cache_path, "JPEG", quality=80)
+            response = send_file(cache_path, mimetype="image/jpeg", conditional=True, max_age=31536000)
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            return response
+        except Exception:
+            return source
 
 
 @tv_bp.route("/api/tv/music/stream/<int:media_id>")
@@ -852,4 +894,365 @@ def tv_music_lyrics(media_id=None):
         })
     finally:
         conn.close()
+
+
+# ==============================================================================
+# KRAKEN TV — VINCULACIÓN POR CÓDIGO QR (ESTILO NETFLIX / PLEX)
+# ==============================================================================
+import secrets
+import time
+from flask import render_template_string
+from services.auth import create_token
+
+TV_QR_SESSIONS = {}
+
+
+def _clean_expired_qrs():
+    now = time.time()
+    expired = [k for k, v in list(TV_QR_SESSIONS.items()) if v.get("expires", 0) < now]
+    for k in expired:
+        TV_QR_SESSIONS.pop(k, None)
+
+
+def _resolve_qr_base_url():
+    """Obtiene la URL base ideal (pública o IP LAN) para que el celular pueda abrir el QR."""
+    from routes.api import _load_runtime_config
+    runtime = _load_runtime_config()
+    pub_url = (runtime.get("public_url") or getattr(config, "PUBLIC_SERVER_URL", "") or "").strip().rstrip("/")
+    if pub_url:
+        return pub_url
+    host_url = request.host_url.rstrip("/")
+    if "127.0.0.1" in host_url or "localhost" in host_url:
+        try:
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            lan_ip = s.getsockname()[0]
+            s.close()
+            port = request.host.split(":")[1] if ":" in request.host else "5000"
+            return f"http://{lan_ip}:{port}"
+        except Exception:
+            pass
+    return host_url
+
+
+@tv_bp.route("/api/tv/qr/init", methods=["POST"])
+def tv_qr_init():
+    _clean_expired_qrs()
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    code = "".join(secrets.choice(alphabet) for _ in range(6))
+
+    TV_QR_SESSIONS[code] = {
+        "status": "pending",
+        "user_data": None,
+        "expires": time.time() + 300
+    }
+
+    base_url = _resolve_qr_base_url()
+    verify_url = f"{base_url}/tv-verify?code={code}"
+
+    return jsonify({
+        "code": code,
+        "verify_url": verify_url,
+        "expires_in": 300
+    })
+
+
+@tv_bp.route("/api/tv/qr/poll", methods=["GET"])
+def tv_qr_poll():
+    _clean_expired_qrs()
+    code = (request.args.get("code") or "").strip().upper()
+    data = TV_QR_SESSIONS.get(code)
+
+    if not data or data["expires"] < time.time():
+        TV_QR_SESSIONS.pop(code, None)
+        return jsonify({"status": "expired"}), 404
+
+    if data["status"] == "approved" and data.get("user_data"):
+        user_data = data["user_data"]
+        TV_QR_SESSIONS.pop(code, None)
+        return jsonify({
+            "status": "approved",
+            "redirect": "/",
+            "token": user_data.get("token"),
+            "email": user_data.get("email"),
+            "username": user_data.get("username"),
+            "avatar_url": user_data.get("avatar_url"),
+            "is_superadmin": user_data.get("is_superadmin", False),
+            "role": user_data.get("role", "user")
+        })
+
+    return jsonify({"status": "pending"})
+
+
+@tv_bp.route("/api/tv/qr/approve", methods=["POST"])
+def tv_qr_approve():
+    _clean_expired_qrs()
+    payload = request.get_json(silent=True) or {}
+    code = (payload.get("code") or request.args.get("code") or "").strip().upper()
+    data = TV_QR_SESSIONS.get(code)
+
+    if not data or data["expires"] < time.time():
+        return jsonify({"ok": False, "error": "El código QR expiró. Genera uno nuevo en la TV."}), 404
+
+    email = get_user_from_request(request)
+    if not email:
+        return jsonify({"ok": False, "error": "Primero inicia sesión en Kraken desde este dispositivo."}), 401
+
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute("PRAGMA table_info(users)")
+        cols = [r[1] for r in c.fetchall()]
+        sel_cols = ["email", "username", "avatar_url", "is_superadmin"]
+        if "role" in cols:
+            sel_cols.append("role")
+        if "trial_expires_at" in cols:
+            sel_cols.append("trial_expires_at")
+        row = c.execute(f"SELECT {', '.join(sel_cols)} FROM users WHERE email = ? COLLATE NOCASE", (email,)).fetchone()
+        if not row:
+            return jsonify({"ok": False, "error": "Usuario no encontrado"}), 404
+
+        role = row["role"] if "role" in row.keys() and row["role"] else ("admin" if row["is_superadmin"] else "user")
+        trial_exp = row["trial_expires_at"] if "trial_expires_at" in row.keys() else None
+        tv_token = create_token(row["email"], row["username"] or "", bool(row["is_superadmin"]), expires_at=trial_exp, role=role)
+
+        data["user_data"] = {
+            "token": tv_token,
+            "email": row["email"],
+            "username": row["username"] or row["email"].split("@")[0],
+            "avatar_url": row["avatar_url"],
+            "is_superadmin": bool(row["is_superadmin"]),
+            "role": role
+        }
+        data["status"] = "approved"
+        return jsonify({"ok": True, "status": "approved", "username": data["user_data"]["username"]})
+    finally:
+        conn.close()
+
+
+@tv_bp.route("/tv-verify", methods=["GET"])
+def tv_verify_page():
+    _clean_expired_qrs()
+    code = (request.args.get("code") or "").strip().upper()
+    return render_template_string("""<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vincular Kraken TV</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            background: radial-gradient(circle at top, #062e22 0%, #050505 65%);
+            color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+        .card {
+            text-align: center;
+            padding: 32px 26px;
+            border: 1px solid rgba(16, 185, 129, 0.35);
+            border-radius: 22px;
+            background: rgba(9, 13, 22, 0.92);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.75), 0 0 30px rgba(16, 185, 129, 0.12);
+            max-width: 380px;
+            width: 100%;
+        }
+        .logo { width: 72px; height: 72px; margin-bottom: 10px; filter: drop-shadow(0 0 12px rgba(16,185,129,0.5)); }
+        h2 { color: #10B981; letter-spacing: 3px; margin: 0 0 6px 0; font-size: 20px; }
+        .sub { color: #94A3B8; font-size: 14px; margin-bottom: 20px; line-height: 1.4; }
+        .code-input {
+            width: 100%;
+            text-align: center;
+            font-size: 28px;
+            font-weight: 800;
+            letter-spacing: 8px;
+            background: #0f172a;
+            border: 1px solid rgba(16, 185, 129, 0.4);
+            padding: 14px;
+            border-radius: 12px;
+            margin: 12px 0 20px 0;
+            color: #10B981;
+            text-transform: uppercase;
+            outline: none;
+        }
+        .user-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: #A7F3D0;
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 14px;
+        }
+        .btn {
+            width: 100%;
+            padding: 15px;
+            background: #10B981;
+            color: #050505;
+            font-weight: 800;
+            font-size: 16px;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: transform 0.15s, background 0.15s;
+        }
+        .btn:hover { background: #34D399; }
+        .btn:active { transform: scale(0.98); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .msg { margin-top: 14px; font-size: 13px; min-height: 20px; }
+        .err { color: #F87171; }
+        .ok { color: #34D399; font-weight: bold; }
+        .login-box { display: none; margin-top: 14px; text-align: left; }
+        .field {
+            width: 100%;
+            padding: 12px 14px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.15);
+            background: rgba(255,255,255,0.06);
+            color: #fff;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="card" id="main-card">
+        <img src="/assets/kraken.svg" class="logo" alt="Kraken">
+        <h2>KRAKEN TV</h2>
+        <p class="sub" id="desc-text">¿Autorizar inicio de sesión en tu pantalla con este código?</p>
+        <div id="user-badge-wrap"></div>
+        <input id="code-box" class="code-input" maxlength="6" value="{{ code }}" placeholder="------">
+
+        <div id="quick-login-form" class="login-box">
+            <p style="color:#CBD5E1;font-size:12px;margin:0 0 8px 0;text-align:center;">Inicia sesión para autorizar la pantalla:</p>
+            <input id="login-user" class="field" type="text" placeholder="Tu usuario (ej. Skaso)">
+            <input id="login-pass" class="field" type="password" placeholder="Tu contraseña">
+        </div>
+
+        <button id="authorize-btn" class="btn" onclick="autorizarTv()">Autorizar Pantalla</button>
+        <div id="status-msg" class="msg"></div>
+    </div>
+
+    <script>
+        const AUTH_KEY = 'kraken_auth_token';
+        const USER_KEY = 'kraken_user';
+        let token = localStorage.getItem(AUTH_KEY) || '';
+
+        try {
+            const u = JSON.parse(localStorage.getItem(USER_KEY) || '{}');
+            if (token && (u.username || u.email)) {
+                document.getElementById('user-badge-wrap').innerHTML =
+                    '<div class="user-pill">👤 Conectado como <b>' + (u.username || u.email) + '</b></div>';
+            } else {
+                document.getElementById('quick-login-form').style.display = 'block';
+            }
+        } catch (_) {
+            if (!token) document.getElementById('quick-login-form').style.display = 'block';
+        }
+
+        async function autorizarTv() {
+            const btn = document.getElementById('authorize-btn');
+            const msg = document.getElementById('status-msg');
+            const code = (document.getElementById('code-box').value || '').trim().toUpperCase();
+            if (!code || code.length < 4) {
+                msg.className = 'msg err';
+                msg.textContent = 'Ingresa el código de 6 letras que aparece en la TV.';
+                return;
+            }
+
+            btn.disabled = true;
+            msg.className = 'msg';
+            msg.textContent = 'Vinculando pantalla...';
+
+            try {
+                if (!token) {
+                    const rawUser = (document.getElementById('login-user').value || '').trim();
+                    const password = document.getElementById('login-pass').value || '';
+                    if (!rawUser || !password) {
+                        msg.className = 'msg err';
+                        msg.textContent = 'Ingresa tu usuario y contraseña.';
+                        btn.disabled = false;
+                        return;
+                    }
+                    let email = rawUser;
+                    if (!email.includes('@')) {
+                        try {
+                            const uRes = await fetch('/api/auth/users');
+                            const uData = await uRes.json();
+                            const found = (uData.users || []).find(x => (x.username || '').toLowerCase() === rawUser.toLowerCase());
+                            email = found ? found.email : (rawUser.toLowerCase().replace(/\\s+/g, '_') + '@kraken.local');
+                        } catch (_) {
+                            email = rawUser.toLowerCase().replace(/\\s+/g, '_') + '@kraken.local';
+                        }
+                    }
+                    const lRes = await fetch('/api/auth/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email, password })
+                    });
+                    const lData = await lRes.json();
+                    if (!lData.token) {
+                        msg.className = 'msg err';
+                        msg.textContent = lData.error || 'Credenciales incorrectas';
+                        btn.disabled = false;
+                        return;
+                    }
+                    token = lData.token;
+                    localStorage.setItem(AUTH_KEY, token);
+                    localStorage.setItem(USER_KEY, JSON.stringify(lData));
+                }
+
+                const res = await fetch('/api/tv/qr/approve', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + token
+                    },
+                    body: JSON.stringify({ code })
+                });
+                const data = await res.json();
+                if (res.status === 401) {
+                    token = '';
+                    localStorage.removeItem(AUTH_KEY);
+                    document.getElementById('quick-login-form').style.display = 'block';
+                    msg.className = 'msg err';
+                    msg.textContent = 'Tu sesión expiró, ingresa tu usuario y contraseña.';
+                    btn.disabled = false;
+                    return;
+                }
+                if (!data.ok) {
+                    msg.className = 'msg err';
+                    msg.textContent = data.error || 'No se pudo autorizar el código.';
+                    btn.disabled = false;
+                    return;
+                }
+
+                document.getElementById('main-card').innerHTML = `
+                    <div style="font-size:52px;margin-bottom:10px;">✅</div>
+                    <h2 style="color:#10B981;">¡TV VINCULADA!</h2>
+                    <p style="color:#CBD5E1;font-size:15px;line-height:1.5;margin-top:12px;">
+                        Tu pantalla ya inició sesión automáticamente como <b>${data.username || 'tu cuenta'}</b>.<br><br>
+                        Ya puedes cerrar esta ventana.
+                    </p>
+                `;
+            } catch (e) {
+                msg.className = 'msg err';
+                msg.textContent = 'Error de conexión con el servidor.';
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>""", code=code)
 

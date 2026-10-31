@@ -49,14 +49,38 @@
                 }
             }
 
+            const isRecentManualSeek = Boolean(
+                window._lastRemoteSeekAt && (Date.now() - window._lastRemoteSeekAt < 4500)
+            );
+
             if (window.KRAKEN_CONTROL_TARGET?.session_id) {
                 const freshControl = onlineBySid.get(window.KRAKEN_CONTROL_TARGET.session_id);
+                if (freshControl && isRecentManualSeek && typeof window._lastRemoteSeekTargetTime === 'number') {
+                    freshControl.time = window._lastRemoteSeekTargetTime;
+                }
                 window.KRAKEN_CONTROL_TARGET = freshControl || null;
             }
 
             if (window.KRAKEN_PLAYBACK_TARGET?.session_id) {
                 const freshPlayback = onlineBySid.get(window.KRAKEN_PLAYBACK_TARGET.session_id);
+                if (freshPlayback && isRecentManualSeek && typeof window._lastRemoteSeekTargetTime === 'number') {
+                    freshPlayback.time = window._lastRemoteSeekTargetTime;
+                }
                 window.KRAKEN_PLAYBACK_TARGET = freshPlayback || null;
+            }
+
+            if (window._activeCineRemoteData?.targetSid) {
+                const freshCineTarget = onlineBySid.get(window._activeCineRemoteData.targetSid);
+                if (freshCineTarget) {
+                    if (isRecentManualSeek && typeof window._lastRemoteSeekTargetTime === 'number') {
+                        freshCineTarget.time = window._lastRemoteSeekTargetTime;
+                    }
+                    if (!window.KRAKEN_PLAYBACK_TARGET) window.KRAKEN_PLAYBACK_TARGET = freshCineTarget;
+                    if (!window.KRAKEN_CONTROL_TARGET) window.KRAKEN_CONTROL_TARGET = freshCineTarget;
+                    if (document.getElementById('cine-remote-modal') && typeof updateCineRemoteLive === 'function') {
+                        updateCineRemoteLive(freshCineTarget);
+                    }
+                }
             }
 
             // Sync Active Watch Party (Ver juntos) si está activa
@@ -97,11 +121,72 @@
         }
 
         /**
+         * `parseDurationSeconds(val)`
+         * Convierte duraciones numéricas o en formato 'H:MM:SS' / 'MM:SS' a segundos enteros.
+         */
+        function parseDurationSeconds(val) {
+            if (typeof val === 'number' && Number.isFinite(val)) return Math.max(0, Math.floor(val));
+            if (!val) return 0;
+            const str = String(val).trim();
+            if (/^\d+(\.\d+)?$/.test(str)) return Math.max(0, Math.floor(Number(str)));
+            const parts = str.split(':').map(Number);
+            if (parts.some(Number.isNaN)) return 0;
+            if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+            if (parts.length === 2) return parts[0] * 60 + parts[1];
+            return 0;
+        }
+        window.parseDurationSeconds = parseDurationSeconds;
+
+        /**
+         * `resolveMediaDurationSeconds(target, video)`
+         * Resuelve la duración total real en segundos buscando en el dispositivo, objeto de video o catálogo local.
+         */
+        function resolveMediaDurationSeconds(target, video = null) {
+            let dur = parseDurationSeconds(target?.duration)
+                || parseDurationSeconds(video?.duration_seconds)
+                || parseDurationSeconds(video?.duration)
+                || parseDurationSeconds(window._lastCineRemoteVideo?.duration_seconds)
+                || parseDurationSeconds(window._lastCineRemoteVideo?.duration);
+            if (dur > 0) return dur;
+            const searchPath = (video?.path || target?.path || window._activeCineRemoteData?.path || '').replace(/\\/g, '/').toLowerCase();
+            const searchTitle = (video?.title || target?.song || window._activeCineRemoteData?.title || '').trim().toLowerCase();
+            if (Array.isArray(window.libData?.files)) {
+                const match = window.libData.files.find(f => {
+                    if (!f) return false;
+                    if (searchPath && (f.path || '').replace(/\\/g, '/').toLowerCase() === searchPath) return true;
+                    if (searchTitle && (f.title || '').trim().toLowerCase() === searchTitle) return true;
+                    return false;
+                });
+                if (match) {
+                    dur = parseDurationSeconds(match.duration_seconds) || parseDurationSeconds(match.duration);
+                }
+            }
+            return dur;
+        }
+
+        /**
          * `getActiveRemotePlaybackTarget()`
          * Obtiene los datos del dispositivo remoto actualmente vinculado.
          */
         function getActiveRemotePlaybackTarget() {
-            return window.KRAKEN_PLAYBACK_TARGET || window.KRAKEN_CONTROL_TARGET || null;
+            if (window.KRAKEN_PLAYBACK_TARGET && window.KRAKEN_PLAYBACK_TARGET.session_id) {
+                return window.KRAKEN_PLAYBACK_TARGET;
+            }
+            if (window.KRAKEN_CONTROL_TARGET && window.KRAKEN_CONTROL_TARGET.session_id) {
+                return window.KRAKEN_CONTROL_TARGET;
+            }
+            if (window._activeCineRemoteData && window._activeCineRemoteData.targetSid) {
+                const found = (LAST_USERS_DATA || []).find(u => u && u.session_id === window._activeCineRemoteData.targetSid);
+                if (found) return found;
+                return {
+                    session_id: window._activeCineRemoteData.targetSid,
+                    name: window._activeCineRemoteData.subtitle || 'Pantalla',
+                    song: window._activeCineRemoteData.title || 'Película',
+                    path: window._activeCineRemoteData.path || '',
+                    media_type: 'video'
+                };
+            }
+            return null;
         }
 
         /**
@@ -182,11 +267,30 @@
 
         /**
          * `sendRemoteSeek(value)`
-         * Envía un comando de salto de tiempo (`seek`) al dispositivo controlado.
+         * Envía un comando de salto de tiempo (`seek`) al dispositivo controlado y actualiza la UI de inmediato.
          */
         function sendRemoteSeek(value) {
             const seconds = Math.max(0, Math.floor(Number(value) || 0));
-            sendCommand(null, `seek_to_${seconds}`);
+            const target = getActiveRemotePlaybackTarget();
+            const targetSid = target?.session_id || window._activeCineRemoteData?.targetSid || null;
+
+            window._lastRemoteSeekAt = Date.now();
+            window._lastRemoteSeekTargetTime = seconds;
+
+            if (target) target.time = seconds;
+            if (window.KRAKEN_PLAYBACK_TARGET && (!targetSid || window.KRAKEN_PLAYBACK_TARGET.session_id === targetSid)) {
+                window.KRAKEN_PLAYBACK_TARGET.time = seconds;
+            }
+            if (window.KRAKEN_CONTROL_TARGET && (!targetSid || window.KRAKEN_CONTROL_TARGET.session_id === targetSid)) {
+                window.KRAKEN_CONTROL_TARGET.time = seconds;
+            }
+
+            const seekEl = document.getElementById('cine-remote-seek');
+            const timeCurEl = document.getElementById('cine-remote-time-cur');
+            if (seekEl) seekEl.value = seconds;
+            if (timeCurEl) timeCurEl.innerText = formatTimeShort(seconds);
+
+            sendCommand(targetSid, `seek_to_${seconds}`);
         }
 
         /**
@@ -590,9 +694,16 @@
             if (action.startsWith('seek_to_')) {
                 const raw = Number(action.slice('seek_to_'.length));
                 if (!Number.isNaN(raw)) {
-                    if (currentArt) currentArt.currentTime = Math.max(0, raw);
-                    else if (activeVideo) activeVideo.currentTime = Math.max(0, raw);
-                    else if (audioElement) audioElement.currentTime = Math.max(0, raw);
+                    const targetSec = Math.max(0, raw);
+                    if (currentArt && typeof currentArt.seekToMovieTime === 'function') {
+                        currentArt.seekToMovieTime(targetSec);
+                    } else if (currentArt) {
+                        currentArt.currentTime = targetSec;
+                    } else if (activeVideo) {
+                        activeVideo.currentTime = targetSec;
+                    } else if (audioElement) {
+                        audioElement.currentTime = targetSec;
+                    }
                 }
             }
         }
@@ -1176,6 +1287,22 @@
                         ${devicesListHtml}
                     </div>
 
+                    <div class="mb-4 p-3 bg-white/[0.03] border border-white/10 rounded-2xl">
+                        <div class="flex items-center gap-2 text-[10px] uppercase font-bold tracking-widest text-emerald-400 mb-2">
+                            <i class="fa-solid fa-qrcode"></i> Vincular Pantalla TV con Código
+                        </div>
+                        <div class="flex gap-2">
+                            <input id="connect-tv-qr-code-input" type="text" maxlength="6" placeholder="Ej. A7X9P2"
+                                class="flex-1 bg-black/50 border border-white/15 focus:border-emerald-500 rounded-xl px-3 py-2 text-xs text-white font-mono tracking-widest uppercase outline-none"
+                                onkeydown="if(event.key==='Enter') window.approveTvCodeFromModal()" />
+                            <button onclick="window.approveTvCodeFromModal()"
+                                class="px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs rounded-xl transition shrink-0">
+                                Autorizar TV
+                            </button>
+                        </div>
+                        <div id="connect-tv-qr-status" class="text-[11px] text-zinc-400 mt-1.5 hidden"></div>
+                    </div>
+
                     <div class="pt-4 border-t border-white/5 flex gap-2">
                         <button onclick="document.getElementById('${modalId}').remove(); showEditProfileModal();"
                             class="flex-1 flex items-center justify-center gap-2 bg-white/5 hover:bg-emerald-500/20 border border-white/10 hover:border-emerald-500/40 rounded-xl py-2.5 text-xs text-zinc-300 hover:text-emerald-300 transition font-medium">
@@ -1192,6 +1319,45 @@
             document.body.appendChild(modal);
         }
         window.showConnectModal = showConnectModal;
+
+        async function approveTvCodeFromModal() {
+            const input = document.getElementById('connect-tv-qr-code-input');
+            const statusEl = document.getElementById('connect-tv-qr-status');
+            if (!input || !statusEl) return;
+            const code = (input.value || '').trim().toUpperCase();
+            statusEl.classList.remove('hidden');
+            if (!code || code.length < 4) {
+                statusEl.className = 'text-[11px] text-amber-400 mt-1.5';
+                statusEl.textContent = 'Escribe el código de 6 caracteres que aparece en tu TV.';
+                return;
+            }
+            statusEl.className = 'text-[11px] text-zinc-300 mt-1.5';
+            statusEl.textContent = 'Autorizando pantalla...';
+            try {
+                const headers = Object.assign(
+                    { 'Content-Type': 'application/json' },
+                    (window.krakenAuth && typeof window.krakenAuth.headers === 'function') ? window.krakenAuth.headers() : {}
+                );
+                const res = await fetch('/api/tv/qr/approve', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ code })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok && (data.ok || data.status === 'approved')) {
+                    statusEl.className = 'text-[11px] text-emerald-400 font-semibold mt-1.5';
+                    statusEl.textContent = '✅ ¡Pantalla vinculada! Tu TV entrará sola en unos segundos.';
+                    input.value = '';
+                } else {
+                    statusEl.className = 'text-[11px] text-red-400 mt-1.5';
+                    statusEl.textContent = data.error || 'Código inválido o expirado. Genera uno nuevo en la TV.';
+                }
+            } catch (err) {
+                statusEl.className = 'text-[11px] text-red-400 mt-1.5';
+                statusEl.textContent = 'Error de conexión con el servidor.';
+            }
+        }
+        window.approveTvCodeFromModal = approveTvCodeFromModal;
 
         /**
          * `showFriendModal(userName)`
@@ -1680,7 +1846,7 @@
          * Envía un comando de control o reacción a `/api/command` dirigido a otra sesión.
          */
         async function sendCommand(targetSid, action) {
-            const resolvedTarget = targetSid || window.KRAKEN_CONTROL_TARGET?.session_id;
+            const resolvedTarget = targetSid || window._activeCineRemoteData?.targetSid || window.KRAKEN_PLAYBACK_TARGET?.session_id || window.KRAKEN_CONTROL_TARGET?.session_id;
             if (!resolvedTarget) {
                 showToast("Primero elige un dispositivo para controlar", "warning");
                 return;
@@ -2295,8 +2461,10 @@
 
             const rawPath = video?.path || resolvedTarget.path || window._activeCineRemoteData?.path || '';
 
-            const totalSec = Math.max(0, Number(resolvedTarget.duration || video?.duration || 0));
-            const curSec = Math.max(0, Number(resolvedTarget.time || 0));
+            const knownDur = resolveMediaDurationSeconds(resolvedTarget, video);
+            const curSec = Math.max(0, Math.floor(Number(resolvedTarget.time || 0)));
+            const totalSec = knownDur > 0 ? Math.max(knownDur, curSec) : 0;
+            const sliderMax = totalSec > 0 ? totalSec : Math.max(curSec + 3600, 7200);
             const isPlaying = Boolean(resolvedTarget.is_playing);
 
             let coverUrl = '/assets/kraken-512.png';
@@ -2412,7 +2580,7 @@
                         <div class="w-full md:w-7/12 flex flex-col justify-center gap-5 max-w-lg">
                             <!-- Progress slider -->
                             <div class="w-full bg-white/[0.03] border border-white/10 p-4 rounded-2xl backdrop-blur-sm">
-                                <input type="range" id="cine-remote-seek" min="0" max="${totalSec}" value="${curSec}"
+                                <input type="range" id="cine-remote-seek" min="0" max="${sliderMax}" value="${curSec}"
                                     onmousedown="window.isUserDraggingCineSeek=true"
                                     ontouchstart="window.isUserDraggingCineSeek=true"
                                     oninput="document.getElementById('cine-remote-time-cur').innerText=formatTimeShort(this.value)"
@@ -2533,7 +2701,7 @@
         window.renderCineRemoteMiniPill = renderCineRemoteMiniPill;
 
         function toggleCineRemotePlay() {
-            const target = window.KRAKEN_PLAYBACK_TARGET || window.KRAKEN_CONTROL_TARGET;
+            const target = getActiveRemotePlaybackTarget();
             if (!target) return;
             const newIsPlaying = !target.is_playing;
             target.is_playing = newIsPlaying;
@@ -2547,25 +2715,32 @@
         window.toggleCineRemotePlay = toggleCineRemotePlay;
 
         function cineRemoteSeekRel(seconds) {
-            const target = window.KRAKEN_PLAYBACK_TARGET || window.KRAKEN_CONTROL_TARGET;
+            const target = getActiveRemotePlaybackTarget();
             if (!target) return;
-            const cur = Number(target.time || 0);
-            const tot = Number(target.duration || 0);
+            const seekEl = document.getElementById('cine-remote-seek');
+            const isRecentSeek = Boolean(window._lastRemoteSeekAt && (Date.now() - window._lastRemoteSeekAt < 4000));
+            const cur = (isRecentSeek && typeof window._lastRemoteSeekTargetTime === 'number')
+                ? window._lastRemoteSeekTargetTime
+                : Number(target.time || seekEl?.value || 0);
+            const tot = resolveMediaDurationSeconds(target);
             let next = cur + seconds;
             if (next < 0) next = 0;
             if (tot > 0 && next > tot) next = tot;
             target.time = next;
             sendRemoteSeek(next);
 
-            const seekEl = document.getElementById('cine-remote-seek');
             const timeCurEl = document.getElementById('cine-remote-time-cur');
-            if (seekEl) seekEl.value = next;
+            if (seekEl) {
+                const currentMax = Number(seekEl.max || 0);
+                if (next > currentMax) seekEl.max = Math.max(tot, next + 1800);
+                seekEl.value = next;
+            }
             if (timeCurEl) timeCurEl.innerText = formatTimeShort(next);
         }
         window.cineRemoteSeekRel = cineRemoteSeekRel;
 
         function switchToLocalVideo(path, title) {
-            const target = window.KRAKEN_PLAYBACK_TARGET || window.KRAKEN_CONTROL_TARGET;
+            const target = getActiveRemotePlaybackTarget();
             const currentSeconds = target ? Number(target.time || 0) : 0;
 
             if (target && target.session_id) {
@@ -2578,22 +2753,19 @@
 
             const clean = (path || '').replace(/\\/g, '/');
             const matched = (window.libData?.files || []).find(f => (f.path || '').replace(/\\/g, '/') === clean);
-            const videoFile = matched || {
+            const videoFile = matched ? { ...matched } : {
                 path: path,
                 title: title || (path ? path.split('/').pop() : 'Video'),
                 type: 'video'
             };
 
+            if (currentSeconds > 5) {
+                window.krakenPendingResumeSeconds = Math.floor(currentSeconds);
+            }
+
             showToast('📱 Continuando reproducción en este dispositivo', 'info');
             if (typeof playVideoMode === 'function') {
-                playVideoMode(videoFile).then(() => {
-                    setTimeout(() => {
-                        const vid = document.querySelector('#cine-screen video, #artplayer-container video, #main-video');
-                        if (vid && currentSeconds > 0) {
-                            vid.currentTime = currentSeconds;
-                        }
-                    }, 1500);
-                });
+                playVideoMode(videoFile);
             }
         }
         window.switchToLocalVideo = switchToLocalVideo;
@@ -2625,11 +2797,15 @@
                 }
             }
 
-            const cur = Number(target.time || 0);
-            const dur = Number(target.duration || 0);
+            const isRecentManualSeek = Boolean(window._lastRemoteSeekAt && (Date.now() - window._lastRemoteSeekAt < 4500));
+            const cur = (isRecentManualSeek && typeof window._lastRemoteSeekTargetTime === 'number')
+                ? window._lastRemoteSeekTargetTime
+                : Math.max(0, Math.floor(Number(target.time || 0)));
+            const dur = resolveMediaDurationSeconds(target);
 
-            if (seekEl && !window.isUserDraggingCineSeek && dur > 0) {
-                seekEl.max = dur;
+            if (seekEl && !window.isUserDraggingCineSeek) {
+                const effMax = dur > 0 ? Math.max(dur, cur) : Math.max(cur + 3600, 7200);
+                seekEl.max = effMax;
                 seekEl.value = cur;
             }
             if (curEl && !window.isUserDraggingCineSeek) curEl.innerText = formatTimeShort(cur);
@@ -2707,7 +2883,9 @@
                 showToast(`▶️ ${sender} reanudó la película`, 'info');
             } else if (payload.action === 'seek') {
                 const targetSec = Number(payload.time || 0);
-                if (art) {
+                if (art && typeof art.seekToMovieTime === 'function') {
+                    art.seekToMovieTime(targetSec);
+                } else if (art) {
                     art.currentTime = targetSec;
                 } else if (activeVid) {
                     activeVid.currentTime = targetSec;

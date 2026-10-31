@@ -10,7 +10,7 @@
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#10b981">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <script>window.APP_VERSION = "5.0.1"; window.OFFLINE_VERSION = "5.0.1"; window.OFFLINE_LIMIT = 500; window.GITHUB_REPO = "arsdaemonia-design/kraken-media-server";</script>
+    <script>window.APP_VERSION = "5.0.1.4"; window.OFFLINE_VERSION = "5.0.1.4"; window.OFFLINE_LIMIT = 500; window.GITHUB_REPO = "arsdaemonia-design/kraken-media-server";</script>
     <script src="/assets/tailwind.min.js"></script>
     <script src="/assets/html2canvas.min.js"></script>
     <!-- Chromecast: SDK + Plugin (el plugin maneja la inicialización) -->
@@ -18,87 +18,105 @@
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <script src="/assets/artplayer-plugin-chromecast.js"></script>
     <!-- Inicialización de Google Cast y configuración de Tailwind -->
-    <script src="/assets/js/head-config.js?v=5.0.1"></script>
+    <script src="/assets/js/head-config.js?v=5.0.1.4"></script>
     <link rel="stylesheet" href="/assets/fontawesome.min.css">
-    <link rel="stylesheet" href="/assets/css/kraken.css?v=5.0.1">
+    <link rel="stylesheet" href="/assets/css/kraken.css?v=5.0.1.4">
     <!-- Modo TV Lite y Sistema de Autenticación JWT -->
-    <script src="/assets/js/tv-lite.js?v=5.0.1"></script>
-    <script src="/assets/js/auth.js?v=5.0.1"></script>
+    <script src="/assets/qrcode.min.js"></script>
+    <script src="/assets/js/tv-lite.js?v=5.0.1.4"></script>
+    <script src="/assets/js/auth.js?v=5.0.1.4"></script>
 </head>
 
 <body
     class="bg-[#09090b] text-emerald-300 font-sans h-screen overflow-hidden flex selection:bg-emerald-500 selection:text-white">
 
     <!-- ═══ KRAKEN AUTH SCREEN ═══ -->
-    <div id="kraken-auth-screen" class="fixed inset-0 z-[100005] bg-black flex items-center justify-center"
+    <div id="kraken-auth-screen" class="fixed inset-0 z-[100005] bg-black flex items-center justify-center overflow-y-auto p-4"
         style="display:none;">
-        <div class="w-full max-w-lg mx-4">
-            <!-- Logo -->
-            <div class="text-center mb-8">
-                <div class="flex justify-center mb-4">
-                    <img src="/assets/kraken.svg" class="w-32 h-32 kraken-neon-filter select-none pointer-events-none">
+        <div class="w-full max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-center gap-8">
+            <div class="w-full max-w-md flex-1">
+                <!-- Logo -->
+                <div class="text-center mb-8">
+                    <div class="flex justify-center mb-4">
+                        <img src="/assets/kraken.svg" class="w-28 h-28 kraken-neon-filter select-none pointer-events-none">
+                    </div>
+                    <h1 class="text-3xl font-bold text-white tracking-tight">KRAKEN</h1>
+                    <p class="text-emerald-500/60 text-xs font-mono uppercase tracking-[0.3em] mt-2">Deep Media Server</p>
                 </div>
-                <h1 class="text-3xl font-bold text-white tracking-tight">KRAKEN</h1>
-                <p class="text-emerald-500/60 text-xs font-mono uppercase tracking-[0.3em] mt-2">Deep Media Server</p>
-            </div>
 
-            <!-- User Selection (Who's watching?) -->
-            <div id="auth-user-select" style="display:none;">
-                <h2 class="text-xl text-white text-center mb-6 font-medium">¿Quién está viendo?</h2>
-                <div id="auth-users-grid" class="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6"></div>
-                <div class="flex justify-center gap-3 mt-4">
-                    <button onclick="showAuthInvite()" class="text-sm text-gray-400 hover:text-emerald-400 transition">
-                        <i class="fa-solid fa-ticket mr-1"></i> Tengo código de invitación
+                <!-- User Selection (Who's watching?) -->
+                <div id="auth-user-select" style="display:none;">
+                    <h2 class="text-xl text-white text-center mb-6 font-medium">¿Quién está viendo?</h2>
+                    <div id="auth-users-grid" class="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6"></div>
+                    <div class="flex justify-center gap-3 mt-4">
+                        <button id="btn-toggle-qr-login" onclick="toggleQrLoginPanel()" class="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 hover:text-white text-xs font-bold tracking-wide transition shadow-lg"><i class="fa-solid fa-qrcode text-emerald-400"></i> <span id="btn-toggle-qr-login-label">QR Login</span></button><button onclick="showAuthInvite()" class="text-sm text-gray-400 hover:text-emerald-400 transition px-2 py-1.5">
+                            <i class="fa-solid fa-ticket mr-1"></i> Tengo código de invitación
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Password Entry -->
+                <div id="auth-password-entry" style="display:none;" class="text-center">
+                    <div id="auth-password-avatar"
+                        class="w-20 h-20 rounded-full bg-gray-700 mx-auto mb-4 flex items-center justify-center text-3xl text-white overflow-hidden">
+                    </div>
+                    <h2 id="auth-password-name" class="text-xl text-white mb-4"></h2>
+                    <input id="auth-password-input" type="password" placeholder="Contraseña (mín. 8)"
+                        class="w-full max-w-xs text-center bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 mx-auto block mb-4">
+                    <div id="auth-password-error" class="text-red-400 text-sm mb-3" style="display:none;"></div>
+                    <div class="flex justify-center gap-3">
+                        <button onclick="submitPassword()"
+                            class="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2 rounded-lg transition font-medium">Entrar</button>
+                        <button onclick="showUserSelect()"
+                            class="bg-white/10 hover:bg-white/20 text-white px-6 py-2 rounded-lg transition">Volver</button>
+                    </div>
+                </div>
+
+                <!-- Registration (first admin or invite) -->
+                <div id="auth-register" style="display:none;" class="text-center">
+                    <h2 id="auth-register-title" class="text-xl text-white mb-6 font-medium">Crear Administrador</h2>
+                    <input id="auth-reg-name" type="text" placeholder="Tu nombre" maxlength="30"
+                        class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 mb-3">
+                    <input id="auth-reg-password" type="password" placeholder="Contraseña (mín. 8 caracteres)" minlength="8"
+                        maxlength="30"
+                        class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 mb-3">
+                    <div id="auth-reg-error" class="text-red-400 text-sm mb-3" style="display:none;"></div>
+                    <button onclick="submitRegister()"
+                        class="w-full bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-xl transition font-bold text-lg mb-3">
+                        <i class="fa-solid fa-user-plus mr-2"></i> Crear Cuenta
                     </button>
+                    <button onclick="showUserSelect()" id="auth-reg-back"
+                        class="text-sm text-gray-400 hover:text-white transition" style="display:none;">Volver</button>
+                </div>
+
+                <!-- Invite Code Entry -->
+                <div id="auth-invite" style="display:none;" class="text-center">
+                    <h2 class="text-xl text-white mb-6 font-medium">Código de Invitación</h2>
+                    <input id="auth-invite-code" type="text" placeholder="KRK-XXXX" maxlength="8"
+                        class="w-64 text-center text-2xl tracking-widest bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 mx-auto block mb-3 uppercase">
+                    <div id="auth-invite-error" class="text-red-400 text-sm mb-3" style="display:none;"></div>
+                    <div class="flex justify-center gap-3">
+                        <button onclick="submitInvite()"
+                            class="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2 rounded-lg transition font-medium">Validar</button>
+                        <button onclick="showUserSelect()"
+                            class="bg-white/10 hover:bg-white/20 text-white px-6 py-2 rounded-lg transition">Volver</button>
+                    </div>
                 </div>
             </div>
 
-            <!-- Password Entry -->
-            <div id="auth-password-entry" style="display:none;" class="text-center">
-                <div id="auth-password-avatar"
-                    class="w-20 h-20 rounded-full bg-gray-700 mx-auto mb-4 flex items-center justify-center text-3xl text-white overflow-hidden">
+            <!-- Columna Derecha: Login por QR para TV / Pantallas -->
+            <div id="qr-login-box" style="display:none;" class="flex-col items-center justify-center p-6 bg-[#090D16] border border-emerald-500/30 rounded-2xl text-center shadow-2xl w-full max-w-[260px] relative">
+                <button onclick="toggleQrLoginPanel(false)" class="absolute top-3 right-3 w-7 h-7 rounded-full bg-white/5 hover:bg-white/15 text-zinc-400 hover:text-white flex items-center justify-center text-xs transition" title="Cerrar QR"><i class="fa-solid fa-xmark"></i></button>
+                <span class="text-[11px] font-bold tracking-widest text-emerald-400 uppercase mb-1">Acceso Rápido TV</span>
+                <h3 class="text-base font-bold text-white mb-3">Escanea con tu celular</h3>
+                <div id="qrcode-canvas" class="p-3 bg-white rounded-xl shadow-lg mb-3 flex items-center justify-center min-w-[164px] min-h-[164px]"></div>
+                <p class="text-[11px] text-zinc-400 mb-1">Código de vinculación:</p>
+                <div id="qr-code-text" class="text-2xl font-mono font-bold tracking-[0.25em] text-emerald-400 bg-black/60 px-4 py-1.5 rounded-lg border border-white/10">
+                    ------
                 </div>
-                <h2 id="auth-password-name" class="text-xl text-white mb-4"></h2>
-                <input id="auth-password-input" type="password" placeholder="Contraseña (mín. 8)"
-                    class="w-full max-w-xs text-center bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 mx-auto block mb-4">
-                <div id="auth-password-error" class="text-red-400 text-sm mb-3" style="display:none;"></div>
-                <div class="flex justify-center gap-3">
-                    <button onclick="submitPassword()"
-                        class="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2 rounded-lg transition font-medium">Entrar</button>
-                    <button onclick="showUserSelect()"
-                        class="bg-white/10 hover:bg-white/20 text-white px-6 py-2 rounded-lg transition">Volver</button>
-                </div>
-            </div>
-
-            <!-- Registration (first admin or invite) -->
-            <div id="auth-register" style="display:none;" class="text-center">
-                <h2 id="auth-register-title" class="text-xl text-white mb-6 font-medium">Crear Administrador</h2>
-                <input id="auth-reg-name" type="text" placeholder="Tu nombre" maxlength="30"
-                    class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 mb-3">
-                <input id="auth-reg-password" type="password" placeholder="Contraseña (mín. 8 caracteres)" minlength="8"
-                    maxlength="30"
-                    class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 mb-3">
-                <div id="auth-reg-error" class="text-red-400 text-sm mb-3" style="display:none;"></div>
-                <button onclick="submitRegister()"
-                    class="w-full bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-xl transition font-bold text-lg mb-3">
-                    <i class="fa-solid fa-user-plus mr-2"></i> Crear Cuenta
+                <button onclick="iniciarQrTv()" class="mt-3 text-[11px] text-zinc-400 hover:text-emerald-400 transition">
+                    <i class="fa-solid fa-rotate mr-1"></i> Actualizar QR</button><button onclick="if(window.KrakenTV && typeof window.KrakenTV.changeServer === 'function') window.KrakenTV.changeServer();" class="mt-2 text-[10px] text-zinc-500 hover:text-white transition"><i class="fa-solid fa-server mr-1"></i> Cambiar Servidor
                 </button>
-                <button onclick="showUserSelect()" id="auth-reg-back"
-                    class="text-sm text-gray-400 hover:text-white transition" style="display:none;">Volver</button>
-            </div>
-
-            <!-- Invite Code Entry -->
-            <div id="auth-invite" style="display:none;" class="text-center">
-                <h2 class="text-xl text-white mb-6 font-medium">Código de Invitación</h2>
-                <input id="auth-invite-code" type="text" placeholder="KRK-XXXX" maxlength="8"
-                    class="w-64 text-center text-2xl tracking-widest bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 mx-auto block mb-3 uppercase">
-                <div id="auth-invite-error" class="text-red-400 text-sm mb-3" style="display:none;"></div>
-                <div class="flex justify-center gap-3">
-                    <button onclick="submitInvite()"
-                        class="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2 rounded-lg transition font-medium">Validar</button>
-                    <button onclick="showUserSelect()"
-                        class="bg-white/10 hover:bg-white/20 text-white px-6 py-2 rounded-lg transition">Volver</button>
-                </div>
             </div>
         </div>
     </div>
@@ -1378,27 +1396,27 @@
         <!-- 1. Dependencias externas de video y componente Hero -->
         <script src="/assets/hls.min.js"></script>
         <script src="/assets/artplayer.js"></script>
-        <script src="/assets/js/hero_series.js?v=5.0.1"></script>
+        <script src="/assets/js/hero_series.js?v=5.0.1.4"></script>
 
         <!-- 2. Estado global centralizado y utilidades base -->
-        <script src="/assets/js/state.js?v=5.0.1"></script>
+        <script src="/assets/js/state.js?v=5.0.1.4"></script>
 
         <!-- 3. Catálogo, vistas y administración -->
-        <script src="/assets/js/video-catalog.js?v=5.0.1"></script>
-        <script src="/assets/js/admin-settings.js?v=5.0.1.2"></script>
-        <script src="/assets/js/playlists-batch.js?v=5.0.1"></script>
-        <script src="/assets/js/tag-editor.js?v=5.0.1"></script>
+        <script src="/assets/js/video-catalog.js?v=5.0.1.4"></script>
+        <script src="/assets/js/admin-settings.js?v=5.0.1.4"></script>
+        <script src="/assets/js/playlists-batch.js?v=5.0.1.4"></script>
+        <script src="/assets/js/tag-editor.js?v=5.0.1.4"></script>
 
         <!-- 4. Motores de reproducción (Audio, Video HLS y Renderizador de Biblioteca) -->
-        <script src="/assets/js/audio-player.js?v=5.0.1"></script>
-        <script src="/assets/js/video-player.js?v=5.0.1"></script>
-        <script src="/assets/js/library-render.js?v=5.0.1"></script>
+        <script src="/assets/js/audio-player.js?v=5.0.1.4"></script>
+        <script src="/assets/js/video-player.js?v=5.0.1.4"></script>
+        <script src="/assets/js/library-render.js?v=5.0.1.4"></script>
 
         <!-- 5. Descargador, duplicados, radar remoto, letras y arranque -->
-        <script src="/assets/js/downloader-tools.js?v=5.0.1"></script>
-        <script src="/assets/js/radar-remote.js?v=5.0.1"></script>
-        <script src="/assets/js/lyrics-share.js?v=5.0.1"></script>
-        <script src="/assets/js/app-init.js?v=5.0.1"></script>
+        <script src="/assets/js/downloader-tools.js?v=5.0.1.4"></script>
+        <script src="/assets/js/radar-remote.js?v=5.0.1.4"></script>
+        <script src="/assets/js/lyrics-share.js?v=5.0.1.4"></script>
+        <script src="/assets/js/app-init.js?v=5.0.1.4"></script>
         <script>
             // Punto de arranque principal (conservado en index.html para compatibilidad con inyección de app_offline.py)
             initApp();
@@ -1432,7 +1450,7 @@
             </div>
         </div>
 
-        <script src="/assets/js/console.js?v=5.0.1"></script>
+        <script src="/assets/js/console.js?v=5.0.1.4"></script>
 </body>
 
 </html>

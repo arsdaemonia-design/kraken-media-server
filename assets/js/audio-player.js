@@ -448,7 +448,8 @@ function playContext() {
                 // SI ES VIDEO: No debe abrir el reproductor de música. Se silencia el audio local y se abre Cine Remote
                 if (audioElement) {
                     audioElement.pause();
-                    audioElement.src = '';
+                    audioElement.removeAttribute('src');
+                    audioElement.load();
                 }
                 const bar = document.getElementById('player-bar');
                 if (bar) {
@@ -483,7 +484,8 @@ function playContext() {
             currentTrackIndex = 0;
             if (audioElement) {
                 audioElement.pause();
-                audioElement.src = '';
+                audioElement.removeAttribute('src');
+                audioElement.load();
             }
             actualizarInterfazPlayer(payloadFile);
             const bar = document.getElementById('player-bar');
@@ -550,8 +552,42 @@ function playContext() {
                 playVideoMode(file);
             }
         } else {
-            playerQueue = [file];
-            currentTrackIndex = 0;
+            // Construir una cola real basada en el contexto actual (álbum, artista, carpeta o vista filtrada)
+            // para evitar que una cola de 1 sola canción active inmediatamente la Radio aleatoria al terminar
+            // o que el botón "Anterior" salte a una pista aleatoria.
+            let contextTracks = [];
+            try {
+                if (typeof currentView !== 'undefined' && currentView === 'artist' && Array.isArray(currentArtistTracks) && currentArtistTracks.length > 1) {
+                    contextTracks = currentArtistTracks.filter(f => f && f.type === 'audio');
+                } else if (typeof currentView !== 'undefined' && currentView === 'folders' && typeof currentExplorerPath !== 'undefined' && currentExplorerPath) {
+                    contextTracks = (libData.files || [])
+                        .filter(f => f.type === 'audio' && f.path.startsWith(currentExplorerPath + '/'))
+                        .sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' }));
+                } else if (typeof getFilteredTracks === 'function') {
+                    const filtered = getFilteredTracks().filter(f => f && f.type === 'audio');
+                    const idxInFiltered = filtered.findIndex(f => f.path === file.path);
+                    if (idxInFiltered !== -1 && filtered.length > 1) {
+                        const startSlice = Math.max(0, idxInFiltered - 25);
+                        contextTracks = filtered.slice(startSlice, startSlice + 100);
+                    }
+                }
+            } catch (_) {}
+
+            if (contextTracks.length <= 1 && file.full_folder) {
+                const sameFolder = (libData.files || [])
+                    .filter(f => f.type === 'audio' && f.full_folder === file.full_folder)
+                    .sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' }));
+                if (sameFolder.length > 1) contextTracks = sameFolder.slice(0, 100);
+            }
+
+            const foundIdx = contextTracks.findIndex(f => f.path === file.path);
+            if (foundIdx !== -1 && contextTracks.length > 1) {
+                playerQueue = contextTracks;
+                currentTrackIndex = foundIdx;
+            } else {
+                playerQueue = [file];
+                currentTrackIndex = 0;
+            }
             playTrack(file);
         }
     }
@@ -589,17 +625,34 @@ function playContext() {
      * Gestiona la carga de audio, crossfade entre pistas, MediaSession API y registro en historial.
      */
     function playTrack(file) {
+        if (!file || !file.path) return;
         const playerBar = document.getElementById('player-bar');
         if (playerBar) {
-            playerBar.style.opacity = '0.6';
-            playerBar.style.pointerEvents = 'none';
+            playerBar.style.opacity = '1';
+            playerBar.style.pointerEvents = 'auto';
         }
+
+        // Registrar pista anterior en el historial real de reproducción para el botón "Anterior"
+        if (!Array.isArray(window.audioPlayHistory)) {
+            window.audioPlayHistory = [];
+        }
+        if (window._currentAudioTrackObj && window._currentAudioTrackObj.path && window._currentAudioTrackObj.path !== file.path) {
+            if (!window._skipHistoryPush) {
+                const lastInHistory = window.audioPlayHistory[window.audioPlayHistory.length - 1];
+                if (!lastInHistory || lastInHistory.path !== window._currentAudioTrackObj.path) {
+                    window.audioPlayHistory.push(window._currentAudioTrackObj);
+                    if (window.audioPlayHistory.length > 50) window.audioPlayHistory.shift();
+                }
+            }
+        }
+        window._skipHistoryPush = false;
+        window._currentAudioTrackObj = file;
 
         fetch('/log_play', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: file.path })
-        });
+        }).catch(() => {});
 
         const bar = document.getElementById('player-bar');
         const videoView = document.getElementById('view-player');
@@ -607,7 +660,8 @@ function playContext() {
         if (file.type === 'video') {
             if (audioElement) {
                 audioElement.pause();
-                audioElement.src = "";
+                audioElement.removeAttribute('src');
+                audioElement.load();
             }
             if (bar) {
                 bar.classList.add('hidden');
@@ -615,13 +669,6 @@ function playContext() {
             }
 
             playVideoMode(file);
-
-            // 🔧 restaurar estado visual
-            if (playerBar) {
-                playerBar.style.opacity = '1';
-                playerBar.style.pointerEvents = 'auto';
-            }
-
             return; // 👈 salir aquí
         }
 
@@ -638,6 +685,18 @@ function playContext() {
 
         const parts = file.path.split('/');
         const safePath = parts.map(p => encodeURIComponent(p)).join('/');
+        const targetSrc = '/descargas/' + safePath;
+
+        // Cancelar cualquier timeout pendiente de crossfade para no apagar el reproductor activo
+        if (window._crossfadeCleanupTimer) {
+            clearTimeout(window._crossfadeCleanupTimer);
+            window._crossfadeCleanupTimer = null;
+        }
+        window.isCrossfading = false;
+
+        if (isVisualizerInit && audioCtx && audioCtx.state === 'suspended') {
+            audioCtx.resume().catch(() => {});
+        }
 
         // --- CROSSFADE LOGIC ---
         let nextAudio = activeAudioIndex === 1 ? audioElement2 : audioElement1;
@@ -645,71 +704,96 @@ function playContext() {
         let nextGain = activeAudioIndex === 1 ? gainNode2 : gainNode1;
         let currGain = activeAudioIndex === 1 ? gainNode1 : gainNode2;
 
-        let isPlaying = !currAudio.paused && !currAudio.ended && currAudio.currentTime > 0;
+        let isPlaying = Boolean(!currAudio.paused && !currAudio.ended && currAudio.currentTime > 0 && currAudio.getAttribute('src'));
 
         // FIX: Update active pointers immediately so UI events are accurately caught
         audioElement = nextAudio;
         activeAudioIndex = activeAudioIndex === 1 ? 2 : 1;
 
-        nextAudio.src = '/descargas/' + safePath;
-
-        if (isVisualizerInit && isPlaying) {
-            nextGain.gain.setValueAtTime(0, audioCtx.currentTime);
-        } else if (isVisualizerInit) {
-            nextGain.gain.setValueAtTime(1, audioCtx.currentTime);
+        // Asegurar que la ganancia de salida no quede en 0 tras un crossfade interrumpido
+        if (isVisualizerInit && audioCtx) {
+            const now = audioCtx.currentTime;
+            nextGain.gain.cancelScheduledValues(now);
+            currGain.gain.cancelScheduledValues(now);
+            if (isPlaying) {
+                nextGain.gain.setValueAtTime(0.01, now);
+            } else {
+                nextGain.gain.setValueAtTime(1, now);
+                currGain.gain.setValueAtTime(0, now);
+            }
         }
 
-        nextAudio.play().then(() => {
-            if (isVisualizerInit && isPlaying) {
-                let fadeTime = 3.0; // segundos de crossfade
-                let now = audioCtx.currentTime;
+        nextAudio.pause();
+        nextAudio.src = targetSrc;
+        nextAudio.currentTime = 0;
 
-                currGain.gain.cancelScheduledValues(now);
-                currGain.gain.setValueAtTime(currGain.gain.value, now);
-                currGain.gain.linearRampToValueAtTime(0, now + fadeTime);
+        const playPromise = nextAudio.play();
+        if (playPromise !== undefined) {
+            playPromise.then(() => {
+                if (isVisualizerInit && audioCtx && isPlaying) {
+                    let fadeTime = 2.5; // segundos de crossfade suave
+                    let now = audioCtx.currentTime;
 
-                nextGain.gain.cancelScheduledValues(now);
-                nextGain.gain.setValueAtTime(0, now);
-                nextGain.gain.linearRampToValueAtTime(1, now + fadeTime);
+                    currGain.gain.cancelScheduledValues(now);
+                    currGain.gain.setValueAtTime(Math.max(0.01, currGain.gain.value || 1), now);
+                    currGain.gain.linearRampToValueAtTime(0, now + fadeTime);
 
-                setTimeout(() => { if (currAudio !== audioElement) { currAudio.pause(); currAudio.src = ""; } }, fadeTime * 1000);
-            } else if (isPlaying) {
-                currAudio.pause();
-                currAudio.src = "";
-            }
+                    nextGain.gain.cancelScheduledValues(now);
+                    nextGain.gain.setValueAtTime(0.01, now);
+                    nextGain.gain.linearRampToValueAtTime(1, now + fadeTime);
 
-            updateQueueUI();
-            syncPlayerUI();
+                    window._crossfadeCleanupTimer = setTimeout(() => {
+                        if (currAudio !== audioElement) {
+                            currAudio.pause();
+                            currAudio.removeAttribute('src');
+                            currAudio.load();
+                        }
+                    }, fadeTime * 1000);
+                } else {
+                    if (isVisualizerInit && audioCtx) {
+                        const now = audioCtx.currentTime;
+                        nextGain.gain.cancelScheduledValues(now);
+                        nextGain.gain.setValueAtTime(1, now);
+                    }
+                    if (currAudio !== audioElement) {
+                        currAudio.pause();
+                        currAudio.removeAttribute('src');
+                        currAudio.load();
+                    }
+                }
 
-            if (playerBar) {
-                playerBar.style.opacity = '1';
-                playerBar.style.pointerEvents = 'auto';
-            }
+                updateQueueUI();
+                syncPlayerUI();
+                if (typeof updatePlayIcons === 'function') updatePlayIcons(true);
 
-            const modal = document.getElementById('fullscreen-player');
-            if (modal && !modal.classList.contains('hidden')) {
-                syncFullscreenPlayerCover();
-            }
+                const modal = document.getElementById('fullscreen-player');
+                if (modal && !modal.classList.contains('hidden')) {
+                    syncFullscreenPlayerCover();
+                    syncFullscreenPlayer();
+                }
 
-            if (playerBar) {
-                playerBar.style.opacity = '1';
-                playerBar.style.pointerEvents = 'auto';
-            }
-
-            // Auto-update lyrics panel if open
-            const lyricsOverlay = document.getElementById('lyrics-overlay');
-            if (lyricsOverlay) {
-                refreshLyricsPanel(file);
-            }
-
-        }).catch(e => {
-            console.error("Error al reproducir audio:", e);
-
-            if (playerBar) {
-                playerBar.style.opacity = '1';
-                playerBar.style.pointerEvents = 'auto';
-            }
-        });
+                // Auto-update lyrics panel if open
+                const lyricsOverlay = document.getElementById('lyrics-overlay');
+                if (lyricsOverlay) {
+                    refreshLyricsPanel(file);
+                }
+            }).catch(e => {
+                console.warn("Reintentando reproducción directa tras bloqueo/interrupción:", e);
+                if (currAudio && currAudio !== audioElement) {
+                    currAudio.pause();
+                    currAudio.removeAttribute('src');
+                    currAudio.load();
+                }
+                if (isVisualizerInit && audioCtx) {
+                    const now = audioCtx.currentTime;
+                    nextGain.gain.cancelScheduledValues(now);
+                    nextGain.gain.setValueAtTime(1, now);
+                }
+                updateQueueUI();
+                syncPlayerUI();
+                if (typeof updatePlayIcons === 'function') updatePlayIcons(!nextAudio.paused);
+            });
+        }
     }
     /**
      * `actualizarInterfazPlayer(file)`
@@ -898,6 +982,11 @@ function toggleShuffle() {
      * Alterna entre reproducción y pausa del motor de audio activo.
      */
     function togglePlay() {
+        const playerBar = document.getElementById('player-bar');
+        if (playerBar) {
+            playerBar.style.opacity = '1';
+            playerBar.style.pointerEvents = 'auto';
+        }
         if (window.KRAKEN_CONTROL_TARGET && window.KRAKEN_CONTROL_TARGET.session_id) {
             const isPaused = window.KRAKEN_CONTROL_TARGET.is_playing === false;
             if (typeof sendCommand === 'function') {
@@ -907,19 +996,62 @@ function toggleShuffle() {
             if (typeof updatePlayIcons === 'function') updatePlayIcons(isPaused);
             return;
         }
-        if (!audioElement || !audioElement.src) return;
-        if (audioElement.paused) audioElement.play(); else audioElement.pause();
+        if (!audioElement) return;
+        if (isVisualizerInit && audioCtx && audioCtx.state === 'suspended') {
+            audioCtx.resume().catch(() => {});
+        }
+        // Asegurar que la ganancia del nodo activo esté en 1 al reanudar
+        if (isVisualizerInit && audioCtx) {
+            const activeGain = (audioElement === audioElement1) ? gainNode1 : gainNode2;
+            if (activeGain) {
+                const now = audioCtx.currentTime;
+                activeGain.gain.cancelScheduledValues(now);
+                activeGain.gain.setValueAtTime(1, now);
+            }
+        }
+        const hasValidSrc = Boolean(audioElement.getAttribute('src'));
+        if (!hasValidSrc) {
+            const currentTrack = playerQueue[currentTrackIndex] || window._currentAudioTrackObj;
+            if (currentTrack && currentTrack.type !== 'video') {
+                playTrack(currentTrack);
+            }
+            return;
+        }
+        if (audioElement.paused) {
+            // Pausar el otro elemento por si quedó un crossfade a medias
+            const otherAudio = (audioElement === audioElement1) ? audioElement2 : audioElement1;
+            if (otherAudio && !otherAudio.paused) otherAudio.pause();
+            audioElement.play().then(() => {
+                if (typeof updatePlayIcons === 'function') updatePlayIcons(true);
+                syncFullscreenPlayer();
+            }).catch(err => {
+                console.warn("Reintentando carga de pista en togglePlay:", err);
+                const currentTrack = playerQueue[currentTrackIndex] || window._currentAudioTrackObj;
+                if (currentTrack && currentTrack.type !== 'video') {
+                    playTrack(currentTrack);
+                }
+            });
+        } else {
+            if (window._crossfadeCleanupTimer) {
+                clearTimeout(window._crossfadeCleanupTimer);
+                window._crossfadeCleanupTimer = null;
+            }
+            if (audioElement1 && !audioElement1.paused) audioElement1.pause();
+            if (audioElement2 && !audioElement2.paused) audioElement2.pause();
+            if (typeof updatePlayIcons === 'function') updatePlayIcons(false);
+            syncFullscreenPlayer();
+        }
     }
     /**
      * `updateProgress()`
      * Actualiza la barra de progreso, tiempos y letras sincronizadas durante la reproducción de audio.
      */
     function updateProgress() {
-        if (!audioElement.duration) return;
+        if (!audioElement || !audioElement.duration || isNaN(audioElement.duration)) return;
         const curr = audioElement.currentTime;
 
-        // CROSSFADE TRIGGER: Faltando 3 segundos, iniciamos la siguiente!
-        if (!window.isCrossfading && loopMode !== 'one' && audioElement.duration > 5 && audioElement.duration - curr <= 3.0) {
+        // CROSSFADE TRIGGER: Faltando 2.5 segundos en pistas largas (>15s), iniciamos la siguiente
+        if (!window.isCrossfading && loopMode !== 'one' && !audioElement.paused && audioElement.duration > 15 && curr > 5 && (audioElement.duration - curr) <= 2.5) {
             window.isCrossfading = true;
             setTimeout(() => { window.isCrossfading = false; }, 3500);
             playNext();
@@ -1248,7 +1380,8 @@ function toggleShuffle() {
             }
             if (audioElement) {
                 audioElement.pause();
-                audioElement.src = '';
+                audioElement.removeAttribute('src');
+                audioElement.load();
             }
             actualizarInterfazPlayer(item);
             const bar = document.getElementById('player-bar');
@@ -1293,9 +1426,12 @@ function toggleShuffle() {
                 while (newIndex === currentTrackIndex) {
                     newIndex = Math.floor(Math.random() * playerQueue.length);
                 }
+                currentTrackIndex = newIndex;
+                playMediaItem(playerQueue[currentTrackIndex]);
+                return;
             }
-            currentTrackIndex = newIndex;
-            playMediaItem(playerQueue[currentTrackIndex]);
+            // Si la cola solo tenía 1 canción y Shuffle está activo, activar Radio
+            activarModoRadio();
             return;
         }
 
@@ -1307,7 +1443,7 @@ function toggleShuffle() {
         } else {
             // 3. SE ACABÓ LA LISTA (El momento mágico)
 
-            if (loopMode === 'all') {
+            if (loopMode === 'all' && playerQueue.length > 0) {
                 // Solo si tienes activado "Repetir Todo", volvemos al inicio
                 currentTrackIndex = 0;
                 playMediaItem(playerQueue[0]);
@@ -1328,7 +1464,7 @@ function toggleShuffle() {
     }
     /**
      * `playPrevious()`
-     * Retrocede a la pista anterior o reinicia la actual.
+     * Retrocede a la última pista reproducida (historial real) o a la pista anterior en la cola.
      */
     function playPrevious() {
         if (window.KRAKEN_CONTROL_TARGET && window.KRAKEN_CONTROL_TARGET.session_id) {
@@ -1337,11 +1473,44 @@ function toggleShuffle() {
             }
             return;
         }
+        if (audioElement && audioElement.currentTime > 4) {
+            audioElement.currentTime = 0;
+            return;
+        }
+
+        // 1. Priorizar el historial real de canciones escuchadas en la sesión
+        if (Array.isArray(window.audioPlayHistory) && window.audioPlayHistory.length > 0) {
+            const prevTrack = window.audioPlayHistory.pop();
+            if (prevTrack && prevTrack.path) {
+                window._skipHistoryPush = true;
+                const existingIdx = playerQueue.findIndex(f => f && f.path === prevTrack.path);
+                if (existingIdx !== -1) {
+                    currentTrackIndex = existingIdx;
+                } else {
+                    const insertPos = Math.max(0, currentTrackIndex);
+                    playerQueue.splice(insertPos, 0, prevTrack);
+                    currentTrackIndex = insertPos;
+                }
+                playMediaItem(prevTrack);
+                return;
+            }
+        }
+
         if (playerQueue.length === 0) return;
-        if (audioElement && audioElement.currentTime > 3) { audioElement.currentTime = 0; return; }
-        currentTrackIndex = currentTrackIndex - 1;
-        if (currentTrackIndex < 0) currentTrackIndex = playerQueue.length - 1;
-        playMediaItem(playerQueue[currentTrackIndex]);
+
+        // 2. Si no hay historial previo, retroceder linealmente en la cola actual
+        if (currentTrackIndex > 0) {
+            window._skipHistoryPush = true;
+            currentTrackIndex = currentTrackIndex - 1;
+            playMediaItem(playerQueue[currentTrackIndex]);
+        } else if (loopMode === 'all' && playerQueue.length > 1) {
+            window._skipHistoryPush = true;
+            currentTrackIndex = playerQueue.length - 1;
+            playMediaItem(playerQueue[currentTrackIndex]);
+        } else if (audioElement) {
+            audioElement.currentTime = 0;
+            if (audioElement.paused) audioElement.play().catch(() => {});
+        }
     }
     /**
      * `jumpToTrack(index)`

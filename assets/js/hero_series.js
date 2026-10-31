@@ -278,16 +278,26 @@ function buildFullCastGrid(cast) {
 
         window._progressInterval = setInterval(() => {
             try {
-                const current = artPlayerInstance.currentTime || 0;
-                const duration = artPlayerInstance.duration || 0;
-                if (current > 0 && duration > 0) {
+                const hlsOffset = Number(artPlayerInstance._hlsTimeOffset || 0);
+                const rawCurrent = Number(artPlayerInstance.currentTime || 0);
+                const current = hlsOffset + rawCurrent;
+                const knownDuration = Math.max(
+                    Number(window.currentVideoData?.duration || 0),
+                    Number(window.currentVideoFile?.duration || 0),
+                    hlsOffset + Number(artPlayerInstance.duration || 0)
+                );
+                if (rawCurrent > 0 && current > 0 && knownDuration > 0) {
+                    if (window.currentVideoFile && window.currentVideoFile.id === mediaId) {
+                        window.currentVideoFile.progress_seconds = current;
+                        window.currentVideoFile.duration_seconds = knownDuration;
+                    }
                     fetch('/api/progress', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             media_id: mediaId,
                             progress_seconds: current,
-                            duration_seconds: duration
+                            duration_seconds: knownDuration
                         })
                     }).catch(() => { });
                 }

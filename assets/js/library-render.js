@@ -1357,20 +1357,6 @@ function filterNetflixRows(category) {
                         </div>`;
                     }
 
-                    // Función para navegar a temporada
-                    /**
-                     * `goToSeason(seasonName)`
-                     * Cambia la temporada activa en la vista detallada de una serie.
-                     */
-                    window.goToSeason = function (seasonName) {
-                        const safeName = seasonName.replace(/[^a-zA-Z0-9]/g, '-');
-                        const el = document.getElementById('season-' + safeName);
-                        if (el) {
-                            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                            currentFolderView = seasonName;
-                        }
-                    };
-
                     seasonNames.forEach(name => {
                         if (groups[name].isSeason) {
                             const safeName = name.replace(/[^a-zA-Z0-9]/g, '-');
@@ -1816,13 +1802,19 @@ function filterNetflixRows(category) {
         ${menuBtn}
     </div>`;
 
-                // Lógica para movie vs series: movie_folder = 1 click, series_folder = navegar
-                const clickAction = isMovieFolder
-                    ? `playNow(this.dataset.path)`
-                    : (f.type === 'folder' ? `openFolderPath(this.dataset.path)` : `playNow(this.dataset.path)`);
-                const folderIcon = isMovieFolder ? 'fa-play ml-1' : 'fa-folder-open';
-                const movieDetailPath = ((f.path || '').replace(/\\/g, '/').split('/').slice(0, 3).join('/') + '/');
-                const movieInfoHoverBtn = (currentLibrary === 'video' && isMovieFolder) ? `
+                // Lógica para movie vs series: abrir vista de detalle TMDB (con sinopsis, reparto y backdrop) desde el catálogo raíz
+                const moviePathParts = (f.path || '').replace(/\\/g, '/').split('/').filter(Boolean);
+                const hasMovieDetailFolder = isMovieFolder && moviePathParts.length >= 3;
+                const movieDetailPath = hasMovieDetailFolder ? (moviePathParts.slice(0, 3).join('/') + '/') : '';
+                const clickAction = (currentLibrary === 'video' && currentPath === '' && hasMovieDetailFolder)
+                    ? `openFolderPath(this.dataset.moviePath)`
+                    : (f.type === 'folder'
+                        ? `openFolderPath(this.dataset.path)`
+                        : ((currentLibrary === 'video' && currentPath === '' && previewTmdbId)
+                            ? `showVideoInfoFromCard(this.dataset.path)`
+                            : `playNow(this.dataset.path)`));
+                const folderIcon = (isMovieFolder || f.type === 'video') ? 'fa-play ml-1' : 'fa-folder-open';
+                const movieInfoHoverBtn = (currentLibrary === 'video' && hasMovieDetailFolder) ? `
                 <button onclick="event.stopPropagation(); openFolderPath(this.dataset.moviePath)"
                         data-movie-path="${escapeHtml(movieDetailPath)}"
                         class="px-3 py-1.5 rounded-full bg-white/15 hover:bg-white/25 border border-white/25 text-white text-[11px] font-bold transition-all duration-200 mb-1">
@@ -1842,6 +1834,7 @@ function filterNetflixRows(category) {
          data-preview-type="${previewType}"
          onmouseenter="loadVideoCardPreview(this)"
          data-path="${escapeHtml(f.path)}"
+         data-movie-path="${escapeHtml(movieDetailPath)}"
          onclick="${clickAction}">
         ${hoverPreview}
         <div class="relative w-full ${currentLibrary === 'video' ? 'aspect-[2/3]' : 'aspect-square'} bg-[#0a0a0a] rounded-lg overflow-hidden mb-2 shadow-inner flex items-center justify-center">
@@ -1855,7 +1848,7 @@ function filterNetflixRows(category) {
             <div class="absolute inset-0 hidden items-center justify-center bg-emerald-800 z-0"><i class="fa-solid ${f.type === 'video' ? 'fa-film' : (f.type === 'folder' ? 'fa-folder' : 'fa-music')} text-4xl text-white/50"></i></div>
             
             <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center backdrop-blur-[2px] z-20 gap-2">
-                ${selectionMode ? '<i class="fa-regular fa-square-check text-4xl text-white"></i>' : `${movieInfoHoverBtn}<div class="w-10 h-10 bg-emerald-500 text-black rounded-full flex items-center justify-center shadow-xl hover:scale-110 transition"><i class="fa-solid ${folderIcon}"></i></div>`}
+                ${selectionMode ? '<i class="fa-regular fa-square-check text-4xl text-white"></i>' : `${movieInfoHoverBtn}<div onclick="${f.type === 'folder' && !isMovieFolder ? 'event.stopPropagation(); openFolderPath(this.closest(\'[data-path]\').dataset.path)' : 'event.stopPropagation(); playNow(this.closest(\'[data-path]\').dataset.path)'}" class="w-10 h-10 bg-emerald-500 text-black rounded-full flex items-center justify-center shadow-xl hover:scale-110 transition"><i class="fa-solid ${folderIcon}"></i></div>`}
             </div>
             ${progressPct > 0 ? `<div class="krk-video-card-progress"><span style="width:${progressPct}%"></span></div>` : ''}
         </div>

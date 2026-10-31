@@ -48,11 +48,16 @@ function initApp() {
             const currentTrack = playerQueue[currentTrackIndex];
             const playbackSnapshot = getKrakenPlaybackSnapshot();
             const activeVideoElement = document.querySelector('#cine-screen video, #artplayer-container video, #main-video');
+            const hlsTimeOffset = Number(window.currentArtPlayer?._hlsTimeOffset || 0);
             const currentProgressTime = playbackSnapshot.media_type === 'video'
-                ? (activeVideoElement ? activeVideoElement.currentTime : 0)
+                ? (activeVideoElement ? (hlsTimeOffset + (activeVideoElement.currentTime || 0)) : 0)
                 : (audioElement ? audioElement.currentTime : 0);
             const currentProgressDuration = playbackSnapshot.media_type === 'video'
-                ? (activeVideoElement ? activeVideoElement.duration : 0)
+                ? Math.max(
+                    Number(window.currentVideoData?.duration || 0),
+                    Number(window.currentVideoFile?.duration || 0),
+                    activeVideoElement ? (hlsTimeOffset + (activeVideoElement.duration || 0)) : 0
+                )
                 : (audioElement ? audioElement.duration : 0);
 
             const currentVideo = window.currentVideoFile;
@@ -92,8 +97,8 @@ function initApp() {
                 media_type: playbackSnapshot.media_type
             });
 
-            const authHeaders = (window.krakenAuth && typeof window.krakenAuth.getAuthHeaders === 'function')
-                ? window.krakenAuth.getAuthHeaders()
+            const authHeaders = (window.krakenAuth && typeof window.krakenAuth.headers === 'function')
+                ? window.krakenAuth.headers()
                 : {};
             const res = await fetch(`/status?${params.toString()}`, { headers: authHeaders });
             if (!res.ok) {
@@ -121,7 +126,11 @@ function initApp() {
             if (d.online_users) {
                 drawUserRadar(d.online_users);
             }
-            applyControlledTargetState(d.controlled_target || null);
+            if (d.controlled_target) {
+                applyControlledTargetState(d.controlled_target);
+            } else if (!window.KRAKEN_PLAYBACK_TARGET && !window._activeCineRemoteData?.targetSid) {
+                applyControlledTargetState(null);
+            }
             // --- 2. ALEXA ---
             const cmd = d.last_command;
             if (typeof window.lastProcessedTime === 'undefined') window.lastProcessedTime = 0;

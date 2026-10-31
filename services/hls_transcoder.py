@@ -59,8 +59,11 @@ class HLSTranscoder:
         self._video_encoder = 'libx264'
         return 'libx264'
 
-    def _get_encoder_settings(self, encoder):
-        """Retorna los settings apropiados para cada encoder."""
+    def _get_encoder_settings(self, encoder, is_4k=False):
+        """Retorna los settings apropiados para cada encoder (soporta 4K nativo o 1080p)."""
+        target_bitrate = "20M" if is_4k else "8M"
+        max_bitrate = "25M" if is_4k else "10M"
+        buf_size = "40M" if is_4k else "16M"
         if encoder == 'libx264':
             return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv420p"]
         elif '_nvenc' in encoder:  # NVIDIA
@@ -69,18 +72,18 @@ class HLSTranscoder:
                 "-preset", "p4",
                 "-pix_fmt", "yuv420p",
                 "-profile:v", "main",
-                "-b:v", "8M",
-                "-maxrate", "10M",
-                "-bufsize", "16M"
+                "-b:v", target_bitrate,
+                "-maxrate", max_bitrate,
+                "-bufsize", buf_size
             ]
         elif '_videotoolbox' in encoder:  # Apple Silicon (Mac)
             return [
                 "-c:v", encoder,
                 "-pix_fmt", "yuv420p",
                 "-profile:v", "main",
-                "-b:v", "8M",
-                "-maxrate", "10M",
-                "-bufsize", "16M"
+                "-b:v", target_bitrate,
+                "-maxrate", max_bitrate,
+                "-bufsize", buf_size
             ]
         else:
             return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv420p"]
@@ -89,7 +92,7 @@ class HLSTranscoder:
         """Analiza el archivo para decidir si requiere transcodificación y extrae pistas de audio y subtítulos."""
         cmd = [
             self.ffprobe, "-v", "quiet", "-print_format", "json",
-            "-show_streams", input_file
+            "-show_format", "-show_streams", input_file
         ]
         try:
             kwargs = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
@@ -99,6 +102,11 @@ class HLSTranscoder:
             video_stream = next((s for s in data.get('streams', []) if s.get('codec_type') == 'video'), None)
             audio_streams = [s for s in data.get('streams', []) if s.get('codec_type') == 'audio']
             subtitle_streams = [s for s in data.get('streams', []) if s.get('codec_type') == 'subtitle']
+            fmt_duration = 0.0
+            try:
+                fmt_duration = float((data.get('format') or {}).get('duration') or (video_stream or {}).get('duration') or 0.0)
+            except (TypeError, ValueError):
+                fmt_duration = 0.0
             
             video_codec = video_stream.get('codec_name') if video_stream else None
             pix_fmt = video_stream.get('pix_fmt') if video_stream else None
@@ -111,11 +119,10 @@ class HLSTranscoder:
             
             # Para Direct Play en navegador (MP4/WebM):
             browser_friendly_video = ['h264', 'vp8', 'vp9', 'av1']
-            # Para HLS MPEG-TS sin recodificar (-c:v copy), el stream debe ser H.264 8-bit estándar y no superar 1080p:
+            # Para HLS MPEG-TS sin recodificar (-c:v copy), el stream debe ser H.264 8-bit estándar (mantiene 4K nativo sin re-encodear):
             hls_can_copy_video = (
                 video_codec == 'h264'
                 and (pix_fmt in ('yuv420p', 'yuvj420p', None))
-                and not is_over_1080p
             )
             video_needs_transcode = not hls_can_copy_video
             
@@ -194,6 +201,7 @@ class HLSTranscoder:
                 "pix_fmt": pix_fmt,
                 "width": width,
                 "height": height,
+                "duration": fmt_duration,
                 "is_over_1080p": is_over_1080p,
                 "hls_can_copy_video": hls_can_copy_video,
                 "can_remux": can_remux,
@@ -223,11 +231,13 @@ class HLSTranscoder:
         audio_tracks = analysis.get('audio_tracks', [])
         needs_video_reencode = (
             force_video_reencode
+            or downscale_1080
             or analysis.get('video_needs_transcode', True)
         )
 
+        is_4k_output = bool(analysis.get('is_over_1080p') and not downscale_1080)
         video_encoder = self._detect_video_encoder() if needs_video_reencode else None
-        encoder_settings = self._get_encoder_settings(video_encoder) if needs_video_reencode else []
+        encoder_settings = self._get_encoder_settings(video_encoder, is_4k=is_4k_output) if needs_video_reencode else []
 
         cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-fflags", "+genpts"]
 
@@ -325,6 +335,7 @@ class HLSTranscoder:
         start_time=0.0,
         force_transcode=False,
         downscale_1080=False,
+        is_tv_client=False,
     ):
         """Prepara e inicia el proceso FFmpeg para HLS."""
         print(f"[HLS] Input file: {input_file}")
@@ -338,7 +349,16 @@ class HLSTranscoder:
             print("[HLS] ERROR: No se pudo analizar el archivo")
             return None, [], 0, "No se pudo analizar el archivo"
         self._last_analysis = analysis
-        print(f"[HLS] Analysis: video={analysis.get('video_codec')} copy_ok={analysis.get('hls_can_copy_video')} direct={analysis.get('direct_play')} subs={len(analysis.get('embedded_subtitles', []))}")
+
+        # En Smart TVs (Android TV), el decodificador H.264 (AVC) por hardware solo soporta hasta 1080p (Level 4.1).
+        # Si el video supera 1080p (ej. Fantasía 2872x2160 H.264 Level 5.1 o MKV 4K transcodificado a H.264),
+        # escalamos a 1080p únicamente para la TV sin afectar la reproducción 4K en PC/Web.
+        if is_tv_client and analysis.get('is_over_1080p'):
+            downscale_1080 = True
+            if analysis.get('video_codec') == 'h264':
+                force_transcode = True
+
+        print(f"[HLS] Analysis: video={analysis.get('video_codec')} copy_ok={analysis.get('hls_can_copy_video')} direct={analysis.get('direct_play')} tv={is_tv_client} downscale_1080={downscale_1080} subs={len(analysis.get('embedded_subtitles', []))}")
         os.makedirs(output_dir, exist_ok=True)
         playlist_path = os.path.join(output_dir, "playlist.m3u8")
         
@@ -353,7 +373,7 @@ class HLSTranscoder:
 
         force_hls_for_audio = normalized_audio_index > 0
 
-        if analysis.get('direct_play') and not force_transcode and not force_hls_for_audio and (not start_time or start_time <= 0):
+        if analysis.get('direct_play') and not force_transcode and not force_hls_for_audio:
             print("[HLS] MP4/WebM nativo detectado, bypass HLS (Direct Play)")
             return "DIRECT", audio_tracks, normalized_audio_index, None
 

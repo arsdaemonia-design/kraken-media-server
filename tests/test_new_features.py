@@ -350,6 +350,29 @@ class TestNewFeaturesV5(unittest.TestCase):
         cmd_tv_str = ' '.join(cmd_tv)
         self.assertIn("scale='min(1920,iw)':-2", cmd_tv_str)
 
+        # Case C: 4K H.264 stream (downscale_1080=False, force_video_reencode=False) -> MUST use -c:v copy (4K remux without re-encoding)
+        analysis_4k_h264 = {
+            'video_codec': 'h264',
+            'pix_fmt': 'yuv420p',
+            'width': 3840,
+            'height': 2160,
+            'is_over_1080p': True,
+            'hls_can_copy_video': True,
+            'video_needs_transcode': False,
+            'audio_tracks': [{'index': 0, 'channels': 2}]
+        }
+        cmd_copy_4k, used_reencode = hls_transcoder._build_ffmpeg_hls_cmd(
+            input_file='dummy_4k_h264.mkv',
+            output_dir='dummy_dir',
+            playlist_path='dummy_dir/playlist.m3u8',
+            analysis=analysis_4k_h264,
+            normalized_audio_index=0,
+            force_video_reencode=False,
+            downscale_1080=False
+        )
+        self.assertFalse(used_reencode)
+        self.assertIn("-c:v copy", ' '.join(cmd_copy_4k))
+
     # 5. PRIVACY: CROSS-ACCOUNT DEVICE CONTROL PROTECTION
     def test_10_device_control_cross_account_forbidden(self):
         # Setup two users from different accounts in ACTIVE_USERS
@@ -458,11 +481,49 @@ class TestNewFeaturesV5(unittest.TestCase):
         self.assertFalse(sample['title'].strip().lower().endswith('ingles]'))
         self.assertTrue(any(e['season'].startswith('Temporada') for e in data['items']))
 
+    # 12. TV QR CODE LOGIN FLOW (/api/tv/qr/init -> /tv-verify -> /api/tv/qr/approve -> /api/tv/qr/poll)
+    def test_12_tv_qr_auth_flow(self):
+        # 1. TV requests QR init
+        init_res = self.client.post('/api/tv/qr/init')
+        self.assertEqual(init_res.status_code, 200)
+        init_data = init_res.get_json()
+        code = init_data.get('code')
+        self.assertIsNotNone(code)
+        self.assertEqual(len(code), 6)
+        self.assertIn('/tv-verify?code=', init_data.get('verify_url', ''))
+
+        # 2. TV polls while pending
+        poll_pending = self.client.get(f'/api/tv/qr/poll?code={code}')
+        self.assertEqual(poll_pending.status_code, 200)
+        self.assertEqual(poll_pending.get_json()['status'], 'pending')
+
+        # 3. Mobile opens /tv-verify page
+        verify_page = self.client.get(f'/tv-verify?code={code}')
+        self.assertEqual(verify_page.status_code, 200)
+        self.assertIn(code.encode(), verify_page.data)
+
+        # 4. Mobile approves QR using its Bearer token
+        approve_res = self.client.post('/api/tv/qr/approve', headers=self.headers_admin, json={'code': code})
+        self.assertEqual(approve_res.status_code, 200)
+        self.assertEqual(approve_res.get_json()['status'], 'approved')
+
+        # 5. TV polls again and receives approved JWT token + user data
+        poll_ok = self.client.get(f'/api/tv/qr/poll?code={code}')
+        self.assertEqual(poll_ok.status_code, 200)
+        poll_data = poll_ok.get_json()
+        self.assertEqual(poll_data['status'], 'approved')
+        self.assertTrue(len(poll_data.get('token', '')) > 20)
+        self.assertEqual(poll_data.get('email'), self.admin_email)
+
+        # 6. Subsequent poll with consumed code returns 404 expired
+        poll_consumed = self.client.get(f'/api/tv/qr/poll?code={code}')
+        self.assertEqual(poll_consumed.status_code, 404)
+
     @classmethod
     def tearDownClass(cls):
         conn = get_db()
         c = conn.cursor()
-        c.execute("DELETE FROM media WHERE rel_path IN ('vault/secret_adult.mp4', 'movies/regular_movie.mp4', 'test_song.mp3')")
+        c.execute("DELETE FROM media WHERE rel_path IN ('vault/secret_adult.mp4', 'movies/regular_movie.mp4', 'test_song.mp3', 'Video/Series/That ''70s Show/Season 1/S01E01.mkv')")
         c.execute("DELETE FROM users WHERE email LIKE 'tester_%'")
         c.execute("DELETE FROM invites WHERE code LIKE 'test_%' OR trial_hours = 48")
         conn.commit()

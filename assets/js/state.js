@@ -112,6 +112,16 @@ function ensureVideoStateBindings() {
             videoUIState.gridRenderLimit = Number.isFinite(n) && n > 0 ? n : 84;
         }
     });
+    Object.defineProperty(window, 'currentPath', {
+        configurable: true,
+        get() { return currentPath; },
+        set(value) { currentPath = (typeof value === 'string') ? value : ''; }
+    });
+    Object.defineProperty(window, 'currentFolderView', {
+        configurable: true,
+        get() { return currentFolderView; },
+        set(value) { currentFolderView = value ?? null; }
+    });
 }
 
 /**
@@ -184,12 +194,17 @@ function getMasterPin(mensaje) {
         pin = prompt(mensaje);
         if (pin) {
             sessionStorage.setItem('kraken_master_pin', pin);
+            if (window.KrakenTV && typeof window.KrakenTV.setMasterPin === 'function') {
+                try { window.KrakenTV.setMasterPin(pin); } catch (_) {}
+            }
             setTimeout(() => {
                 if (typeof cargarLib === 'function' && !libData?.adult_unlocked) {
                     cargarLib();
                 }
             }, 200);
         }
+    } else if (window.KrakenTV && typeof window.KrakenTV.setMasterPin === 'function') {
+        try { window.KrakenTV.setMasterPin(pin); } catch (_) {}
     }
     return pin;
 }
@@ -375,8 +390,8 @@ window.openFolderPath = function(target) {
     if (targetPath && !targetPath.endsWith('/')) {
         targetPath += '/';
     }
-    window.currentPath = targetPath || '';
-    window.currentFolderView = null;
+    currentPath = targetPath || '';
+    currentFolderView = null;
     if (typeof renderLib === 'function') {
         renderLib();
     }
@@ -390,5 +405,5 @@ window.goToSeason = function(seasonName) {
     if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-    window.currentFolderView = safeSeason;
+    currentFolderView = safeSeason;
 };

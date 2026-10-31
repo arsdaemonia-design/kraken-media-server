@@ -5,7 +5,7 @@
  * multimedia para reproducción en modo Offline PWA.
  * ============================================================================
  */
-const VERSION = new URL(self.location.href).searchParams.get('v') || 'v5.0.1';
+const VERSION = new URL(self.location.href).searchParams.get('v') || 'v5.0.1.4';
 const CACHE_NAME = `kraken-offline-${VERSION}`;
 const APP_CACHE = `kraken-app-${VERSION}`;
 let offlineMode = false;
@@ -16,6 +16,7 @@ const APP_SHELL = [
   '/assets/kraken-192.png',
   '/assets/kraken-512.png',
   '/assets/apple-touch-icon.png',
+  '/assets/qrcode.min.js',
   '/assets/css/kraken.css',
   '/assets/js/head-config.js',
   '/assets/js/tv-lite.js',

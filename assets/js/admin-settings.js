@@ -1546,10 +1546,26 @@ async function saveProfileEdit() {
 
     if (newName && newName.length >= 2) {
         payload.username = newName;
-        localStorage.setItem('kraken_user', newName);
         MY_NAME = newName;
+        window.MY_NAME = newName;
+        try {
+            const rawUser = localStorage.getItem('kraken_user');
+            const parsedUser = rawUser ? JSON.parse(rawUser) : {};
+            if (parsedUser && typeof parsedUser === 'object') {
+                parsedUser.username = newName;
+                if (avatar) parsedUser.avatar_url = avatar.value;
+                localStorage.setItem('kraken_user', JSON.stringify(parsedUser));
+            }
+        } catch (err) {
+            localStorage.setItem('kraken_user', JSON.stringify({ email: window.MY_EMAIL, username: newName }));
+        }
     }
     if (avatar) payload.avatar_url = avatar.value;
+
+    if (newPassword && newPassword.length < 8) {
+        showToast('La contraseña debe tener al menos 8 caracteres', 'error');
+        return;
+    }
 
     if (!payload.username && !payload.avatar_url && !newPassword) {
         showToast('No hay cambios que guardar', 'warning');
@@ -1570,7 +1586,7 @@ async function saveProfileEdit() {
             }
         }
 
-        if (newPassword && newPassword.length >= 4) {
+        if (newPassword && newPassword.length >= 8) {
             const passRes = await fetch('/api/auth/set_password', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1579,6 +1595,9 @@ async function saveProfileEdit() {
             const passData = await passRes.json();
             if (passData.ok) {
                 showToast('Contraseña actualizada', 'success');
+            } else {
+                showToast(passData.error || 'No se pudo actualizar la contraseña', 'error');
+                return;
             }
         }
 

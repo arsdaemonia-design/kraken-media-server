@@ -785,11 +785,12 @@ function renderVideoDetailHeroAndSeasonControls(container, filtered) {
     const heroCover = heroSource.tmdb_poster
         ? `/caratula/${encodeURIComponent(heroSource.tmdb_poster)}`
         : `/caratula/${heroSource.path.split('/').map(p => encodeURIComponent(p)).join('/')}`;
+    const isMovieDetail = heroSource.folder_type === 'movie';
     const detailHeroItem = {
-        type: 'folder',
+        type: isMovieDetail ? 'video' : 'folder',
         name: heroSource.tmdb_title || showTitle,
         title: heroSource.tmdb_title || showTitle,
-        path: baseShowPath,
+        path: isMovieDetail ? heroSource.path : baseShowPath,
         sample: heroSource,
         folder_type: heroSource.folder_type,
         tmdb_id: heroSource.tmdb_id,
@@ -836,7 +837,7 @@ function renderVideoDetailHeroAndSeasonControls(container, filtered) {
             <div class="relative z-10 h-full p-4 md:p-6 flex flex-col justify-end">
                 <div class="flex items-center gap-2 mb-2">
                     <div class="w-1 h-3 bg-emerald-500 rounded"></div>
-                    <span class="text-[10px] md:text-xs font-black tracking-[0.2em] text-white/90 uppercase">${escapeHtml(categoryName)} · TEMPORADAS</span>
+                    <span class="text-[10px] md:text-xs font-black tracking-[0.2em] text-white/90 uppercase">${escapeHtml(categoryName)} · ${isMovieDetail ? 'PELÍCULA' : 'TEMPORADAS'}</span>
                 </div>
                 <h2 class="text-2xl md:text-4xl font-black text-white leading-tight line-clamp-2 mb-3">${escapeHtml(showTitle)}</h2>
             </div>
@@ -851,15 +852,28 @@ function renderVideoDetailHeroAndSeasonControls(container, filtered) {
             if (!richEl) return;
             richEl.classList.add('col-span-full');
             ph.replaceWith(richEl);
+            if (window.KRAKEN_TV_MODE) {
+                const firstBtn = richEl.querySelector('button');
+                if (firstBtn) {
+                    firstBtn.setAttribute('tabindex', '0');
+                    setTimeout(() => { try { firstBtn.focus(); } catch (_) {} }, 50);
+                }
+            }
         }).catch(e => console.warn('[DETAIL HERO] render failed:', e));
     }
+
+    const primaryDetailBtn = (isMovieDetail && allSeasons.length === 0)
+        ? `<button onclick="playNow(this.dataset.path)" data-path="${escapeHtml(heroSource.path)}" class="bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs md:text-sm py-2.5 px-6 rounded-full transition flex items-center gap-2 shadow-lg">
+            <i class="fa-solid fa-play"></i> Reproducir Película
+        </button>`
+        : `<button onclick="openFolderPath(this.dataset.basePath)" data-base-path="${escapeHtml(baseShowPath)}" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-xs md:text-sm py-2.5 px-5 rounded-full transition flex items-center gap-2">
+            <i class="fa-solid fa-folder-open"></i> Explorar Temporadas
+        </button>`;
 
     container.innerHTML += `
         <div class="w-full flex items-center justify-between gap-2 px-2 md:px-0 mt-1 mb-4 overflow-x-auto no-scrollbar">
             <div class="flex items-center gap-3">
-                <button onclick="openFolderPath(this.dataset.basePath)" data-base-path="${escapeHtml(baseShowPath)}" class="bg-white hover:bg-emerald-50 text-black font-extrabold text-xs md:text-sm py-2.5 px-5 rounded-full transition flex items-center gap-2">
-                    <i class="fa-solid fa-folder-open"></i> Explorar Temporadas
-                </button>
+                ${primaryDetailBtn}
                 ${seasonSelect}
             </div>
             <div class="flex gap-2 shrink-0">

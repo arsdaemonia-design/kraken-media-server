@@ -428,8 +428,10 @@ def play_hls():
         except (TypeError, ValueError):
             selected_audio_track = None
 
+    ua = (request.headers.get('User-Agent') or '').lower()
+    is_tv_client = request.args.get('client') == 'tv' or 'okhttp' in ua or 'krakentv' in ua
     force_transcode = request.args.get('force_transcode') in ('1', 'true', 'True')
-    downscale_1080 = request.args.get('downscale_1080') in ('1', 'true', 'True') or (force_transcode and request.args.get('downscale_1080') != '0')
+    downscale_1080 = request.args.get('downscale_1080') in ('1', 'true', 'True')
     process, audio_tracks, selected_audio_track, hls_error = hls_transcoder.start_hls_session(
         full_video_path,
         session_dir,
@@ -439,7 +441,10 @@ def play_hls():
         start_time=start_time,
         force_transcode=force_transcode,
         downscale_1080=downscale_1080,
+        is_tv_client=is_tv_client,
     )
+    if (not video_duration or video_duration <= 0) and getattr(hls_transcoder, '_last_analysis', None):
+        video_duration = float(hls_transcoder._last_analysis.get('duration') or 0)
     all_subs = _build_combined_subtitles(full_video_path, media_id=media_id, token=token, video_rel_path=video_path)
     # Preferir subtítulo externo como activo por defecto; los incrustados quedan disponibles en el menú
     external_subs_only = [s for s in all_subs if s.get('external')]
@@ -451,6 +456,7 @@ def play_hls():
             "url": f"/descargas/{video_path}",
             "direct_play": True,
             "duration": video_duration,
+            "start_time": start_time,
             "audio_tracks": audio_tracks,
             "selected_audio_track": selected_audio_track,
             "session_id": session_id,
@@ -578,8 +584,10 @@ def reconnect_hls():
         except (TypeError, ValueError):
             selected_audio_track = None
 
+    ua = (request.headers.get('User-Agent') or '').lower()
+    is_tv_client = request.args.get('client') == 'tv' or 'okhttp' in ua or 'krakentv' in ua
     force_transcode = request.args.get('force_transcode') in ('1', 'true', 'True')
-    downscale_1080 = request.args.get('downscale_1080') in ('1', 'true', 'True') or (force_transcode and request.args.get('downscale_1080') != '0')
+    downscale_1080 = request.args.get('downscale_1080') in ('1', 'true', 'True')
     process, audio_tracks, selected_audio_track, hls_error = hls_transcoder.start_hls_session(
         full_video_path,
         session_dir,
@@ -589,6 +597,7 @@ def reconnect_hls():
         start_time=start_time,
         force_transcode=force_transcode,
         downscale_1080=downscale_1080,
+        is_tv_client=is_tv_client,
     )
 
     all_subs = _build_combined_subtitles(full_video_path, media_id=media_id, token=token, video_rel_path=video_path)

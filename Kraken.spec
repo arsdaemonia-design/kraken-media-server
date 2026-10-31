@@ -5,7 +5,7 @@ a = Analysis(
     ['app.py'],
     pathex=[],
     binaries=[],
-    datas=[('templates', 'templates'), ('assets', 'assets'), ('routes', 'routes'), ('services', 'services'), ('sw.js', '.'), ('config.py', '.'), ('state.py', '.'), ('utils.py', '.'), ('app.py', '.'), ('app_offline.py', '.'), ('alexa_handlers.py', '.'), ('ffmpeg.exe', '.'), ('ffprobe.exe', '.'), ('cloudflared-windows-amd64.exe', '.')],
+    datas=[('templates', 'templates'), ('assets', 'assets'), ('static', 'static'), ('routes', 'routes'), ('services', 'services'), ('sw.js', '.'), ('config.py', '.'), ('state.py', '.'), ('utils.py', '.'), ('app.py', '.'), ('app_offline.py', '.'), ('alexa_handlers.py', '.'), ('ffmpeg.exe', '.'), ('ffprobe.exe', '.'), ('cloudflared-windows-amd64.exe', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

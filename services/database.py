@@ -9,14 +9,26 @@ os.makedirs(config.DOWNLOAD_FOLDER, exist_ok=True)
 DB_PATH = os.path.join(config.DOWNLOAD_FOLDER, 'kraken.db')
 
 def get_db():
-    """Get database connection with row factory."""
-    conn = sqlite3.connect(DB_PATH)
+    """Get database connection with row factory, WAL concurrency and busy_timeout."""
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+    except Exception:
+        pass
     return conn
 
 def init_db():
     """Initialize SQLite database with required tables."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    try:
+        conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+    except Exception:
+        pass
     c = conn.cursor()
     
     # Create tables

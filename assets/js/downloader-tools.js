@@ -1000,6 +1000,7 @@ await loadDuplicateCandidates();
  */
 function detectKrakenDeviceType() {
     const ua = navigator.userAgent || '';
+    if (window.KrakenTV || document.body?.classList?.contains('tv-mode') || /Android TV|SmartTV|HbbTV|GoogleTV|CrKey|Xbox|PlayStation|Nintendo|Web0S|Tizen|Viera|NetCast|Roku|AFT[ABKMR]/i.test(ua)) return 'tv';
     if (/ipad|tablet/i.test(ua)) return 'tablet';
     if (/mobi|android|iphone/i.test(ua)) return 'mobile';
     return 'desktop';
@@ -1011,12 +1012,21 @@ function detectKrakenDeviceType() {
  */
 function getKrakenDeviceName() {
     let saved = localStorage.getItem('kraken_device_name');
+    if (detectKrakenDeviceType() === 'tv' && (!saved || saved === 'PC Linux' || saved === 'Movil Kraken' || saved === 'tv')) {
+        localStorage.setItem('kraken_device_name', 'Smart TV Kraken');
+        return 'Smart TV Kraken';
+    }
     if (saved) return saved;
 
     const ua = navigator.userAgent || '';
+    if (window.KrakenTV || document.body?.classList?.contains('tv-mode') || /Android TV|SmartTV|HbbTV|GoogleTV|CrKey|Xbox|PlayStation|Nintendo|Web0S|Tizen|Viera|NetCast|Roku|AFT[ABKMR]/i.test(ua)) return 'tv';
     const type = detectKrakenDeviceType();
     const platform = navigator.platform || '';
-    let inferred = type === 'desktop' ? 'PC Kraken' : (type === 'tablet' ? 'Tablet Kraken' : 'Movil Kraken');
+    let inferred = type === 'tv' ? 'Smart TV Kraken' : (type === 'desktop' ? 'PC Kraken' : (type === 'tablet' ? 'Tablet Kraken' : 'Movil Kraken'));
+    if (type === 'tv') {
+        localStorage.setItem('kraken_device_name', inferred);
+        return inferred;
+    }
 
     if (/Win/i.test(platform)) inferred = 'PC Windows';
     else if (/Mac/i.test(platform)) inferred = 'Mac Kraken';

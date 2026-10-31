@@ -124,6 +124,7 @@ async function showAuthScreen() {
     const screen = document.getElementById('kraken-auth-screen');
     console.log('[AUTH] Screen element:', screen);
     screen.style.display = 'flex';
+    toggleQrLoginPanel(false);
 
     try {
         console.log('[AUTH] Fetching /api/auth/users...');
@@ -274,7 +275,11 @@ async function loginUser(email, password) {
         const data = await res.json();
 
         if (data.token) {
+            detenerQrTv();
             window.krakenAuth.setAuth(data.token, data);
+            if (window.KrakenTV && typeof window.KrakenTV.onAuthSuccess === 'function') {
+                try { window.KrakenTV.onAuthSuccess(data.token, data.email || email, data.username || ''); } catch (_) {}
+            }
             document.getElementById('kraken-auth-screen').style.display = 'none';
             if (typeof cargarLib === 'function') cargarLib();
         } else {
@@ -389,5 +394,94 @@ async function submitInvite() {
         const err = document.getElementById('auth-invite-error');
         err.textContent = 'Error validando código';
         err.style.display = 'block';
+    }
+}
+
+// ═══ KRAKEN TV QR LOGIN POLLING ═══
+let _qrPollTimer = null;
+
+function toggleQrLoginPanel(forceShow = null) {
+    const box = document.getElementById('qr-login-box');
+    const lbl = document.getElementById('btn-toggle-qr-login-label');
+    if (!box) return;
+    const isVisible = box.style.display === 'flex';
+    const shouldShow = (forceShow !== null) ? Boolean(forceShow) : !isVisible;
+    if (shouldShow) {
+        box.style.display = 'flex';
+        if (lbl) lbl.textContent = 'Ocultar QR';
+        iniciarQrTv();
+    } else {
+        box.style.display = 'none';
+        if (lbl) lbl.textContent = 'QR Login';
+        detenerQrTv();
+    }
+}
+window.toggleQrLoginPanel = toggleQrLoginPanel;
+
+function detenerQrTv() {
+    if (_qrPollTimer) {
+        clearInterval(_qrPollTimer);
+        _qrPollTimer = null;
+    }
+}
+
+async function iniciarQrTv() {
+    const container = document.getElementById('qrcode-canvas');
+    const codeText = document.getElementById('qr-code-text');
+    if (!container || !codeText) return;
+
+    detenerQrTv();
+    try {
+        const res = await fetch('/api/tv/qr/init', { method: 'POST' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.code || !data.verify_url) return;
+
+        codeText.textContent = data.code;
+        container.innerHTML = '';
+
+        if (typeof QRCode !== 'undefined') {
+            new QRCode(container, {
+                text: data.verify_url,
+                width: 150,
+                height: 150,
+                colorDark: '#050505',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.M
+            });
+        } else {
+            container.innerHTML = `<div class="text-xs text-black font-mono p-2 break-all">${data.verify_url}</div>`;
+        }
+
+        _qrPollTimer = setInterval(async () => {
+            const screen = document.getElementById('kraken-auth-screen');
+            if (!screen || screen.style.display === 'none') {
+                detenerQrTv();
+                return;
+            }
+            try {
+                const pollRes = await fetch(`/api/tv/qr/poll?code=${encodeURIComponent(data.code)}`);
+                if (pollRes.status === 404) {
+                    detenerQrTv();
+                    iniciarQrTv();
+                    return;
+                }
+                const pollData = await pollRes.json();
+                if (pollData.status === 'approved' && pollData.token) {
+                    detenerQrTv();
+                    window.krakenAuth.setAuth(pollData.token, pollData);
+                    if (window.KrakenTV && typeof window.KrakenTV.onAuthSuccess === 'function') {
+                        try { window.KrakenTV.onAuthSuccess(pollData.token, pollData.email || '', pollData.username || ''); } catch (_) {}
+                    }
+                    screen.style.display = 'none';
+                    if (typeof cargarLib === 'function') cargarLib();
+                    if (typeof showToast === 'function') {
+                        showToast(`📺 ¡Pantalla vinculada como ${pollData.username || pollData.email}!`, 'success');
+                    }
+                }
+            } catch (_) {}
+        }, 2000);
+    } catch (e) {
+        console.warn('[QR Auth] No se pudo iniciar QR:', e);
     }
 }
