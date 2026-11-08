@@ -52,11 +52,17 @@ def run_server(open_browser: bool = False):
     check_ffmpeg()
     database.init_db()
 
-    print("🐙  KRAKEN V4 - SERVIDOR MULTIMEDIA (Private Playlists Edition)")
+    print("🐙  KRAKEN V5.0.2 - SERVIDOR MULTIMEDIA (Modular Edition)")
 
     print("📚 Precargando biblioteca...")
     library.generar_biblioteca_viva()
     print("✅ Biblioteca lista")
+
+    try:
+        from services.video_tagger import enrich_extended_tmdb_metadata_async
+        threading.Thread(target=enrich_extended_tmdb_metadata_async, daemon=True).start()
+    except Exception as e:
+        print(f"⚠️ No se pudo iniciar enriquecimiento TMDB en segundo plano: {e}")
 
     print("🧹 Iniciando Radar de Usuarios...")
     radar_thread = threading.Thread(target=cleanup_inactive_users, daemon=True)

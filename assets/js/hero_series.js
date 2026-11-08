@@ -46,11 +46,18 @@
             ]);
             tmdbData = tmdbRes.status === 'fulfilled' ? tmdbRes.value : null;
             resumeData = progressRes.status === 'fulfilled' ? progressRes.value : null;
+            if (tmdbData) syncTmdbDetailsToMemory(tmdbId, tmdbData, source);
         }
 
+        const heroHorizontalBackdrop = source.tmdb_backdrop
+            ? (source.tmdb_backdrop.startsWith('http') ? source.tmdb_backdrop : `https://image.tmdb.org/t/p/w1280${source.tmdb_backdrop}`)
+            : '';
+
         const backdrop = tmdbData?.backdrop
-            ? `<img src="${tmdbData.backdrop}" class="absolute inset-0 w-full h-full object-cover opacity-50 group-hover:opacity-65 group-hover:scale-105 transition duration-1000" onerror="this.style.display='none'">`
-            : `<img src="${heroCover}" class="absolute inset-0 w-full h-full object-cover opacity-50 group-hover:opacity-65 group-hover:scale-105 transition duration-1000" onerror="this.style.display='none'">`;
+            ? `<img src="${tmdbData.backdrop}" class="absolute inset-0 w-full h-full object-cover object-[center_18%] opacity-50 group-hover:opacity-65 group-hover:scale-105 transition duration-1000" onerror="this.style.display='none'">`
+            : (heroHorizontalBackdrop
+                ? `<img src="${heroHorizontalBackdrop}" class="absolute inset-0 w-full h-full object-cover object-[center_18%] opacity-50 group-hover:opacity-65 group-hover:scale-105 transition duration-1000" onerror="this.style.display='none'">`
+                : `<img src="${heroCover}" class="absolute inset-0 w-full h-full object-cover object-[center_18%] opacity-50 group-hover:opacity-65 group-hover:scale-105 transition duration-1000" onerror="this.style.display='none'">`);
 
         const overviewText = tmdbData?.overview || '';
         const genresHtml = (tmdbData?.genres || []).slice(0, 4).map(g =>
@@ -65,11 +72,17 @@
         ).join('<span class="text-zinc-600">·</span>');
 
         const directorsHtml = tmdbData?.directors?.length
-            ? `<div class="text-[10px] text-zinc-500 mt-1">${isMovie ? 'Director' : 'Creador'}: ${tmdbData.directors.map(d => escapeHtml(d)).join(', ')}</div>`
+            ? `<div class="text-[10px] text-zinc-400 mt-1">${isMovie ? 'Director' : 'Creador'}: ${tmdbData.directors.map(d => `<button onclick="event.stopPropagation(); filterCatalogByPerson('Director', this.dataset.personName)" data-person-name="${escapeHtml(d)}" class="text-emerald-400 hover:text-emerald-300 font-bold hover:underline transition">${escapeHtml(d)}</button>`).join(', ')}</div>`
             : '';
         const castHtml = opts.showCastInHero ? buildCastCarousel(tmdbData?.cast || []) : '';
 
         const actionBtn = buildActionButton(heroItem, isMovie, resumeData);
+        const trailerBtn = tmdbData?.trailer_key ? `
+            <button onclick="event.stopPropagation(); openTrailerModal('${escapeStr(tmdbData.trailer_key)}', '${escapeStr(heroTitle)}')"
+                    class="bg-red-600/90 hover:bg-red-500 text-white font-extrabold text-xs md:text-sm py-2.5 md:py-3 px-5 md:px-7 rounded-full shadow-lg hover:scale-105 transition flex items-center justify-center gap-2 border border-red-400/30">
+                <i class="fa-brands fa-youtube text-base"></i> Ver Tráiler
+            </button>
+        ` : '';
         const showInfoButton = opts.showInfoButton !== false;
         const showFullInfo = !!opts.fullInfo;
         const infoButton = showInfoButton && !showFullInfo ? buildInfoButton(heroItem, tmdbData, resumeData, isMovie) : '';
@@ -78,6 +91,7 @@
             ? `<div class="mt-3 text-zinc-200 text-sm md:text-base leading-relaxed">${escapeHtml(tmdbData?.overview || 'Sin descripcion disponible.')}</div>`
             : '';
         const castGridHtml = showFullInfo ? buildFullCastGrid(tmdbData?.cast || []) : '';
+        const similarsGridHtml = showFullInfo ? buildSimilarsHtml(heroItem) : '';
 
         const hasRichContent = overviewText || (tmdbData?.cast && tmdbData.cast.length > 0);
         const heroHeightClass = hasRichContent
@@ -108,6 +122,7 @@
 
                         <div class="flex flex-wrap gap-3 mt-3">
                             ${actionBtn}
+                            ${trailerBtn}
                             ${infoButton}
                             ${!isMovie ? `
                                 <button onclick="event.stopPropagation(); playShuffleSeries(this.dataset.seriesPath);" data-series-path="${escapeHtml(heroItem.path)}" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs md:text-sm py-2.5 md:py-3 px-6 md:px-8 rounded-full shadow-lg hover:scale-105 transition flex items-center justify-center gap-2 border border-emerald-400/30">
@@ -121,6 +136,7 @@
                     </div>
                 </div>
                 ${castGridHtml}
+                ${similarsGridHtml}
                 ${infoBanner}
             </div>`;
     };
@@ -153,11 +169,14 @@
         if (!cast || cast.length === 0) return '';
 
         const items = cast.filter(c => c.photo).slice(0, 8).map(c => `
-            <div class="flex flex-col items-center gap-1 shrink-0 group/actor">
-                <div class="w-10 h-10 md:w-12 md:h-12 rounded-full overflow-hidden border-2 border-white/10 group-hover/actor:border-emerald-500/50 transition shadow-lg">
+            <div class="flex flex-col items-center gap-1 shrink-0 group/actor cursor-pointer"
+                 data-actor-name="${escapeHtml(c.name)}"
+                 onclick="event.stopPropagation(); filterCatalogByPerson('Actor', this.dataset.actorName);"
+                 title="Ver películas de ${escapeHtml(c.name)}">
+                <div class="w-10 h-10 md:w-12 md:h-12 rounded-full overflow-hidden border-2 border-white/10 group-hover/actor:border-emerald-400 transition shadow-lg">
                     <img src="${c.photo}" class="w-full h-full object-cover" loading="lazy" onerror="this.parentElement.style.display='none'">
                 </div>
-                <span class="text-[9px] md:text-[10px] text-zinc-400 text-center leading-tight max-w-[60px] truncate">${escapeHtml(c.name)}</span>
+                <span class="text-[9px] md:text-[10px] text-zinc-400 group-hover/actor:text-emerald-400 text-center leading-tight max-w-[60px] truncate transition">${escapeHtml(c.name)}</span>
             </div>
         `).join('');
 
@@ -167,10 +186,13 @@
 function buildFullCastGrid(cast) {
   if (!cast || cast.length === 0) return '';
   const cards = cast.slice(0, 12).map(c => `
-    <div class="flex items-center gap-2 p-2 rounded-lg bg-white/[0.04] border border-white/5">
+    <div class="flex items-center gap-2 p-2 rounded-lg bg-white/[0.04] hover:bg-white/[0.09] border border-white/5 hover:border-emerald-500/40 cursor-pointer transition"
+         data-actor-name="${escapeHtml(c.name)}"
+         onclick="event.stopPropagation(); filterCatalogByPerson('Actor', this.dataset.actorName);"
+         title="Ver títulos de ${escapeHtml(c.name)}">
       ${c.photo ? `<img src="${c.photo}" class="w-8 h-8 rounded-full object-cover" onerror="this.style.display='none'">` : '<div class="w-8 h-8 rounded-full bg-white/10"></div>'}
       <div class="min-w-0">
-        <div class="text-xs text-white truncate">${escapeHtml(c.name || '')}</div>
+        <div class="text-xs text-white group-hover:text-emerald-300 truncate">${escapeHtml(c.name || '')}</div>
         <div class="text-[10px] text-zinc-400 truncate">${escapeHtml(c.character || '')}</div>
       </div>
     </div>
@@ -322,14 +344,21 @@ function buildFullCastGrid(cast) {
 
         const { heroItem, tmdbData, resumeData, isMovie } = info;
         const title = heroItem?.name || heroItem?.title || tmdbData?.title || 'Sin titulo';
-        const backdrop = tmdbData?.backdrop
-            ? `<img src="${tmdbData.backdrop}" class="absolute inset-0 w-full h-full object-cover opacity-35" onerror="this.style.display='none'">`
+        const source = heroItem?.sample || heroItem || {};
+        const modalHeroHorizontal = source.tmdb_backdrop
+            ? (source.tmdb_backdrop.startsWith('http') ? source.tmdb_backdrop : `https://image.tmdb.org/t/p/w1280${source.tmdb_backdrop}`)
+            : '';
+        const backdrop = (tmdbData?.backdrop || modalHeroHorizontal)
+            ? `<img src="${tmdbData?.backdrop || modalHeroHorizontal}" class="absolute inset-0 w-full h-full object-cover object-[center_18%] opacity-35" onerror="this.style.display='none'">`
             : '';
         const genres = (tmdbData?.genres || []).map(g =>
             `<span class="px-2 py-0.5 rounded-full text-[10px] bg-white/10 border border-white/10">${escapeHtml(g)}</span>`
         ).join('');
         const cast = (tmdbData?.cast || []).slice(0, 12).map(c => `
-            <div class="flex items-center gap-2 p-2 rounded-lg bg-white/[0.04] border border-white/5">
+            <div class="flex items-center gap-2 p-2 rounded-lg bg-white/[0.04] hover:bg-white/[0.09] border border-white/5 hover:border-emerald-500/40 cursor-pointer transition"
+                 data-actor-name="${escapeHtml(c.name)}"
+                 onclick="event.stopPropagation(); filterCatalogByPerson('Actor', this.dataset.actorName);"
+                 title="Ver películas de ${escapeHtml(c.name)}">
                 ${c.photo ? `<img src="${c.photo}" class="w-8 h-8 rounded-full object-cover" onerror="this.style.display='none'">` : '<div class="w-8 h-8 rounded-full bg-white/10"></div>'}
                 <div class="min-w-0">
                     <div class="text-xs text-white truncate">${escapeHtml(c.name || '')}</div>
@@ -339,6 +368,12 @@ function buildFullCastGrid(cast) {
         `).join('');
 
         const actionBtn = buildActionButton(heroItem, isMovie, resumeData);
+        const modalTrailerBtn = tmdbData?.trailer_key ? `
+            <button onclick="event.stopPropagation(); openTrailerModal('${escapeStr(tmdbData.trailer_key)}', '${escapeStr(title)}')"
+                    class="px-5 py-2.5 rounded-full bg-red-600/90 hover:bg-red-500 text-white font-extrabold text-xs md:text-sm flex items-center gap-2 shadow-xl hover:scale-105 transition border border-red-400/30">
+                <i class="fa-brands fa-youtube text-base"></i> Ver Tráiler
+            </button>
+        ` : '';
         const contentHtml = `
             <div class="mb-3 flex items-center justify-between">
                 <button onclick="closeInlineVideoInfo()" class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs md:text-sm font-bold border border-white/10 transition">
@@ -359,14 +394,16 @@ function buildFullCastGrid(cast) {
                     </div>
                     <div class="flex flex-wrap gap-1.5 mt-3">${genres}</div>
                     <p class="text-sm md:text-base text-zinc-200 mt-4 leading-relaxed">${escapeHtml(tmdbData?.overview || 'Sin descripcion disponible.')}</p>
-                    ${(tmdbData?.directors || []).length ? `<div class="mt-3 text-xs text-zinc-400">${isMovie ? 'Director' : 'Creador'}: ${tmdbData.directors.map(d => escapeHtml(d)).join(', ')}</div>` : ''}
-                    <div class="flex flex-wrap gap-2 mt-5">${actionBtn}</div>
+                    ${(tmdbData?.directors || []).length ? `<div class="mt-3 text-xs text-zinc-400">${isMovie ? 'Director' : 'Creador'}: ${tmdbData.directors.map(d => `<button onclick="event.stopPropagation(); filterCatalogByPerson('Director', this.dataset.personName)" data-person-name="${escapeHtml(d)}" class="text-emerald-400 hover:text-emerald-300 font-bold hover:underline transition">${escapeHtml(d)}</button>`).join(', ')}</div>` : ''}
+${(tmdbData?.studios || []).length ? `<div class="mt-1 text-xs text-zinc-400">Estudio / Cadena: ${tmdbData.studios.map(s => `<button onclick="event.stopPropagation(); filterCatalogByPerson('Estudio', this.dataset.personName)" data-person-name="${escapeHtml(s)}" class="text-cyan-400 hover:text-cyan-300 font-bold hover:underline transition">${escapeHtml(s)}</button>`).join(', ')}</div>` : ''}
+                    <div class="flex flex-wrap gap-2 mt-5">${actionBtn}${modalTrailerBtn}</div>
                 </div>
             </div>
             ${cast ? `<div class="mt-4">
                 <div class="text-xs uppercase tracking-[0.16em] text-zinc-400 font-bold mb-2">Reparto</div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">${cast}</div>
             </div>` : ''}
+            ${buildSimilarsHtml(heroItem)}
         `;
 
         const inlineHost = document.getElementById(_inlineInfoHostId);
@@ -417,6 +454,7 @@ function buildFullCastGrid(cast) {
         ]);
 
         if (!tmdbData) return false;
+        syncTmdbDetailsToMemory(tmdbId, tmdbData, source);
 
         const infoKey = `hero_auto_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         _heroInfoStore[infoKey] = { heroItem, tmdbData, resumeData, isMovie };
@@ -512,4 +550,333 @@ function buildFullCastGrid(cast) {
         }
     };
 
+
+    // ============================================================
+    // PERSON FILTER & SIMILAR TITLES & SAGA COLLECTIONS (v5.0.2)
+    // ============================================================
+
+    function syncTmdbDetailsToMemory(tmdbId, tmdbData, refSource) {
+        if (!tmdbData) return;
+        const dirStr = Array.isArray(tmdbData.directors) ? tmdbData.directors.join(', ') : '';
+        const castStr = Array.isArray(tmdbData.cast) ? tmdbData.cast.map(c => c.name).filter(Boolean).join(', ') : '';
+        const studioStr = Array.isArray(tmdbData.studios) ? tmdbData.studios.join(', ') : '';
+        const kwStr = Array.isArray(tmdbData.keywords) ? tmdbData.keywords.join(', ') : '';
+        const genreStr = Array.isArray(tmdbData.genres) ? tmdbData.genres.join(', ') : '';
+        const yearStr = tmdbData.year ? String(tmdbData.year) : '';
+        const backdropStr = tmdbData.backdrop || '';
+        const collName = tmdbData.collection?.name || '';
+        const collId = tmdbData.collection?.id || null;
+        const voteAvg = Number(tmdbData.vote_average || 0);
+
+        if (Array.isArray(tmdbData.cast)) {
+            window._personPhotoCache = window._personPhotoCache || {};
+            tmdbData.cast.forEach(c => {
+                if (c && c.name && c.photo) window._personPhotoCache[c.name] = c.photo;
+            });
+        }
+
+        const applyToObj = (obj) => {
+            if (!obj) return;
+            if (dirStr && !obj.tmdb_director) obj.tmdb_director = dirStr;
+            if (castStr && !obj.tmdb_cast) obj.tmdb_cast = castStr;
+            if (studioStr && !obj.tmdb_studio) obj.tmdb_studio = studioStr;
+            if (kwStr && !obj.tmdb_keywords) obj.tmdb_keywords = kwStr;
+            if (genreStr && !obj.genre) obj.genre = genreStr;
+            if (genreStr && !obj.tmdb_genres) obj.tmdb_genres = genreStr;
+            if (yearStr && !obj.tmdb_year) obj.tmdb_year = yearStr;
+            if (backdropStr && !obj.tmdb_backdrop) obj.tmdb_backdrop = backdropStr;
+            if (collName && !obj.tmdb_collection_name) obj.tmdb_collection_name = collName;
+            if (collId && !obj.tmdb_collection_id) obj.tmdb_collection_id = collId;
+            if (voteAvg > 0 && !obj.tmdb_vote_average) obj.tmdb_vote_average = voteAvg;
+            if (typeof normalizeText === 'function' && obj.searchKey) {
+                const extra = normalizeText(`${dirStr} ${castStr} ${studioStr} ${collName} ${kwStr}`);
+                if (extra && !obj.searchKey.includes(extra)) {
+                    obj.searchKey = `${obj.searchKey} ${extra}`.trim();
+                }
+            }
+        };
+
+        applyToObj(refSource);
+        if (typeof libData !== 'undefined' && Array.isArray(libData.files)) {
+            libData.files.forEach(f => {
+                if (f.type === 'video' && Number(f.tmdb_id) === Number(tmdbId)) {
+                    applyToObj(f);
+                }
+            });
+        }
+    }
+
+    window.filterCatalogByPerson = function (role, name) {
+        if (!name) return;
+        const cleanName = String(name).trim();
+        window.closeHeroInfoModal?.();
+        window.closeInlineVideoInfo?.();
+        window.closeCollectionModal?.();
+
+        // Salir de cualquier vista de detalle (carpeta de película o serie) para volver al catálogo raíz
+        if (typeof currentPath !== 'undefined') currentPath = '';
+        if (typeof window.currentPath !== 'undefined') window.currentPath = '';
+        if (typeof currentFolderView !== 'undefined') currentFolderView = null;
+        if (typeof window.currentFolderView !== 'undefined') window.currentFolderView = null;
+        if (typeof currentView !== 'undefined' && currentView === 'folders') currentView = 'library';
+        if (window.netflixActiveCategory === '📚 Colecciones') {
+            window.netflixActiveCategory = 'Todo';
+        }
+
+        // Limpiar búsqueda de texto para que no interfiera con el filtro de persona
+        const mobileInput = document.getElementById('lib-search-mobile');
+        const desktopInput = document.getElementById('lib-search-desktop');
+        if (mobileInput) mobileInput.value = '';
+        if (desktopInput) desktopInput.value = '';
+
+        window.netflixActivePersonFilter = { role: role || 'Persona', name: cleanName };
+        window.netflixGridRenderLimit = 84;
+        if (typeof showToast === 'function') {
+            showToast(`🎬 Filtrando por ${role || 'Persona'}: ${cleanName}`, 'info');
+        }
+        if (typeof renderLib === 'function') {
+            renderLib();
+            setTimeout(() => {
+                const mainScroll = document.getElementById('main-scroll');
+                if (mainScroll) mainScroll.scrollTo({ top: 0, behavior: 'smooth' });
+                const grid = document.getElementById('netflix-catalog-grid') || document.getElementById('lib-container');
+                if (grid) grid.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 280);
+        }
+    };
+
+    window.clearPersonFilter = function () {
+        window.netflixActivePersonFilter = null;
+        if (typeof renderLib === 'function') renderLib();
+    };
+
+    function buildSimilarsHtml(heroItem) {
+        if (!heroItem || typeof window.getSimilarLibraryItems !== 'function') return '';
+        const similars = window.getSimilarLibraryItems(heroItem, 10);
+        if (!similars || similars.length === 0) return '';
+
+        const cards = similars.map(sim => {
+            const simCover = sim.tmdb_poster
+                ? (sim.tmdb_poster.startsWith('http') || sim.tmdb_poster.startsWith('/caratula/') ? sim.tmdb_poster : `/caratula/${encodeURIComponent(sim.tmdb_poster)}`)
+                : `/caratula/${(sim.path || '').split('/').map(p => encodeURIComponent(p)).join('/')}`;
+            const simTitle = sim._displayTitle || sim.tmdb_title || sim.clean_title || sim.title || 'Video';
+            const simYear = sim.tmdb_year ? `<span>${escapeHtml(sim.tmdb_year)}</span>` : '';
+            const simVote = sim.tmdb_vote_average ? `<span class="text-amber-400 font-bold"><i class="fa-solid fa-star text-[9px] mr-0.5"></i>${sim.tmdb_vote_average}</span>` : '';
+            const simReason = sim._simReason ? `<div class="text-[9px] text-emerald-400 truncate mt-0.5">${escapeHtml(sim._simReason)}</div>` : '';
+            const normSimPath = (sim.path || '').replace(/\\/g, '/');
+            const simParts = normSimPath.split('/').filter(Boolean);
+            const hasMovieFolder = (!sim._isSeries && sim.folder_type === 'movie' && simParts.length > 3);
+            const detailFolderPath = sim._isSeries
+                ? (sim._seriesPath || sim.path)
+                : (hasMovieFolder ? (simParts.slice(0, 3).join('/') + '/') : '');
+            const clickAction = detailFolderPath
+                ? `openFolderPath(this.dataset.detailPath)`
+                : `playNow(this.dataset.path)`;
+
+            return `
+            <div class="flex-none w-[130px] md:w-[155px] bg-white/[0.03] border border-white/5 rounded-xl p-2 hover:bg-white/[0.08] hover:border-emerald-500/40 transition cursor-pointer group/sim"
+                 data-path="${escapeHtml(sim.path)}"
+                 data-detail-path="${escapeHtml(detailFolderPath)}"
+                 onclick="event.stopPropagation(); closeHeroInfoModal(); closeInlineVideoInfo(); ${clickAction};">
+                <div class="relative w-full aspect-[2/3] rounded-lg overflow-hidden mb-1.5 bg-black/50">
+                    <img src="${simCover}" loading="lazy" class="w-full h-full object-cover group-hover/sim:scale-105 transition duration-300" onerror="this.style.display='none'">
+                    <div class="absolute inset-0 bg-black/40 opacity-0 group-hover/sim:opacity-100 transition flex items-center justify-center">
+                        <button onclick="event.stopPropagation(); closeHeroInfoModal(); closeInlineVideoInfo(); playNow('${escapeStr(sim.path)}');"
+                            title="Reproducir ahora"
+                            class="w-9 h-9 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-lg hover:scale-110 transition">
+                            <i class="fa-solid fa-play text-xs"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="text-xs font-bold text-white truncate">${escapeHtml(simTitle)}</div>
+                <div class="flex items-center justify-between text-[10px] text-zinc-400 mt-0.5">
+                    ${simYear}
+                    ${simVote}
+                </div>
+                ${simReason}
+            </div>`;
+        }).join('');
+
+        return `
+        <div class="mt-6 pt-4 border-t border-white/10">
+            <div class="flex items-center gap-2 mb-3">
+                <i class="fa-solid fa-wand-magic-sparkles text-emerald-400 text-sm"></i>
+                <h4 class="text-xs md:text-sm uppercase tracking-[0.16em] text-white font-bold">Más títulos similares en tu biblioteca</h4>
+            </div>
+            <div class="flex gap-3 overflow-x-auto no-scrollbar pb-2">
+                ${cards}
+            </div>
+        </div>`;
+    }
+
+    // Modal para Ver y Maratonear Colecciones / Sagas
+    window.openCollectionModal = function (collectionKey) {
+        const store = window._collectionsStore || {};
+        const coll = store[collectionKey];
+        if (!coll) {
+            console.warn('[COLLECTION] No encontrada:', collectionKey);
+            return;
+        }
+
+        const movies = coll.items || [];
+        const collTitle = coll.name || 'Colección';
+        const sample = coll.sample || movies[0] || {};
+        const backdrop = sample.tmdb_backdrop
+            ? (sample.tmdb_backdrop.startsWith('http') ? sample.tmdb_backdrop : `https://image.tmdb.org/t/p/w1280${sample.tmdb_backdrop}`)
+            : (coll.poster ? (coll.poster.startsWith('http') ? coll.poster : `/caratula/${encodeURIComponent(coll.poster)}`) : '');
+
+        const movieCards = movies.map((m, idx) => {
+            const mCover = m.tmdb_poster ? (m.tmdb_poster.startsWith('http') || m.tmdb_poster.startsWith('/caratula/') ? m.tmdb_poster : `/caratula/${encodeURIComponent(m.tmdb_poster)}`) : `/caratula/${(m.path || '').split('/').map(p => encodeURIComponent(p)).join('/')}`;
+            const mTitle = m.tmdb_title || m.clean_title || m.title || `Película ${idx + 1}`;
+            const mYear = m.tmdb_year ? `<span>${escapeHtml(m.tmdb_year)}</span>` : '';
+            const mDur = m.duration || (m.duration_sec ? `${Math.round(m.duration_sec / 60)} min` : '');
+            const mScore = m.tmdb_vote_average ? `<span class="text-amber-400 font-bold"><i class="fa-solid fa-star text-[9px] mr-0.5"></i>${m.tmdb_vote_average}</span>` : '';
+            const mOverview = m.tmdb_overview ? `<p class="text-xs text-zinc-400 line-clamp-2 mt-1">${escapeHtml(m.tmdb_overview)}</p>` : '';
+            const prog = Number(m.progress_seconds || 0);
+            const dur = Number(m.duration_seconds || m.duration_sec || 0);
+            const pct = dur > 0 ? Math.min(100, Math.round((prog / dur) * 100)) : 0;
+
+            return `
+            <div class="flex items-center gap-4 p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 hover:border-emerald-500/30 transition cursor-pointer group"
+                 data-path="${escapeHtml(m.path)}"
+                 onclick="event.stopPropagation(); closeCollectionModal(); playNow(this.dataset.path);">
+                <div class="text-lg md:text-xl font-black text-zinc-600 group-hover:text-amber-400 w-6 text-center shrink-0 transition">#${idx + 1}</div>
+                <div class="relative w-16 md:w-20 aspect-[2/3] rounded-lg overflow-hidden shrink-0 bg-black/60 shadow-md">
+                    <img src="${mCover}" class="w-full h-full object-cover group-hover:scale-105 transition" onerror="this.style.display='none'">
+                    ${pct > 0 ? `<div class="absolute bottom-0 inset-x-0 h-1 bg-zinc-800"><div class="h-full bg-emerald-500" style="width:${pct}%"></div></div>` : ''}
+                </div>
+                <div class="flex-1 min-w-0">
+                    <h4 class="text-sm md:text-base font-bold text-white group-hover:text-emerald-300 transition truncate">${escapeHtml(mTitle)}</h4>
+                    <div class="flex items-center gap-2 text-xs text-zinc-400 mt-0.5">
+                        ${mYear}
+                        ${mDur ? `<span>·</span><span>${mDur}</span>` : ''}
+                        ${mScore ? `<span>·</span>${mScore}` : ''}
+                    </div>
+                    ${mOverview}
+                </div>
+                <button class="w-10 h-10 rounded-full bg-white/10 group-hover:bg-emerald-500 group-hover:text-black text-white flex items-center justify-center shrink-0 transition shadow-lg">
+                    <i class="fa-solid fa-play ml-0.5 text-sm"></i>
+                </button>
+            </div>`;
+        }).join('');
+
+        const modalHtml = `
+        <div id="collection-modal" class="fixed inset-0 z-[1300] p-3 md:p-8 flex items-center justify-center">
+            <div class="absolute inset-0 bg-black/85 backdrop-blur-md" onclick="closeCollectionModal()"></div>
+            <div class="relative z-10 w-full max-w-4xl max-h-[92vh] overflow-y-auto no-scrollbar bg-[#111215] border border-white/10 rounded-3xl shadow-2xl flex flex-col">
+                <div class="relative w-full h-[220px] md:h-[300px] shrink-0 overflow-hidden rounded-t-3xl">
+                    ${backdrop ? `<img src="${backdrop}" class="absolute inset-0 w-full h-full object-cover opacity-40">` : ''}
+                    <div class="absolute inset-0 bg-gradient-to-t from-[#111215] via-[#111215]/60 to-transparent"></div>
+                    <div class="absolute top-4 right-4 z-20">
+                        <button onclick="closeCollectionModal()" class="w-10 h-10 rounded-full bg-black/50 hover:bg-white/20 border border-white/15 text-white flex items-center justify-center transition">
+                            <i class="fa-solid fa-xmark text-lg"></i>
+                        </button>
+                    </div>
+                    <div class="absolute bottom-6 left-6 md:left-8 right-6 z-10">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="px-2.5 py-0.5 rounded-full bg-amber-500/90 text-black font-black text-[10px] uppercase tracking-wider">📚 Franquicia Oficial</span>
+                            <span class="text-xs text-zinc-300 font-bold">${movies.length} Películas ${coll.yearRange ? `(${coll.yearRange})` : ''}</span>
+                        </div>
+                        <h2 class="text-2xl md:text-4xl font-black text-white drop-shadow-lg mb-4">${escapeHtml(collTitle)}</h2>
+                        <div class="flex flex-wrap gap-3">
+                            <button onclick="event.stopPropagation(); playCollectionMarathon('${escapeStr(collectionKey)}')"
+                                    class="px-6 py-2.5 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs md:text-sm flex items-center gap-2 shadow-xl hover:scale-105 transition">
+                                <i class="fa-solid fa-play"></i> Reproducir Maratón en Orden
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="p-6 md:p-8 flex flex-col gap-3">
+                    <h3 class="text-xs uppercase tracking-[0.18em] text-zinc-400 font-bold mb-1">Películas de la Saga en Orden Cronológico</h3>
+                    ${movieCards}
+                </div>
+            </div>
+        </div>`;
+
+        let existing = document.getElementById('collection-modal');
+        if (existing) existing.remove();
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = modalHtml;
+        document.body.appendChild(wrapper.firstElementChild);
+        document.body.classList.add('overflow-hidden');
+    };
+
+    window.closeCollectionModal = function () {
+        const modal = document.getElementById('collection-modal');
+        if (modal) modal.remove();
+        document.body.classList.remove('overflow-hidden');
+    };
+
+    window.playCollectionMarathon = function (collectionKey) {
+        const store = window._collectionsStore || {};
+        const coll = store[collectionKey];
+        if (!coll || !coll.items || coll.items.length === 0) return;
+        closeCollectionModal();
+        playerQueue = [...coll.items];
+        currentTrackIndex = 0;
+        if (typeof showToast === 'function') {
+            showToast(`🎬 Iniciando Maratón: ${coll.name} (${playerQueue.length} películas)`, 'success');
+        }
+        if (typeof playVideoMode === 'function') {
+            playVideoMode(playerQueue[0]);
+        }
+    };
+
+
+    // =========================================================================
+    // MODAL DE TRÁILER OFICIAL YOUTUBE (TMDb)
+    // =========================================================================
+    window.openTrailerModal = function (trailerKey, title) {
+        if (!trailerKey) return;
+        let modal = document.getElementById('krk-trailer-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'krk-trailer-modal';
+            modal.className = 'fixed inset-0 z-[1500] p-4 md:p-8 flex items-center justify-center';
+            document.body.appendChild(modal);
+        }
+        modal.innerHTML = `
+            <div class="absolute inset-0 bg-black/90 backdrop-blur-md" onclick="closeTrailerModal()"></div>
+            <div class="relative z-10 w-full max-w-4xl bg-[#111215] border border-white/10 rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden flex flex-col">
+                <div class="flex items-center justify-between px-5 py-3 border-b border-white/10 bg-[#16181d]">
+                    <div class="flex items-center gap-2.5 text-white font-bold text-sm md:text-base truncate">
+                        <i class="fa-brands fa-youtube text-red-500 text-xl"></i>
+                        <span class="truncate">Tráiler Oficial: ${escapeHtml(title || 'Video')}</span>
+                    </div>
+                    <button onclick="closeTrailerModal()" class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition">
+                        <i class="fa-solid fa-xmark text-sm"></i>
+                    </button>
+                </div>
+                <div class="relative w-full aspect-video bg-black">
+                    <iframe id="krk-trailer-iframe"
+                            class="w-full h-full"
+                            src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(trailerKey)}?autoplay=1&rel=0&modestbranding=1"
+                            title="YouTube video player"
+                            frameborder="0"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                            allowfullscreen></iframe>
+                </div>
+            </div>
+        `;
+        modal.classList.remove('hidden');
+        document.body.classList.add('overflow-hidden');
+    };
+
+    window.closeTrailerModal = function () {
+        const modal = document.getElementById('krk-trailer-modal');
+        if (!modal) return;
+        const iframe = document.getElementById('krk-trailer-iframe');
+        if (iframe) iframe.src = '';
+        modal.classList.add('hidden');
+        document.body.classList.remove('overflow-hidden');
+    };
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+            const trModal = document.getElementById('krk-trailer-modal');
+            if (trModal && !trModal.classList.contains('hidden')) {
+                closeTrailerModal();
+            }
+        }
+    });
 })();

@@ -654,6 +654,22 @@ function playContext() {
             body: JSON.stringify({ path: file.path })
         }).catch(() => {});
 
+        // Si esta canción proviene de la fila del Modo Fiesta, marcarla como en reproducción (consumida de la espera)
+        if (file._partyItemId) {
+            const consumedId = file._partyItemId;
+            delete file._partyItemId;
+            fetch('/api/party/mark-consumed', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ item_id: consumedId })
+            }).then(() => {
+                const pModal = document.getElementById('krk-party-host-modal');
+                if (pModal && !pModal.classList.contains('hidden') && typeof renderPartyModalContent === 'function') {
+                    fetch('/api/party/status').then(r => r.json()).then(renderPartyModalContent).catch(() => {});
+                }
+            }).catch(() => {});
+        }
+
         const bar = document.getElementById('player-bar');
         const videoView = document.getElementById('view-player');
 
@@ -913,7 +929,8 @@ function toggleShuffle() {
                 <i class="fa-solid fa-music text-white/50 text-xs"></i>
             </div>
         </div>`;
-                subText = `<div class="text-[9px] text-emerald-400 truncate">${track.artist}</div>`;
+                const partyTag = track._isPartyTrack ? ` <span class="text-amber-400 font-bold">· 🎉 ${track._partyGuestName || 'Invitado'} (🔥${track._partyVotes || 1})</span>` : '';
+                subText = `<div class="text-[9px] text-emerald-400 truncate">${track.artist}${partyTag}</div>`;
             }
 
             return `
@@ -1521,7 +1538,19 @@ function toggleShuffle() {
      * `removeFromQueue(index)`
      * Elimina una pista de la cola de reproducción por su índice.
      */
-    function removeFromQueue(index) { playerQueue.splice(index, 1); if (currentTrackIndex >= index && currentTrackIndex > 0) currentTrackIndex--; updateQueueUI(); }
+    function removeFromQueue(index) {
+        const removed = playerQueue[index];
+        if (removed && removed._partyItemId) {
+            fetch('/api/party/mark-consumed', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ item_id: removed._partyItemId })
+            }).catch(() => {});
+        }
+        playerQueue.splice(index, 1);
+        if (currentTrackIndex >= index && currentTrackIndex > 0) currentTrackIndex--;
+        updateQueueUI();
+    }
     /**
      * `clearQueue()`
      * Vacía por completo la cola de reproducción.

@@ -1847,3 +1847,26 @@ Tercera y Ãºltima etapa de la unificaciÃ³n del render de video. AdemÃ¡s, s
   - Service Worker `sw.js` v5.0.1 con soporte para borrado automático de cachés obsoletas (`kraken-app-*` y `kraken-offline-*`).
 - **Instalador de Windows**:
   - Generado instalador `dist/Kraken_Media_Server_Installer_v5.0.1.exe` mediante Inno Setup 6, empaquetando el ejecutable `KrakenOffline.exe` actualizado con PyInstaller.
+
+#### Versión 5.0.2 (v5.0.2.1 – v5.0.2.7) — Catálogo Inteligente TMDB, Modo Fiesta Colaborativo, Ruleta, Tráilers y Estadísticas Globales (08-Nov-2026)
+- **Enriquecimiento Extendido TMDB (`services/database.py`, `routes/api.py`)**:
+  - Nuevas columnas en tabla `media`: `tmdb_backdrop`, `tmdb_director`, `tmdb_cast`, `tmdb_studio`, `tmdb_collection_id`, `tmdb_collection_name`, `tmdb_collection_poster`, `tmdb_vote_average` y `trailer_key`.
+  - Extracción automática de tráiler oficial de YouTube (`append_to_response=videos`, prioridad `es-MX` -> `en-US` y `Trailer` -> `Teaser`) durante `auto_tag_library_videos()` y bajo demanda en `GET /api/video/trailer/<id>`.
+  - Calificación `★ TMDB` visible en todas las tarjetas de películas y series; botón `Auto-Tag TMDB` reubicado exclusivamente al panel de Historial/Mantenimiento.
+- **Navegación Avanzada de Video, Hero de Director/Actor, Similares y Sagas (`assets/js/video-catalog.js`, `assets/js/hero_series.js`)**:
+  - Popover unificado `⚙️ Filtros` con filtros por Década, Duración, Calidad/Estado y Agrupación de Sagas (`📚 Agrupar Sagas`), más selector de ordenamiento.
+  - Al filtrar por Director, Actor o Estudio se ocultan los carruseles generales de Explora y se despliega un **Hero Banner de Director/Actor** con su filmografía local y una fila de **Recomendadas similares**.
+  - En el modal de *Más Información* se agregó la fila horizontal **"Más títulos similares"** calculada por afinidad de géneros, director, saga y década.
+  - Corrección de la agrupación de sagas (`tmdb_coll_${id}`) para agrupar únicamente franquicias oficiales de TMDB y secuelas numéricas verificadas, evitando falsos positivos por primera palabra.
+  - **Preview Hover Global (`#krk-global-hover-preview`)**: portal flotante en `document.body` con posicionamiento dinámico que evita recortes por `overflow-x-auto` en los carruseles y se desactiva automáticamente en pantallas móviles/táctiles (`< 768px`).
+  - Priorización de `tmdb_backdrop` horizontal 16:9 y encuadre superior `object-[center_18%]` en Hero Banners y modales de detalle.
+- **🎬 Tráiler Oficial Integrado y 🎲 Ruleta Interactiva ("¿Qué vemos hoy?")**:
+  - Modal reproductor 16:9 (`openTrailerModal`) invocable desde el Hero Banner, el modal de detalle de película/serie y la Ruleta, con fallback directo a búsqueda en YouTube si TMDB no registra video.
+  - Modal interactivo `openVideoRouletteModal()` con filtros por Tipo (Todo/Películas/Series), Género y Estado (Solo no vistas), animación tipo *slot-machine* y acciones directas para reproducir o ver el tráiler.
+- **❤️ Mis Favoritos (Música y Video) y 📊 Estadísticas en 3 Pestañas**:
+  - Entrada fija `❤️ Mis Favoritos` en la barra lateral de Música (`abrirFavoritosAudio()`) sincronizada con *Mixes Para Ti*, y categoría/filtro `❤️ Favoritos` en Video con botón de corazón en tarjetas y modales.
+  - Rediseño del modal de Estadísticas (`/api/stats` y `downloader-tools.js`) en 3 pestañas: **🎵 Música**, **🎬 Video** y **🌐 Resumen Global** (con cálculo de GB en disco por categoría y actividad reciente). Se retiró el botón redundante de Estadísticas del menú lateral.
+- **🎉 Modo Fiesta Colaborativo (`/fiesta`)**:
+  - Nuevo servicio `services/party_mode.py` (`PartyModeManager` con `threading.RLock()`), endpoints `/api/party/*` y vista web móvil para invitados `templates/party_guest.html`.
+  - Botón de encendido rápido en la barra superior de Música tanto en escritorio (`#btn-party-desktop`) como en móvil (`#btn-party-mobile`) con indicador `EN VIVO` pulsante, Código QR y enlace automático vía `public_url` (`https://kraken.ederzu.com/fiesta`) o IP LAN.
+  - Sincronización en tiempo real (`syncPartyQueueToPlayer` en `downloader-tools.js` y `/api/party/mark-consumed` en `audio-player.js`) que inyecta las canciones pedidas por los invitados directamente en `playerQueue` del anfitrión, ordenadas dinámicamente por votos `🔥` e iniciando la reproducción automáticamente si el reproductor estaba detenido.

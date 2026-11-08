@@ -353,7 +353,9 @@ function filterNetflixRows(category) {
                             const videoCategory = f.type === 'video' ? (pathParts[1] || '') : '';
                             const videoShow = f.type === 'video' ? (pathParts[2] || '') : '';
                             const videoSeason = f.type === 'video' ? (pathParts[3] || '') : '';
-                            const videoTokens = f.type === 'video' ? `${videoCategory} ${videoShow} ${videoSeason} ${normalizedPath}` : '';
+                            const videoTokens = f.type === 'video'
+                                ? `${videoCategory} ${videoShow} ${videoSeason} ${normalizedPath} ${f.tmdb_title || ''} ${f.tmdb_director || ''} ${f.tmdb_cast || ''} ${f.tmdb_studio || ''} ${f.tmdb_collection_name || ''} ${f.tmdb_keywords || ''} ${f.tmdb_year || ''} ${f.video_resolution || ''}`
+                                : '';
                             f._searchTitle = normalizeText(title);
                             f._searchArtist = normalizeText(artist);
                             f._searchAlbum = normalizeText(album);
@@ -421,6 +423,25 @@ function filterNetflixRows(category) {
                 const pList = document.getElementById('list-playlists-container');
                 if (pList) {
                     pList.innerHTML = '';
+                    const favAudioCount = (libData && Array.isArray(libData.files))
+                        ? libData.files.filter(f => f.type === 'audio' && Number(f.rating) === 1).length
+                        : 0;
+                    const isFavActive = currentLibrary === 'favorites:audio';
+                    const favActiveClasses = 'bg-emerald-500/15 border-emerald-500/50 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.2)] font-bold';
+                    const favInactiveClasses = 'bg-white/[0.03] border-white/5 text-zinc-300 hover:bg-white/[0.08] hover:text-white hover:border-white/10';
+
+                    pList.innerHTML += `
+                        <div onclick="abrirFavoritosAudio()" class="group flex items-center justify-between px-3 py-2.5 mb-2 rounded-xl cursor-pointer transition-all duration-200 border ${isFavActive ? favActiveClasses : favInactiveClasses}">
+                            <div class="flex-1 flex items-center gap-3 min-w-0">
+                                <div class="w-5 h-5 rounded-full flex items-center justify-center ${isFavActive ? 'bg-emerald-500 text-black' : 'bg-emerald-500/20 text-emerald-400'} transition">
+                                    <i class="fa-solid fa-heart text-[10px]"></i>
+                                </div>
+                                <span class="truncate text-xs tracking-wide">Mis Favoritos</span>
+                            </div>
+                            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-black/40 text-emerald-400 font-bold">${favAudioCount}</span>
+                        </div>
+                    `;
+
                     const playlists = Object.keys(libData.playlists).sort();
 
                     playlists.forEach(p => {
@@ -473,7 +494,28 @@ function filterNetflixRows(category) {
                 }
             }
 
-
+            window.abrirFavoritosAudio = function () {
+                document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
+                const viewLib = document.getElementById('view-library');
+                if (viewLib) viewLib.classList.remove('hidden');
+                const sf = document.getElementById('sidebar-filters');
+                if (sf) sf.classList.remove('hidden');
+                currentLibrary = 'favorites:audio';
+                currentPath = '';
+                currentFolderView = '';
+                if (searchScope !== 'tracks' && searchScope !== 'all') {
+                    searchScope = 'tracks';
+                }
+                const titleDesktop = document.getElementById('lib-title-desktop');
+                const titleMobile = document.getElementById('lib-title-mobile');
+                if (titleDesktop) titleDesktop.innerText = '❤️ Mis Favoritos';
+                if (titleMobile) titleMobile.innerText = '❤️ Mis Favoritos';
+                document.querySelectorAll('.sidebar-link').forEach(el => el.classList.remove('active'));
+                renderSidebarLists();
+                renderLib();
+                if (typeof closeSidebar === 'function') closeSidebar();
+                showToast('❤️ Mostrando tus canciones favoritas', 'info');
+            };
 
             /**
              * `toggleArtist(el, artistName)`
@@ -582,7 +624,7 @@ function filterNetflixRows(category) {
                     .normalize('NFD')
                     .replace(/[\u0300-\u036f]/g, '')
                     .toLowerCase()
-                    .replace(/[^a-z0-9\s]/g, ' ')
+                    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
                     .replace(/\s+/g, ' ')
                     .trim();
             }
@@ -614,8 +656,10 @@ function filterNetflixRows(category) {
 
                 let source = libData.files;
 
-                // 1. FILTRO DE TIPO (Audio/Video)
-                if (filters.playlist === 'all' && !currentLibrary.startsWith('playlist:')) {
+                // 1. FILTRO DE TIPO (Audio/Video/Favoritos)
+                if (currentLibrary === 'favorites:audio') {
+                    source = source.filter(f => f.type === 'audio' && Number(f.rating) === 1);
+                } else if (filters.playlist === 'all' && !currentLibrary.startsWith('playlist:')) {
                     source = source.filter(f => f.type === currentLibrary);
                 }
 
@@ -679,7 +723,8 @@ function filterNetflixRows(category) {
                     const videoCategory = f.type === 'video' ? (pathParts[1] || '') : '';
                     const videoShow = f.type === 'video' ? (pathParts[2] || '') : '';
                     const videoSeason = f.type === 'video' ? (pathParts[3] || '') : '';
-                    const searchKey = f.searchKey || normalizeText(`${f.title || ''} ${f.artist || ''} ${f.album || ''} ${f.genre || ''} ${f.folder || ''} ${f.full_folder || ''} ${rawPath} ${videoCategory} ${videoShow} ${videoSeason}`);
+                    const videoExtra = f.type === 'video' ? `${f.tmdb_title || ''} ${f.tmdb_director || ''} ${f.tmdb_cast || ''} ${f.tmdb_studio || ''} ${f.tmdb_collection_name || ''} ${f.tmdb_keywords || ''} ${f.tmdb_year || ''} ${f.video_resolution || ''}` : '';
+                    const searchKey = f.searchKey || normalizeText(`${f.title || ''} ${f.artist || ''} ${f.album || ''} ${f.genre || ''} ${f.folder || ''} ${f.full_folder || ''} ${rawPath} ${videoCategory} ${videoShow} ${videoSeason} ${videoExtra}`);
 
                     // Búsqueda de texto mediante el Scope
                     let matchText = true;
@@ -1049,10 +1094,10 @@ function filterNetflixRows(category) {
 
                 if (modeLabelDesktop) modeLabelDesktop.classList.toggle('hidden', isVideoMode);
                 if (modeLabelMobile) modeLabelMobile.classList.toggle('hidden', isVideoMode);
-                if (zoomControls) zoomControls.classList.toggle('hidden', isVideoDetailView);
+                if (zoomControls) zoomControls.classList.toggle('hidden', isVideoMode);
                 const zoomSliderEl = document.getElementById('lib-zoom-slider');
                 if (zoomSliderEl) zoomSliderEl.value = String(isVideoMode ? currentVideoZoomIndex : currentZoomIndex);
-                if (desktopActionsRow) desktopActionsRow.classList.remove('hidden');
+                if (desktopActionsRow) desktopActionsRow.classList.toggle('hidden', isVideoMode);
                 if (mobileControlsRow) mobileControlsRow.classList.toggle('hidden', isVideoMode);
 
                 // Controles específicos de Audio en el header
@@ -1085,7 +1130,7 @@ function filterNetflixRows(category) {
                     if (d) d.classList.toggle('hidden', isVideoMode);
                     if (m) m.classList.toggle('hidden', isVideoMode);
                 });
-                document.querySelectorAll('button[onclick="playContext()"], button[onclick="toggleSortMenuDesktop()"], button[onclick="toggleSortMenuMobile()"]').forEach(btn => {
+                document.querySelectorAll('button[onclick="playContext()"], button[onclick="openPartyModal()"], button[onclick="toggleSortMenuDesktop()"], button[onclick="toggleSortMenuMobile()"]').forEach(btn => {
                     btn.classList.toggle('hidden', isVideoMode);
                 });
 
@@ -1236,43 +1281,83 @@ function filterNetflixRows(category) {
                                 return;
                             }
 
-                        // 5. HERO BANNER (Modular - hero_series.js)
-                        const recentShows = [...uniqueShows].sort((a, b) => (b.date || 0) - (a.date || 0)).slice(0, 30);
-                        const heroItem = recentShows[Math.floor(Math.random() * recentShows.length)];
-
-                        appendNetflixHero(container, heroItem);
-                        appendContinueWatchingSection(container);
-
-
-                        // 7. FILTRAR POR BÚSQUEDA Y GÉNERO
+                        // 5. FILTRAR POR BÚSQUEDA, GÉNERO Y FILTROS AVANZADOS
                         let showsToDisplay = uniqueShows;
 
-                        // Filtrar por término de búsqueda leyendo de las barras globales
                         const mobileInputSearch = document.getElementById('lib-search-mobile');
                         const desktopInputSearch = document.getElementById('lib-search-desktop');
                         const term = normalizeText((mobileInputSearch && mobileInputSearch.value) || (desktopInputSearch && desktopInputSearch.value) || '');
                         if (term) {
                             showsToDisplay = showsToDisplay.filter(show => {
-                                const src = show.sample ? show.sample : show;
-                                const title = normalizeText(show.name || show.title || '');
-                                const genre = normalizeText(src.genre || '');
-                                return title.includes(term) || genre.includes(term);
+                                const checkItem = (it) => {
+                                    const src = it.sample ? it.sample : it;
+                                    const hay = normalizeText(`${it.name || it.title || ''} ${src.tmdb_title || ''} ${src.genre || ''} ${src.tmdb_director || ''} ${src.tmdb_cast || ''} ${src.tmdb_studio || ''} ${src.tmdb_collection_name || ''} ${src.tmdb_keywords || ''}`);
+                                    return hay.includes(term);
+                                };
+                                return show.isCollection && Array.isArray(show.items)
+                                    ? (normalizeText(show.name || '').includes(term) || show.items.some(checkItem))
+                                    : checkItem(show);
                             });
                         }
 
-                        // Filtrar por género si hay filtro activo
                         if (window.netflixGenreFilter) {
+                            const targetG = normalizeText(window.netflixGenreFilter);
                             showsToDisplay = showsToDisplay.filter(show => {
-                                const src = show.sample ? show.sample : show;
-                                const genres = (src.genre || '').split(',').map(s => s.trim());
-                                return genres.includes(window.netflixGenreFilter);
+                                const hasGenre = (it) => {
+                                    const src = it.sample ? it.sample : it;
+                                    const genres = (it.genre || src.genre || '').split(',').map(s => normalizeText(s.trim()));
+                                    return genres.includes(targetG);
+                                };
+                                return show.isCollection && Array.isArray(show.items)
+                                    ? (hasGenre(show) || show.items.some(hasGenre))
+                                    : hasGenre(show);
                             });
                         }
 
-                        // 8. GRID PLANO CON TODOS LOS SHOWS (render por lotes para evitar congelamientos)
-                        showsToDisplay.sort((a, b) => ((a.name || a.title) || '').localeCompare((b.name || b.title) || '', undefined, { sensitivity: 'base' }));
-                        appendNetflixRecommendationsSection(container, uniqueShows);
-                        appendNetflixGrid(container, showsToDisplay);
+                        if (typeof window.applyVideoAdvancedFilters === 'function') {
+                            showsToDisplay = window.applyVideoAdvancedFilters(showsToDisplay);
+                        } else {
+                            showsToDisplay.sort((a, b) => ((a.name || a.title) || '').localeCompare((b.name || b.title) || '', undefined, { sensitivity: 'base' }));
+                        }
+
+                        // 6. VISTA DEDICADA DE DIRECTOR / ACTOR / ESTUDIO vs PORTADA NORMAL
+                        if (window.netflixActivePersonFilter && window.netflixActivePersonFilter.name) {
+                            if (typeof window.appendPersonHeroBanner === 'function') {
+                                window.appendPersonHeroBanner(container, showsToDisplay, uniqueShows);
+                            }
+                            container.innerHTML += `
+                                <div class="px-1 md:px-0 -mb-2 flex items-center justify-between">
+                                    <h3 class="text-sm md:text-base font-extrabold text-white uppercase tracking-wider flex items-center gap-2">
+                                        <i class="fa-solid fa-film text-emerald-400"></i>
+                                        Filmografía en tu biblioteca (${showsToDisplay.length})
+                                    </h3>
+                                </div>
+                            `;
+                            appendNetflixGrid(container, showsToDisplay);
+                            if (typeof window.appendPersonRecommendationsSection === 'function') {
+                                window.appendPersonRecommendationsSection(container, showsToDisplay);
+                            }
+                        } else {
+                            const recentShows = [...uniqueShows].sort((a, b) => (b.date || 0) - (a.date || 0)).slice(0, 30);
+                            const rawHero = recentShows[Math.floor(Math.random() * recentShows.length)];
+                            const heroItem = (rawHero && rawHero.isCollection && rawHero.sample) ? rawHero.sample : rawHero;
+
+                            const hasRestrictiveFilter = Boolean(
+                                window.netflixGenreFilter ||
+                                (window.netflixActiveDecade && window.netflixActiveDecade !== 'Todas') ||
+                                (window.netflixActiveDuration && window.netflixActiveDuration !== 'Todas') ||
+                                (window.netflixActiveTech && window.netflixActiveTech !== 'Todos')
+                            );
+
+                            if (!hasRestrictiveFilter && heroItem) {
+                                appendNetflixHero(container, heroItem);
+                            }
+                            if (!hasRestrictiveFilter) {
+                                appendContinueWatchingSection(container);
+                                appendNetflixRecommendationsSection(container, uniqueShows);
+                            }
+                            appendNetflixGrid(container, showsToDisplay);
+                        }
 
                             observeLazyImages(container);
                             return; // Terminar aquí, ya no procesa el Grid viejo!
@@ -1545,29 +1630,127 @@ function filterNetflixRows(category) {
              * `loadVideoCardPreview(card)`
              * Carga de forma asíncrona metadatos cortos de TMDB (año, rating) en las tarjetas de video.
              */
-            function loadVideoCardPreview(card) {
-                if (!card || window.matchMedia('(hover: none)').matches) return;
-                const tmdbId = card.dataset.previewId;
-                if (!tmdbId) return;
-                const preview = card.querySelector('.krk-video-hover-preview');
-                if (!preview || preview.dataset.loaded === '1') return;
-                const mediaType = card.dataset.previewType === 'tv' ? 'tv' : 'movie';
-                const cached = window.krakenVideoPreviewCache[`${mediaType}_${tmdbId}`];
-                if (cached) {
-                    preview.style.backgroundImage = `url("${cached}")`;
-                    preview.dataset.loaded = '1';
-                    return;
+            function _getGlobalHoverPreviewEl() {
+                let el = document.getElementById('krk-global-hover-preview');
+                if (!el) {
+                    el = document.createElement('div');
+                    el.id = 'krk-global-hover-preview';
+                    el.setAttribute('aria-hidden', 'true');
+                    document.body.appendChild(el);
+                    window.addEventListener('scroll', hideVideoCardPreview, true);
+                    window.addEventListener('mousedown', hideVideoCardPreview, true);
                 }
-                fetch(`/api/tmdb/details?id=${encodeURIComponent(tmdbId)}&type=${mediaType}`)
-                    .then(response => response.ok ? response.json() : null)
-                    .then(data => {
-                        const backdrop = data && data.backdrop;
-                        if (!backdrop || !preview.isConnected) return;
-                        window.krakenVideoPreviewCache[`${mediaType}_${tmdbId}`] = backdrop;
-                        preview.style.backgroundImage = `url("${backdrop}")`;
-                        preview.dataset.loaded = '1';
-                    })
-                    .catch(() => { });
+                return el;
+            }
+
+            window.hideVideoCardPreview = function () {
+                if (window._krkPreviewTimer) {
+                    clearTimeout(window._krkPreviewTimer);
+                    window._krkPreviewTimer = null;
+                }
+                window._krkHoveredCard = null;
+                const el = document.getElementById('krk-global-hover-preview');
+                if (el) el.classList.remove('show');
+            };
+
+            function _renderGlobalPreviewContent(card, data) {
+                if (!card || window._krkHoveredCard !== card || !card.isConnected) return;
+                const el = _getGlobalHoverPreviewEl();
+                const rect = card.getBoundingClientRect();
+                if (rect.width === 0 || rect.height === 0) return;
+
+                const previewW = 320;
+                const previewH = 180;
+                let left = rect.left + (rect.width / 2) - (previewW / 2);
+                left = Math.max(14, Math.min(window.innerWidth - previewW - 14, left));
+
+                // Evitar colisión con la barra de navegación superior (clamp seguro)
+                let top = rect.top - previewH - 12;
+                if (top < 72) {
+                    top = rect.bottom + 12;
+                }
+                top = Math.max(72, Math.min(window.innerHeight - previewH - 14, top));
+
+                const title = data.title || card.querySelector('h3')?.innerText || 'Video';
+                const year = data.year || '';
+                const vote = data.vote_average ? `⭐ ${data.vote_average}` : '';
+                const genres = Array.isArray(data.genres) ? data.genres.slice(0, 3).join(' · ') : '';
+                const overview = data.overview || '';
+
+                const rawBackdrop = data.backdrop || card.dataset.backdrop;
+                if (rawBackdrop) {
+                    const backdropUrl = (rawBackdrop.startsWith('http') || rawBackdrop.startsWith('/caratula/'))
+                        ? rawBackdrop
+                        : (rawBackdrop.startsWith('/') ? `https://image.tmdb.org/t/p/w780${rawBackdrop}` : `/caratula/${encodeURIComponent(rawBackdrop)}`);
+                    el.style.backgroundImage = `url("${backdropUrl}")`;
+                } else {
+                    const imgEl = card.querySelector('img');
+                    const fallbackSrc = imgEl ? (imgEl.currentSrc || imgEl.src || imgEl.dataset.src || '') : '';
+                    el.style.backgroundImage = fallbackSrc ? `url("${fallbackSrc}")` : 'none';
+                }
+                el.style.backgroundSize = 'cover';
+                el.style.backgroundPosition = 'center 18%';
+                el.style.width = `${previewW}px`;
+                el.style.height = `${previewH}px`;
+                el.style.left = `${Math.round(left)}px`;
+                el.style.top = `${Math.round(top)}px`;
+                el.innerHTML = `
+                    <div class="absolute inset-x-3.5 bottom-3 z-10 text-left">
+                        <div class="flex items-center gap-2 text-[10px] font-extrabold text-emerald-400 mb-0.5">
+                            ${year ? `<span>${escapeHtml(String(year))}</span>` : ''}
+                            ${vote ? `<span class="text-amber-400">${escapeHtml(vote)}</span>` : ''}
+                            ${genres ? `<span class="text-zinc-300 truncate">${escapeHtml(genres)}</span>` : ''}
+                        </div>
+                        <div class="text-white text-sm font-black truncate drop-shadow">${escapeHtml(title)}</div>
+                        ${overview ? `<div class="text-zinc-300 text-[10px] line-clamp-2 mt-0.5 leading-snug">${escapeHtml(overview)}</div>` : `<div class="text-white/70 text-[10px] mt-0.5">Clic para ver más información</div>`}
+                    </div>
+                `;
+                el.classList.add('show');
+            }
+
+            function loadVideoCardPreview(card) {
+                if (!card || window.innerWidth < 768 || window.matchMedia('(hover: none)').matches) return;
+                if (!card.dataset.leaveBound) {
+                    card.dataset.leaveBound = '1';
+                    card.addEventListener('mouseleave', hideVideoCardPreview);
+                }
+                const tmdbId = card.dataset.previewId;
+                window._krkHoveredCard = card;
+                if (window._krkPreviewTimer) clearTimeout(window._krkPreviewTimer);
+
+                const mediaType = card.dataset.previewType === 'tv' ? 'tv' : 'movie';
+                const cacheKey = `${mediaType}_${tmdbId}`;
+
+                window._krkPreviewTimer = setTimeout(() => {
+                    if (window._krkHoveredCard !== card) return;
+                    if (!tmdbId) {
+                        _renderGlobalPreviewContent(card, {});
+                        return;
+                    }
+                    const cached = window.krakenVideoPreviewCache[cacheKey];
+                    if (cached && typeof cached === 'object') {
+                        _renderGlobalPreviewContent(card, cached);
+                        return;
+                    }
+                    // Mostrar avance inmediato con póster mientras responde TMDB
+                    _renderGlobalPreviewContent(card, {});
+                    fetch(`/api/tmdb/details?id=${encodeURIComponent(tmdbId)}&type=${mediaType}`)
+                        .then(response => response.ok ? response.json() : null)
+                        .then(data => {
+                            if (!data) return;
+                            window.krakenVideoPreviewCache[cacheKey] = data;
+                            if (data.vote_average && Number(data.vote_average) > 0) {
+                                const vBadge = card.querySelector('[data-card-vote]');
+                                if (vBadge) {
+                                    vBadge.innerHTML = `<i class="fa-solid fa-star text-[8px] mr-0.5"></i>${Number(data.vote_average).toFixed(1)}`;
+                                    vBadge.classList.remove('hidden');
+                                    vBadge.classList.add('flex');
+                                }
+                            }
+                            _renderGlobalPreviewContent(card, data);
+                        })
+                        .catch(() => { });
+                }, 160);
             }
 
             /**
@@ -1676,6 +1859,44 @@ function filterNetflixRows(category) {
              * Genera el HTML de una tarjeta multimedia (póster de video o carátula cuadrada de audio).
              */
             function createCard(f) {
+                if (f && f.isCollection) {
+                    const collCover = f.poster
+                        ? (f.poster.startsWith('http') || f.poster.startsWith('/caratula/') ? f.poster : `/caratula/${encodeURIComponent(f.poster)}`)
+                        : getCoverUrl(f.sample || f);
+                    const collKey = f.collectionKey || f.name;
+                    return `
+                    <div class="bg-[#121212] p-3 rounded-xl hover:bg-[#1e1e1e] transition duration-300 group cursor-pointer relative shadow-lg border border-amber-500/20 hover:border-amber-500/50 flex flex-col justify-between"
+                         data-preview-id="${escapeHtml((f.sample && f.sample.tmdb_id) || '')}"
+                         data-preview-type="movie"
+                         onmouseenter="loadVideoCardPreview(this)"
+                         onclick="openCollectionModal(this.dataset.collKey)"
+                         data-coll-key="${escapeHtml(collKey)}">
+                        <div class="relative w-full aspect-[2/3] bg-[#0a0a0a] rounded-lg overflow-hidden mb-2 shadow-inner flex items-center justify-center">
+                            <div class="absolute top-2 left-2 z-20 px-2 py-0.5 rounded bg-amber-500 text-black text-[10px] font-black tracking-wider shadow-lg uppercase">
+                                📚 SAGA · ${f.count}
+                            </div>
+                            <img data-src="${collCover}"
+                                 class="lazy-img w-full h-full object-cover transition duration-500 group-hover:scale-105 z-10 relative"
+                                 onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden'); this.nextElementSibling.classList.add('flex')">
+                            <div class="absolute inset-0 hidden items-center justify-center bg-amber-950 z-0">
+                                <i class="fa-solid fa-layer-group text-4xl text-amber-500/50"></i>
+                            </div>
+                            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center backdrop-blur-[2px] z-20 gap-2">
+                                <div class="w-10 h-10 bg-amber-500 text-black rounded-full flex items-center justify-center shadow-xl hover:scale-110 transition">
+                                    <i class="fa-solid fa-film"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <h3 class="font-bold text-white truncate text-xs mb-0.5 leading-tight">${escapeHtml(f.name)}</h3>
+                            <div class="flex justify-between items-center text-[10px] text-zinc-400">
+                                <span>${escapeHtml(f.yearRange || '')}</span>
+                                <span class="text-amber-400 font-bold">${f.vote_average ? `<i class="fa-solid fa-star text-[9px] mr-0.5"></i>${f.vote_average}` : ''}</span>
+                            </div>
+                        </div>
+                    </div>`;
+                }
+
                 const safePath = escapeStr(f.path);
                 const coverUrl = getCoverUrl(f);
                 const source = f.sample ? f.sample : f;
@@ -1693,8 +1914,8 @@ function filterNetflixRows(category) {
                     ? Math.max(0, Math.min(100, Math.round((progressSeconds / durationSeconds) * 100)))
                     : 0;
 
-                // TMDB RATING
-                const ratingVal = f.tmdb_rating;
+                // TMDB RATING (Certificación por edad: PG-13, R, PG...)
+                const ratingVal = f.tmdb_rating || source.tmdb_rating;
                 let ratingBadge = '';
                 if (ratingVal) {
                     let rColor = 'bg-emerald-600/80 border-emerald-500/50';
@@ -1719,6 +1940,12 @@ function filterNetflixRows(category) {
 
                 const genreValue = (source.genre_lang || source.genre || f.genre_lang || f.genre || '').split(',')[0].trim();
                 const genreTag = genreValue ? `<span class="text-[9px] text-emerald-500 bg-emerald-900/20 px-1.5 rounded">${escapeHtml(genreValue)}</span>` : '';
+                const rawVoteAvg = Number(f.tmdb_vote_average || source.tmdb_vote_average || 0);
+                const voteTag = isVideoCard
+                    ? (rawVoteAvg > 0
+                        ? `<span data-card-vote class="text-[10px] text-amber-400 font-bold flex items-center shrink-0" title="Calificación TMDB"><i class="fa-solid fa-star text-[8px] mr-0.5"></i>${rawVoteAvg.toFixed(1)}</span>`
+                        : `<span data-card-vote class="hidden text-[10px] text-amber-400 font-bold items-center shrink-0" title="Calificación TMDB"></span>`)
+                    : '';
                 const inPlaylistIcon = f.playlists && f.playlists.length > 0 ? `<i class="fa-solid fa-check-circle text-[9px] text-emerald-400 ml-1 opacity-80" title="En playlist"></i>` : '';
 
                 let pName = null;
@@ -1820,23 +2047,16 @@ function filterNetflixRows(category) {
                         class="px-3 py-1.5 rounded-full bg-white/15 hover:bg-white/25 border border-white/25 text-white text-[11px] font-bold transition-all duration-200 mb-1">
                     <i class="fa-solid fa-circle-info mr-1"></i> Más información
                 </button>` : '';
-                const hoverPreview = isVideoCard && previewTmdbId ? `
-            <div class="krk-video-hover-preview" data-preview-card aria-hidden="true">
-                <div class="absolute inset-x-3 bottom-3 z-10 text-left">
-                    <div class="text-white text-sm font-bold truncate">${escapeHtml(f.tmdb_title || f.clean_title || f.title || 'Video')}</div>
-                    <div class="text-white/70 text-[10px] mt-1">Vista previa informativa</div>
-                </div>
-            </div>` : '';
-
+                const cardBackdrop = source.tmdb_backdrop || f.tmdb_backdrop || '';
                 return `
     <div class="${isSel} ${isVideoCard ? 'krk-video-card' : ''} p-3 rounded-xl hover:bg-[#1e1e1e] transition duration-300 group cursor-pointer relative shadow-lg border border-white/5 hover:border-white/10"
          data-preview-id="${escapeHtml(previewTmdbId)}"
          data-preview-type="${previewType}"
+         data-backdrop="${escapeHtml(cardBackdrop)}"
          onmouseenter="loadVideoCardPreview(this)"
          data-path="${escapeHtml(f.path)}"
          data-movie-path="${escapeHtml(movieDetailPath)}"
          onclick="${clickAction}">
-        ${hoverPreview}
         <div class="relative w-full ${currentLibrary === 'video' ? 'aspect-[2/3]' : 'aspect-square'} bg-[#0a0a0a] rounded-lg overflow-hidden mb-2 shadow-inner flex items-center justify-center">
             ${ratingBadge}
                 ${duplicateBadge}
@@ -1858,13 +2078,16 @@ function filterNetflixRows(category) {
         </h3>
         ${videoInfoCta}
         
-        <div class="flex justify-between items-center">
+        <div class="flex justify-between items-center gap-1.5">
     <button onclick="event.stopPropagation(); verArtista(this.dataset.artist)" 
             data-artist="${escapeHtml(f.artist)}"
             class="text-[10px] text-emerald-400 truncate flex-1 text-left hover:text-white hover:underline transition z-20 relative">
-        ${f.type === 'video' ? escapeHtml((f.artist || '').replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim() || 'Video') : escapeHtml(f.artist)}
+        ${f.type === 'video' ? escapeHtml((f.artist || source.tmdb_year || '').toString().replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim() || 'Video') : escapeHtml(f.artist)}
     </button>
-    ${genreTag}
+    <div class="flex items-center gap-1.5 shrink-0">
+        ${voteTag}
+        ${genreTag}
+    </div>
 </div>
         
         ${actionBtns}

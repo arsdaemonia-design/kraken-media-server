@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>🎉 Modo Fiesta · Kraken Media</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            background: #09090b;
+            color: #f4f4f5;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .custom-scroll::-webkit-scrollbar { width: 4px; }
+        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 999px; }
+        .glow-emerald { box-shadow: 0 0 20px rgba(16, 185, 129, 0.25); }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between selection:bg-emerald-500 selection:text-black">
+
+    <!-- TOP BAR -->
+    <header class="sticky top-0 z-40 bg-[#121215]/90 backdrop-blur-md border-b border-white/10 px-4 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center text-black font-black text-base shadow-lg shadow-emerald-500/20">
+                🐙
+            </div>
+            <div>
+                <h1 class="text-sm font-black tracking-tight text-white flex items-center gap-1.5 leading-none">
+                    Kraken Party <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase font-mono tracking-wider">LIVE</span>
+                </h1>
+                <p class="text-[10px] text-zinc-400 mt-0.5">Jukebox de Invitados</p>
+            </div>
+        </div>
+
+        <button onclick="changeGuestNamePrompt()" id="guest-pill" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-zinc-300 transition">
+            <i class="fa-solid fa-user-astronaut text-emerald-400 text-xs"></i>
+            <span id="guest-display-name" class="max-w-[100px] truncate">Invitado</span>
+            <i class="fa-solid fa-pen text-[9px] text-zinc-500 ml-0.5"></i>
+        </button>
+    </header>
+
+    <!-- MAIN CONTAINER -->
+    <main class="flex-1 max-w-lg w-full mx-auto p-4 flex flex-col gap-4">
+
+        <!-- INACTIVE SCREEN -->
+        <div id="inactive-screen" class="hidden my-auto text-center p-8 bg-zinc-900/60 rounded-3xl border border-white/10 flex flex-col items-center">
+            <div class="w-16 h-16 rounded-full bg-zinc-800 text-zinc-500 flex items-center justify-center text-3xl mb-4">
+                <i class="fa-solid fa-moon"></i>
+            </div>
+            <h2 class="text-lg font-bold text-white mb-2">La fiesta aún no ha comenzado</h2>
+            <p class="text-xs text-zinc-400 max-w-xs leading-relaxed">
+                El anfitrión aún no ha activado el Modo Fiesta o la sesión ha finalizado. Pídele que lo active para empezar a agregar canciones.
+            </p>
+            <button onclick="checkStatus(true)" class="mt-6 px-5 py-2.5 rounded-full bg-emerald-500 text-black text-xs font-extrabold hover:bg-emerald-400 transition flex items-center gap-2">
+                <i class="fa-solid fa-rotate-right"></i> Comprobar de nuevo
+            </button>
+        </div>
+
+        <!-- ACTIVE PARTY VIEW -->
+        <div id="active-party-view" class="flex flex-col gap-4">
+
+            <!-- TABS -->
+            <div class="flex items-center bg-zinc-900/80 p-1 rounded-2xl border border-white/10 text-xs font-bold">
+                <button onclick="setTab('search')" id="tab-btn-search" class="flex-1 py-2 rounded-xl transition text-center flex items-center justify-center gap-1.5 bg-emerald-500 text-black shadow">
+                    <i class="fa-solid fa-magnifying-glass"></i> Pedir Canción
+                </button>
+                <button onclick="setTab('queue')" id="tab-btn-queue" class="flex-1 py-2 rounded-xl transition text-center flex items-center justify-center gap-1.5 text-zinc-400 hover:text-white">
+                    <i class="fa-solid fa-fire text-amber-400"></i> Fila de Fiesta (<span id="queue-count-badge">0</span>)
+                </button>
+            </div>
+
+            <!-- TAB 1: SEARCH & BROWSE -->
+            <div id="tab-search" class="flex flex-col gap-3">
+                <!-- Search Box -->
+                <div class="relative">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 text-sm"></i>
+                    <input type="text" id="party-search-input" placeholder="Buscar canción, artista o álbum..."
+                        oninput="onSearchInput(this.value)"
+                        class="w-full pl-10 pr-10 py-3 bg-zinc-900/90 border border-white/10 rounded-2xl text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 transition shadow-inner">
+                    <button onclick="clearSearch()" id="clear-search-btn" class="hidden absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white p-1">
+                        <i class="fa-solid fa-circle-xmark"></i>
+                    </button>
+                </div>
+
+                <!-- Section Header -->
+                <div class="flex items-center justify-between px-1">
+                    <h3 id="search-section-title" class="text-xs font-extrabold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                        <i class="fa-solid fa-sparkles text-emerald-400"></i> Canciones populares
+                    </h3>
+                    <span id="search-results-count" class="text-[11px] text-zinc-500"></span>
+                </div>
+
+                <!-- Results / Suggestions List -->
+                <div id="search-results-list" class="flex flex-col gap-2 min-h-[300px]">
+                    <div class="flex items-center justify-center py-12 text-zinc-500">
+                        <i class="fa-solid fa-circle-notch fa-spin text-xl text-emerald-400 mr-2"></i> Cargando canciones...
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 2: PARTY QUEUE -->
+            <div id="tab-queue" class="hidden flex flex-col gap-3">
+                <div class="flex items-center justify-between px-1">
+                    <div>
+                        <h3 class="text-xs font-extrabold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5">
+                            <i class="fa-solid fa-fire text-amber-500"></i> En fila por votos
+                        </h3>
+                        <p class="text-[10px] text-zinc-500 mt-0.5">Vota 🔥 por tus favoritas para que suenen antes</p>
+                    </div>
+                    <button onclick="refreshQueue()" class="text-xs text-emerald-400 hover:text-white transition p-1">
+                        <i class="fa-solid fa-rotate-right"></i>
+                    </button>
+                </div>
+
+                <div id="party-queue-list" class="flex flex-col gap-2 min-h-[300px]">
+                    <!-- Dynamically populated -->
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- FOOTER / CREDIT -->
+    <footer class="p-4 text-center border-t border-white/5 text-[11px] text-zinc-600">
+        Kraken Media Server · Modo Fiesta
+    </footer>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="party-toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none transition-all duration-300 opacity-0 translate-y-4 px-4 py-2.5 rounded-full bg-zinc-800/95 border border-emerald-500/40 text-white text-xs font-bold shadow-2xl flex items-center gap-2">
+        <i class="fa-solid fa-circle-check text-emerald-400" id="toast-icon"></i>
+        <span id="toast-msg">Mensaje</span>
+    </div>
+
+    <script>
+        let currentTab = 'search';
+        let guestId = localStorage.getItem('krk_party_guest_id') || ('guest_' + Math.random().toString(36).slice(2, 9));
+        let guestName = localStorage.getItem('krk_party_guest_name') || 'Invitado';
+        localStorage.setItem('krk_party_guest_id', guestId);
+        localStorage.setItem('krk_party_guest_name', guestName);
+
+        let searchDebounceTimer = null;
+        let lastQueueData = [];
+
+        document.getElementById('guest-display-name').innerText = guestName;
+
+        function showToast(msg, isSuccess = true) {
+            const toast = document.getElementById('party-toast');
+            const icon = document.getElementById('toast-icon');
+            const label = document.getElementById('toast-msg');
+            label.innerText = msg;
+            icon.className = isSuccess ? 'fa-solid fa-circle-check text-emerald-400' : 'fa-solid fa-circle-exclamation text-rose-400';
+            toast.classList.remove('opacity-0', 'translate-y-4');
+            toast.classList.add('opacity-100', 'translate-y-0');
+            setTimeout(() => {
+                toast.classList.remove('opacity-100', 'translate-y-0');
+                toast.classList.add('opacity-0', 'translate-y-4');
+            }, 2800);
+        }
+
+        function changeGuestNamePrompt() {
+            const entered = prompt("¿Cómo te llamas para la fiesta?", guestName);
+            if (entered && entered.trim()) {
+                guestName = entered.trim().substring(0, 25);
+                localStorage.setItem('krk_party_guest_name', guestName);
+                document.getElementById('guest-display-name').innerText = guestName;
+                showToast(`¡Hola, ${guestName}!`);
+            }
+        }
+
+        function setTab(tab) {
+            currentTab = tab;
+            const btnSearch = document.getElementById('tab-btn-search');
+            const btnQueue = document.getElementById('tab-btn-queue');
+            const divSearch = document.getElementById('tab-search');
+            const divQueue = document.getElementById('tab-queue');
+
+            if (tab === 'search') {
+                btnSearch.className = 'flex-1 py-2 rounded-xl transition text-center flex items-center justify-center gap-1.5 bg-emerald-500 text-black shadow font-bold';
+                btnQueue.className = 'flex-1 py-2 rounded-xl transition text-center flex items-center justify-center gap-1.5 text-zinc-400 hover:text-white font-bold';
+                divSearch.classList.remove('hidden');
+                divQueue.classList.add('hidden');
+            } else {
+                btnQueue.className = 'flex-1 py-2 rounded-xl transition text-center flex items-center justify-center gap-1.5 bg-amber-500 text-black shadow font-bold';
+                btnSearch.className = 'flex-1 py-2 rounded-xl transition text-center flex items-center justify-center gap-1.5 text-zinc-400 hover:text-white font-bold';
+                divQueue.classList.remove('hidden');
+                divSearch.classList.add('hidden');
+                refreshQueue();
+            }
+        }
+
+        async function checkStatus(isManual = false) {
+            try {
+                const res = await fetch('/api/party/status');
+                const data = await res.json();
+                const inactiveScreen = document.getElementById('inactive-screen');
+                const activeView = document.getElementById('active-party-view');
+
+                if (data.ok && data.active) {
+                    const wasInactive = !inactiveScreen.classList.contains('hidden');
+                    inactiveScreen.classList.add('hidden');
+                    activeView.classList.remove('hidden');
+                    renderQueue(data.queue || []);
+                    if (wasInactive) doSearch(document.getElementById('party-search-input')?.value || '');
+                    if (isManual) showToast("¡La fiesta está activa!");
+                } else {
+                    inactiveScreen.classList.remove('hidden');
+                    activeView.classList.add('hidden');
+                }
+            } catch (e) {
+                console.error("Status check error", e);
+            }
+        }
+
+        function onSearchInput(val) {
+            clearTimeout(searchDebounceTimer);
+            const clearBtn = document.getElementById('clear-search-btn');
+            clearBtn.classList.toggle('hidden', !val.trim());
+            searchDebounceTimer = setTimeout(() => {
+                doSearch(val.trim());
+            }, 250);
+        }
+
+        function clearSearch() {
+            const input = document.getElementById('party-search-input');
+            input.value = '';
+            document.getElementById('clear-search-btn').classList.add('hidden');
+            doSearch('');
+        }
+
+        async function doSearch(query) {
+            const titleEl = document.getElementById('search-section-title');
+            const countEl = document.getElementById('search-results-count');
+            const container = document.getElementById('search-results-list');
+
+            if (query) {
+                titleEl.innerHTML = `<i class="fa-solid fa-magnifying-glass text-emerald-400"></i> Resultados para "${escapeHtml(query)}"`;
+            } else {
+                titleEl.innerHTML = `<i class="fa-solid fa-sparkles text-emerald-400"></i> Canciones populares`;
+            }
+
+            try {
+                const res = await fetch(`/api/party/search?q=${encodeURIComponent(query)}`);
+                const data = await res.json();
+                if (!data.ok || !data.items || data.items.length === 0) {
+                    container.innerHTML = `<div class="p-8 text-center text-zinc-500 text-xs bg-zinc-900/40 rounded-2xl border border-white/5">No se encontraron canciones.</div>`;
+                    countEl.innerText = '0 canciones';
+                    return;
+                }
+
+                countEl.innerText = `${data.items.length} canciones`;
+                container.innerHTML = data.items.map(item => `
+                    <div class="bg-zinc-900/60 hover:bg-zinc-800/80 p-2.5 rounded-2xl border border-white/5 flex items-center justify-between gap-3 transition">
+                        <div class="w-12 h-12 rounded-xl overflow-hidden bg-black/40 shrink-0 border border-white/10">
+                            <img src="${item.cover}" class="w-full h-full object-cover" onerror="this.src='/static/favicon.png'">
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-xs font-bold text-white truncate">${escapeHtml(item.title)}</div>
+                            <div class="text-[11px] text-zinc-400 truncate">${escapeHtml(item.artist)}</div>
+                            <div class="text-[10px] text-zinc-500 font-mono mt-0.5">${item.duration}</div>
+                        </div>
+                        <button onclick="requestAddTrack(this)" data-track='${escapeAttr(JSON.stringify(item))}'
+                            class="shrink-0 px-3 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-black text-xs font-black transition flex items-center gap-1.5 shadow-md shadow-emerald-500/20">
+                            <i class="fa-solid fa-plus"></i> Pedir
+                        </button>
+                    </div>
+                `).join('');
+            } catch (e) {
+                container.innerHTML = `<div class="p-8 text-center text-rose-400 text-xs">Error al buscar canciones</div>`;
+            }
+        }
+
+        async function requestAddTrack(btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i>`;
+            const rawTrack = btn.dataset.track;
+            try {
+                const track = JSON.parse(rawTrack);
+                const res = await fetch('/api/party/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        path: track.path,
+                        guest_name: guestName,
+                        guest_id: guestId
+                    })
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    showToast(data.message || `¡"${track.title}" agregada a la fiesta! 🎉`);
+                    refreshQueue();
+                    btn.innerHTML = `<i class="fa-solid fa-check text-xs"></i> En fila`;
+                    btn.className = 'shrink-0 px-3 py-2 rounded-xl bg-emerald-900/40 text-emerald-300 text-xs font-bold border border-emerald-500/40 cursor-default';
+                } else {
+                    showToast(data.error || "No se pudo agregar", false);
+                    btn.disabled = false;
+                    btn.innerHTML = `<i class="fa-solid fa-plus"></i> Pedir`;
+                }
+            } catch (e) {
+                showToast("Error de conexión", false);
+                btn.disabled = false;
+                btn.innerHTML = `<i class="fa-solid fa-plus"></i> Pedir`;
+            }
+        }
+
+        async function refreshQueue() {
+            try {
+                const res = await fetch('/api/party/status');
+                const data = await res.json();
+                if (data.ok) {
+                    renderQueue(data.queue || []);
+                }
+            } catch (e) {}
+        }
+
+        function renderQueue(queue) {
+            lastQueueData = queue;
+            const badge = document.getElementById('queue-count-badge');
+            if (badge) badge.innerText = queue.length;
+
+            const container = document.getElementById('party-queue-list');
+            if (!container) return;
+
+            if (queue.length === 0) {
+                container.innerHTML = `
+                    <div class="p-8 text-center bg-zinc-900/40 rounded-2xl border border-dashed border-white/10 flex flex-col items-center">
+                        <i class="fa-solid fa-music text-3xl text-zinc-600 mb-2"></i>
+                        <p class="text-xs text-zinc-400 font-bold">La fila de la fiesta está vacía</p>
+                        <p class="text-[11px] text-zinc-500 mt-1">Sé el primero en pedir una canción en la pestaña "Pedir Canción"</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = queue.map((item, index) => {
+                const voters = item.voters || [];
+                const hasVoted = voters.includes(guestId);
+                const isMine = item.guest_id === guestId;
+
+                return `
+                    <div class="bg-zinc-900/70 p-3 rounded-2xl border ${hasVoted ? 'border-amber-500/40' : 'border-white/5'} flex items-center justify-between gap-3 transition">
+                        <div class="w-7 text-center font-black text-sm ${index === 0 ? 'text-amber-400' : 'text-zinc-500'}">
+                            ${index === 0 ? '👑' : '#' + (index + 1)}
+                        </div>
+                        <div class="w-11 h-11 rounded-xl overflow-hidden bg-black/40 shrink-0 border border-white/10">
+                            <img src="${item.cover}" class="w-full h-full object-cover" onerror="this.src='/static/favicon.png'">
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-xs font-bold text-white truncate">${escapeHtml(item.title)}</div>
+                            <div class="text-[11px] text-zinc-400 truncate">${escapeHtml(item.artist)}</div>
+                            <div class="flex items-center gap-2 text-[10px] text-zinc-500 mt-0.5">
+                                <span>Por <b class="text-zinc-300">${escapeHtml(item.guest_name)}</b></span>
+                                ${isMine ? '<span class="text-emerald-400 font-bold">(Tuya)</span>' : ''}
+                            </div>
+                        </div>
+                        <button onclick="voteTrack('${item.id}')"
+                            class="shrink-0 px-3 py-2 rounded-xl transition flex items-center gap-1.5 text-xs font-extrabold ${hasVoted ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/25' : 'bg-white/5 hover:bg-white/10 text-zinc-300 border border-white/10'}">
+                            <i class="fa-solid fa-fire ${hasVoted ? 'text-black' : 'text-amber-400'}"></i>
+                            <span>${item.votes || 1}</span>
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function voteTrack(itemId) {
+            try {
+                const res = await fetch('/api/party/vote', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ item_id: itemId, guest_id: guestId })
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    showToast(data.voted ? "¡Voto sumado! 🔥" : "Voto retirado");
+                    refreshQueue();
+                } else {
+                    showToast(data.error || "No se pudo votar", false);
+                }
+            } catch (e) {
+                showToast("Error de conexión", false);
+            }
+        }
+
+        function escapeHtml(str) {
+            return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+        function escapeAttr(str) {
+            return String(str || '').replace(/'/g, '&#39;');
+        }
+
+        // Init
+        checkStatus();
+        doSearch('');
+        setInterval(() => {
+            checkStatus(false);
+        }, 4000);
+    </script>
+</body>
+</html>

@@ -1,6 +1,6 @@
-# 🐙 KRAKEN MEDIA SERVER - DOCUMENTACIÓN TÉCNICA v5.0.1
-> **Fecha de Actualización:** 24 de Octubre de 2026  
-> **Versión del Ecosistema:** `v5.0.1` (`v5.0.1.6` — Modular Server & Android TV Native APK)  
+# 🐙 KRAKEN MEDIA SERVER - DOCUMENTACIÓN TÉCNICA v5.0.2
+> **Fecha de Actualización:** 8 de Noviembre de 2026  
+> **Versión del Ecosistema:** `v5.0.2` (`v5.0.2.7` — Catálogo Inteligente TMDB, Modo Fiesta Colaborativo, Ruleta, Tráilers, Estadísticas y Android TV Native APK)  
 > **Estado:** Compilado, Verificado y Empaquetado en Producción  
 
 ---
@@ -304,17 +304,71 @@ Se resolvieron tres problemas clave de experiencia de reproducción y control mu
 
 ---
 
+### 3.14. Catálogo Inteligente de Video, Modo Fiesta Colaborativo (`/fiesta`), Ruleta, Tráilers Oficiales y Estadísticas Globales (`v5.0.2.1` – `v5.0.2.7`)
+
+En la serie **v5.0.2** (`v5.0.2.1` a `v5.0.2.7`, 8 de Noviembre de 2026) se transformó la experiencia de descubrimiento, navegación social y analítica tanto en **Video** como en **Música**, asegurando compatibilidad total en escritorio y dispositivos móviles:
+
+#### 1. Enriquecimiento Extendido TMDB y Limpieza de Controles ([`services/database.py`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/services/database.py), [`routes/api.py`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/routes/api.py), [`templates/index.html`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/templates/index.html))
+* **Nuevas Columnas de Metadatos en SQLite (`media`)**: Se agregaron y poblaron automáticamente mediante `auto_tag_library_videos()` y `/api/video/enrich_metadata` las columnas:
+  * `tmdb_backdrop`: Imagen panorámica 16:9 (`w1280`) para los Hero Banners y modales de detalle.
+  * `tmdb_director`, `tmdb_cast`, `tmdb_studio`: Director, elenco principal (con foto, nombre y personaje en JSON) y estudio/productora.
+  * `tmdb_collection_id`, `tmdb_collection_name`, `tmdb_collection_poster`: Metadatos oficiales de sagas y franquicias de TMDB.
+  * `tmdb_vote_average`: Calificación oficial TMDB (`★ 0.0–10.0`) mostrada en todas las tarjetas de películas y series.
+  * `trailer_key`: Clave oficial del tráiler en YouTube (`site == 'YouTube'`, priorizando `Trailer` oficial en `es-MX` con fallback a `en-US` y `Teaser`).
+* **Reubicación de Auto-Tag TMDB**: Se retiró el botón `Auto-Tag TMDB` de la barra de filtros principal de Video para mantener una interfaz limpia y se dejó exclusivamente dentro del panel **Historial / Mantenimiento de Biblioteca**.
+
+#### 2. Navegación Omnicanal de Video, Hero de Director/Actor, Similares y Agrupación de Sagas ([`assets/js/video-catalog.js`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/assets/js/video-catalog.js), [`assets/js/hero_series.js`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/assets/js/hero_series.js))
+* **Popover Unificado de Filtros (`⚙️ Filtros`)**: Consolida en un menú flotante limpio los filtros de **Década** (`2020s`, `2010s`, `2000s`, `90s`, `Clásicos`), **Duración** (`< 90 min`, `90–120 min`, `> 2h`), **Calidad / Estado** (`HD / 4K`, `No vistas`, `En progreso`, `Vistas`) y **Agrupar Sagas (`📚`)**, mostrando un contador activo de filtros aplicados.
+* **Hero Dedicado de Director / Actor / Estudio con Recomendaciones**:
+  * Al hacer clic en un director o actor desde el modal de detalle de una película, se aplica el filtro contextual, se ocultan los carruseles genéricos de *"Explora"* para limpiar la vista, y se despliega un **Hero Banner especial del Director/Actor** con su filmografía en tu servidor, calificación promedio y una fila automática de **"Recomendadas similares a su estilo"**.
+* **Fila de "Más títulos similares" en Detalle de Película**: Dentro del modal de *"Más información"*, debajo de la sinopsis y el reparto interactivo, se calcula y renderiza un carrusel de películas similares de la biblioteca basado en coincidencias de género, director, saga y década.
+* **Corrección de Agrupación de Sagas (`tmdb_coll_${id}`)**: Se eliminó la heurística por prefijo de primera palabra que agrupaba erróneamente películas no relacionadas o con títulos en otros alfabetos; ahora la vista **Agrupar Sagas** agrupa exclusivamente por `tmdb_collection_id` oficial de TMDB y por secuelas numéricas verificadas (`Parte 2`, `Vol. 2`, números romanos).
+
+#### 3. Preview Hover Global sin Recortes y Adaptado a Móvil ([`assets/js/video-catalog.js`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/assets/js/video-catalog.js))
+* Se reemplazó el preview incrustado dentro de cada tarjeta (que era recortado por los contenedores con `overflow-x-auto`) por un **portal flotante global en `document.body` (`#krk-global-hover-preview`)** con posicionamiento dinámico `getBoundingClientRect()` y `z-index: 99990`.
+* Reproduce un adelanto silencioso del video al mantener el cursor sobre la tarjeta en escritorio y se desactiva automáticamente en pantallas táctiles o móviles (`window.innerWidth < 768` o `(hover: none)`).
+
+#### 4. 🎬 Tráilers Oficiales de YouTube y Encuadre Panorámico 16:9 ([`assets/js/hero_series.js`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/assets/js/hero_series.js), [`routes/api.py`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/routes/api.py))
+* **Reproductor de Tráiler Integrado (`openTrailerModal`)**: Disponible desde el Hero Banner principal, el modal de *"Más información"* y la Ruleta. Si la película ya cuenta con `trailer_key` en SQLite, abre el reproductor YouTube 16:9 al instante; si aún no lo tiene, consulta `/api/video/trailer/<id>` en vivo contra TMDB (`append_to_response=videos`), lo guarda en caché permanente en `kraken.db` y si no existe en TMDB ofrece búsqueda directa en YouTube.
+* **Encuadre Superior e Imagen Horizontal en Hero Banners**: Se prioriza `tmdb_backdrop` (horizontal 16:9) sobre el póster vertical en todos los Hero Banners y modales, aplicando `object-[center_18%]` para enfocar rostros y parte superior del arte en vez de cortar la imagen al centro/pies.
+
+#### 5. 🎲 Ruleta Interactiva ("¿Qué vemos hoy?") ([`assets/js/video-catalog.js`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/assets/js/video-catalog.js))
+* Nuevo botón **`🎲 Ruleta`** en la barra de herramientas de Video que abre un modal interactivo con filtros combinables (**Todo / Películas / Series**, **Género** y **Solo no vistas**) y animación tipo *slot-machine* con desaceleración gradual hasta elegir un título ganador, ofreciendo botones inmediatos de **Reproducir**, **Ver Tráiler**, **Más Info** y **Girar de nuevo**.
+
+#### 6. ❤️ Mis Favoritos en Música y Video ([`assets/js/library-render.js`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/assets/js/library-render.js), [`assets/js/video-catalog.js`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/assets/js/video-catalog.js), [`templates/index.html`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/templates/index.html))
+* **En Música**: Entrada destacada fija **`❤️ Mis Favoritos`** en el menú lateral (`abrirFavoritosAudio()`), con cabecera especial, contador de canciones y reproducción directa de toda la colección marcada con corazón, sincronizada con la tarjeta *"Mis Favoritos"* de *Mixes Para Ti*.
+* **En Video**: Botón de corazón `❤️` en tarjetas y modales de detalle (persistido en `favorites`), además de la categoría dedicada **`❤️ Favoritos`** en el selector principal de Video y menú lateral.
+
+#### 7. 📊 Estadísticas Avanzadas en 3 Pestañas ([`routes/api.py`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/routes/api.py), [`assets/js/downloader-tools.js`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/assets/js/downloader-tools.js))
+* El panel de estadísticas (accesible desde el icono de gráfica dorada junto al contador de canciones en la barra superior; se retiró el botón redundante del menú lateral) fue rediseñado con 3 vistas completas:
+  * **🎵 Música**: Total de canciones, horas estimadas de escucha, favoritas, Top 10 canciones más escuchadas, Top artistas con barras de proporción y distribución de géneros musicales.
+  * **🎬 Video**: Películas y series totales, títulos terminados vs. en progreso, horas reproducidas de cine/series, calificación TMDB promedio de la videoteca, progreso global en porcentaje y géneros de cine más vistos.
+  * **🌐 Resumen Global**: Total de archivos indexados, espacio en disco ocupado en **GB** (calculado sobre los archivos reales y desglosado entre Audio vs. Video) y actividad reciente de reproducción.
+
+#### 8. 🎉 Modo Fiesta Colaborativo (`/fiesta`) con Votación en Vivo e Inyección en Cola ([`services/party_mode.py`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/services/party_mode.py), [`routes/api.py`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/routes/api.py), [`templates/party_guest.html`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/templates/party_guest.html), [`assets/js/downloader-tools.js`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/assets/js/downloader-tools.js), [`assets/js/audio-player.js`](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/assets/js/audio-player.js))
+* **Acceso Rápido en Escritorio y Móvil**: Botón **`🎉 Modo Fiesta`** integrado directamente en la barra superior de **Mi Música** tanto en PC (`#btn-party-desktop` junto a `Play All`) como en móvil (`#btn-party-mobile` junto al botón Play), con badge pulsante **`EN VIVO`** cuando la sala está activa.
+* **Vinculación Automática con Dominio Público o IP Local (`_get_party_base_url`)**: Al igual que los enlaces `/share/<token>`, el Modo Fiesta lee automáticamente `public_url` de la configuración del servidor (ej. `https://kraken.ederzu.com/fiesta`) o usa como fallback la IP LAN local (`http://192.168.x.x:5000/fiesta`), generando un **Código QR instantáneo** en el modal del anfitrión.
+* **Web App Ligera para Invitados (`templates/party_guest.html`)**: Quienes escanean el QR o abren `/fiesta` entran sin necesidad de cuenta de administrador a una interfaz móvil donde eligen su apodo, buscan canciones en el catálogo de música (excluyendo contenido oculto/`+18`), las agregan a la fila y **votan con `🔥`** para subir sus favoritas de posición.
+* **Sincronización Automática con el Reproductor del Anfitrión (`syncPartyQueueToPlayer`)**:
+  * El anfitrión sincroniza cada 4 segundos contra `/api/party/host-sync`.
+  * Si el reproductor del anfitrión está detenido al llegar la primera canción de un invitado, **inicia la reproducción automáticamente**.
+  * Si ya hay música sonando, las canciones de la fiesta se insertan justo después de la pista actual (`currentTrackIndex + 1`) y se **reordenan dinámicamente según los votos `🔥`** recibidos, mostrando en la cola del reproductor la etiqueta `· 🎉 NombreInvitado (🔥votos)`.
+  * Al comenzar a sonar una canción de la fiesta (`playTrack`), se invoca `/api/party/mark-consumed` para retirarla de la lista de espera de `/fiesta`.
+* **Blindaje de Concurrencia y Serialización**: Uso de `threading.RLock()` reentrante en `PartyModeManager`, conversión segura de `voters` (`set` -> `list`) para serialización JSON y lectura tolerante `request.get_json(silent=True) or {}` en Flask 3.x.
+
+---
+
 ## 4. Binarios Empaquetados y Estado de Distribución
 
 A continuación se detalla el estado actual de los archivos distribuibles del proyecto:
 
 | Componente | Archivo Generado | Tamaño | Estado / Versión | Ruta en Disco |
 | :--- | :--- | :---: | :--- | :--- |
-| **Instalador Oficial Windows** | Kraken_Media_Server_Installer_v5.0.1.exe | 291.6 MB | **Compilado y Listo (30/10/2026 11:33 p. m.)** — Instalador Inno Setup completo con KrakenOffline.exe y dependencias integradas. | [dist/Kraken_Media_Server_Installer_v5.0.1.exe](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/dist/Kraken_Media_Server_Installer_v5.0.1.exe) |
-| **Ejecutable Standalone (GUI / Offline)** | KrakenOffline.exe | 28.8 MB | **Compilado (30/10/2026 11:30 p. m.)** — Aplicación de escritorio windowed con PyWebView acelerado por hardware. | [dist/KrakenOffline/KrakenOffline.exe](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/dist/KrakenOffline/KrakenOffline.exe) |
-| **Servidor Standalone (Consola)** | Kraken.exe | 28.3 MB | **Compilado (30/10/2026 11:28 p. m.)** — Servidor backend standalone con logging directo a consola. | [dist/Kraken/Kraken.exe](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/dist/Kraken/Kraken.exe) |
-| **APK Android TV & Mobile** | KrakenMS.apk | 9.45 MB | **Actualizado (30/10/2026 11:06 p. m.)** — Historial real de reproducción de música, seek sincronizado en Cine Remote y HLS instantáneo con resume. | [E:\\Kraken Media Server\\KrakenMS.apk](file:///E:/Kraken%20Media%20Server/KrakenMS.apk) |
-| **APK Android TV (Backup)** | KrakenMS_v5.0.1.apk | 9.45 MB | Copia de respaldo verificada con el mismo hash binario. | [E:\\Kraken Media Server\\KrakenMS_v5.0.1.apk](file:///E:/Kraken%20Media%20Server/KrakenMS.apk) |
+| **Instalador Oficial Windows** | Kraken_Media_Server_Installer_v5.0.2.exe | 278.2 MB | **Compilado y Listo (08/11/2026 02:53 p. m.)** — Instalador Inno Setup completo v5.0.2 con KrakenOffline.exe y dependencias integradas. | [dist/Kraken_Media_Server_Installer_v5.0.2.exe](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/dist/Kraken_Media_Server_Installer_v5.0.2.exe) |
+| **Ejecutable Standalone (GUI / Offline)** | KrakenOffline.exe | 27.5 MB | **Compilado (08/11/2026 02:48 p. m.)** — Aplicación de escritorio windowed v5.0.2 con PyWebView acelerado por hardware. | [dist/KrakenOffline/KrakenOffline.exe](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/dist/KrakenOffline/KrakenOffline.exe) |
+| **Servidor Standalone (Consola)** | Kraken.exe | 27.0 MB | **Compilado (08/11/2026 02:49 p. m.)** — Servidor backend standalone v5.0.2 con logging directo a consola. | [dist/Kraken/Kraken.exe](file:///E:/Kraken%20Media%20Server/Kraken%20Media%20Server%20-%20modulE/dist/Kraken/Kraken.exe) |
+| **APK Android TV & Mobile** | KrakenMS.apk | 8.30 MB | **Actualizado v5.0.2 (08/11/2026 02:45 p. m.)** — Cliente nativo Android TV (`versionCode=4`, `versionName="5.0.2"`). | [E:\\Kraken Media Server\\KrakenMS.apk](file:///E:/Kraken%20Media%20Server/KrakenMS.apk) |
+| **APK Android TV (Backup v5.0.2)** | KrakenMS_v5.0.2.apk | 8.30 MB | Copia de respaldo v5.0.2 verificada con el mismo hash binario. | [E:\\Kraken Media Server\\KrakenMS_v5.0.2.apk](file:///E:/Kraken%20Media%20Server/KrakenMS_v5.0.2.apk) |
 
 ---
 
@@ -337,4 +391,4 @@ La suite de pruebas automatizadas localizada en [`tests/test_new_features.py`](f
 *Mecanismo `tearDownClass`: Garantiza la eliminación automática de cualquier token, invitación o registro de prueba, manteniendo la base de datos de producción completamente limpia.*
 
 ---
-*Kraken Media Server v5.0.1 (`v5.0.1.6`) — Diseñado y Modularizado para Rendimiento de Nivel Producción en Web, PC y Android TV.*
+*Kraken Media Server v5.0.2 (`v5.0.2.7`) — Diseñado y Modularizado para Rendimiento de Nivel Producción en Web, PC y Android TV.*

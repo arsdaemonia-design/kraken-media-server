@@ -133,7 +133,10 @@ def tv_library_page():
 
         query = """
             SELECT id, rel_path, filename, title, tmdb_title, tmdb_year,
-                   tmdb_poster, tmdb_genres, genre, folder_type, is_adult, tmdb_rating
+                   tmdb_poster, tmdb_genres, genre, folder_type, is_adult, tmdb_rating,
+                   tmdb_collection_id, tmdb_collection_name, tmdb_collection_poster,
+                   tmdb_director, tmdb_cast, tmdb_studio, tmdb_keywords, tmdb_vote_average,
+                   video_resolution
             FROM media
             WHERE media_type = 'video' AND COALESCE(is_hidden, 0) = 0
         """
@@ -179,6 +182,15 @@ def tv_library_page():
                 "kind": "series" if is_series else "movie",
                 "episode_count": 1 if is_series else 0,
                 "series_path": series_path,
+                "collection_id": row["tmdb_collection_id"],
+                "collection_name": row["tmdb_collection_name"],
+                "collection_poster": row["tmdb_collection_poster"],
+                "director": row["tmdb_director"],
+                "cast": row["tmdb_cast"],
+                "studio": row["tmdb_studio"],
+                "keywords": row["tmdb_keywords"],
+                "vote_average": row["tmdb_vote_average"],
+                "resolution": row["video_resolution"],
             }
 
         items = list(catalog.values())
@@ -242,6 +254,116 @@ def tv_backdrop(media_id):
         return jsonify({"url": f"https://image.tmdb.org/t/p/w1280{backdrop_path}"})
     except requests.RequestException:
         return jsonify({"url": None})
+    finally:
+        conn.close()
+
+
+
+
+@tv_bp.route("/api/tv/similar/<int:media_id>")
+def tv_similar_titles(media_id):
+    """Return up to 12 similar titles from the user's video library based on collection, director, genres, and cast."""
+    conn = get_db()
+    try:
+        email, kid_mode, has_pin = _tv_user_context(conn)
+        if not email:
+            return jsonify({"error": "Sesión requerida"}), 401
+        ref = conn.execute(
+            """SELECT id, rel_path, tmdb_id, title, tmdb_title, tmdb_collection_id, tmdb_collection_name,
+                      tmdb_director, tmdb_cast, tmdb_studio, tmdb_keywords, tmdb_genres, genre, tmdb_year, folder_type
+               FROM media WHERE id = ? AND media_type = 'video'""",
+            (media_id,),
+        ).fetchone()
+        if not ref:
+            return jsonify({"items": []})
+
+        query = """
+            SELECT id, rel_path, tmdb_id, filename, title, tmdb_title, tmdb_year,
+                   tmdb_poster, tmdb_genres, genre, folder_type, is_adult, tmdb_rating,
+                   tmdb_collection_id, tmdb_collection_name, tmdb_director, tmdb_cast,
+                   tmdb_studio, tmdb_keywords, tmdb_vote_average
+            FROM media
+            WHERE media_type = 'video' AND id != ? AND COALESCE(is_hidden, 0) = 0
+        """
+        query, args = _apply_tv_visibility(query, [media_id], kid_mode, has_pin)
+        rows = conn.execute(query, args).fetchall()
+
+        ref_parts = (ref["rel_path"] or "").replace("\\", "/").strip("/").split("/")
+        ref_is_series = str(ref["folder_type"] or "").lower() == "series" and len(ref_parts) >= 2
+        ref_series_path = _tv_series_root(ref_parts) if ref_is_series else None
+        ref_tmdb_id = int(ref["tmdb_id"] or 0)
+        seen_entities = set()
+        if ref_series_path:
+            seen_entities.add(f"series:{ref_series_path}")
+        if ref_tmdb_id > 0:
+            seen_entities.add(f"tmdb:{ref['folder_type'] or 'movie'}:{ref_tmdb_id}")
+
+        ref_coll = str(ref["tmdb_collection_id"] or ref["tmdb_collection_name"] or "").strip().lower()
+        ref_directors = {d.strip().lower() for d in str(ref["tmdb_director"] or "").split(",") if d.strip()}
+        ref_cast = {c.strip().lower() for c in str(ref["tmdb_cast"] or "").split(",") if c.strip()}
+        ref_genres = {g.strip().lower() for g in _tv_genres(ref["tmdb_genres"], ref["genre"])}
+        ref_keywords = {k.strip().lower() for k in str(ref["tmdb_keywords"] or "").split(",") if k.strip()}
+
+        scored = []
+        for r in rows:
+            r_rel = (r["rel_path"] or "").replace("\\", "/").strip("/")
+            r_parts = r_rel.split("/")
+            r_is_series = str(r["folder_type"] or "").lower() == "series" and len(r_parts) >= 2
+            r_series_path = _tv_series_root(r_parts) if r_is_series else None
+            r_tmdb_id = int(r["tmdb_id"] or 0)
+            r_entity_key = f"series:{r_series_path}" if r_is_series else f"video:{r['id']}"
+            r_tmdb_key = f"tmdb:{r['folder_type'] or 'movie'}:{r_tmdb_id}" if r_tmdb_id > 0 else None
+
+            if r_entity_key in seen_entities or (r_tmdb_key and r_tmdb_key in seen_entities):
+                continue
+
+            score = 0
+            reason = "Recomendado"
+            r_coll = str(r["tmdb_collection_id"] or r["tmdb_collection_name"] or "").strip().lower()
+            if ref_coll and r_coll and (ref_coll == r_coll):
+                score += 85
+                reason = "Misma Saga / Colección"
+            r_directors = {d.strip().lower() for d in str(r["tmdb_director"] or "").split(",") if d.strip()}
+            common_dir = ref_directors.intersection(r_directors)
+            if common_dir:
+                score += 45
+                if score < 85:
+                    reason = f"Del director {list(common_dir)[0].title()}"
+            r_kw = {k.strip().lower() for k in str(r["tmdb_keywords"] or "").split(",") if k.strip()}
+            common_kw = ref_keywords.intersection(r_kw)
+            if common_kw:
+                score += min(len(common_kw) * 20, 60)
+            r_cast = {c.strip().lower() for c in str(r["tmdb_cast"] or "").split(",") if c.strip()}
+            common_cast = ref_cast.intersection(r_cast)
+            if common_cast:
+                score += min(len(common_cast) * 18, 54)
+                if score < 45:
+                    reason = f"Con {list(common_cast)[0].title()}"
+            r_genres = {g.strip().lower() for g in _tv_genres(r["tmdb_genres"], r["genre"])}
+            common_genres = ref_genres.intersection(r_genres)
+            if common_genres:
+                score += len(common_genres) * 15
+                if score < 40 and not ref_coll and not common_dir:
+                    reason = f"Género: {list(common_genres)[0].title()}"
+
+            if score >= 18:
+                seen_entities.add(r_entity_key)
+                if r_tmdb_key:
+                    seen_entities.add(r_tmdb_key)
+                scored.append({
+                    "id": r["id"],
+                    "title": r["tmdb_title"] or (os.path.basename(r_series_path) if r_is_series else r["title"]) or r["filename"],
+                    "path": r_series_path if r_is_series else r_rel,
+                    "kind": "series" if r_is_series else "movie",
+                    "poster": r["tmdb_poster"] or r["rel_path"],
+                    "year": r["tmdb_year"],
+                    "vote_average": r["tmdb_vote_average"],
+                    "score": score,
+                    "reason": reason
+                })
+
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return jsonify({"items": scored[:12]})
     finally:
         conn.close()
 

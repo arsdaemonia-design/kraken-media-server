@@ -521,11 +521,26 @@ def generar_biblioteca_viva(owner_email='public'):
                title, artist, album, genre, duration_sec, size_bytes, date_added,
                rating, play_count, last_played, language, folder_type, tmdb_id,
                tmdb_title, tmdb_year, tmdb_overview, tmdb_genres, tmdb_poster, tmdb_rating, is_adult, is_hidden,
-               bpm, energy
+               bpm, energy,
+               video_resolution, video_codec, audio_codec, audio_channels, audio_tracks, subtitle_tracks,
+               tmdb_collection_id, tmdb_collection_name, tmdb_collection_poster,
+               tmdb_director, tmdb_cast, tmdb_studio, tmdb_keywords, tmdb_vote_average, tmdb_country, tmdb_backdrop
         FROM media
         ORDER BY folder, title
     ''')
     rows = c.fetchall()
+
+    # Progreso de visualización para filtros Sin Ver / En progreso / Vistas
+    progress_map = {}
+    try:
+        if owner_email and owner_email != 'public':
+            c.execute("SELECT media_id, progress_seconds, duration_seconds, is_finished FROM user_progress WHERE user_email = ?", (owner_email,))
+        else:
+            c.execute("SELECT media_id, progress_seconds, duration_seconds, is_finished FROM user_progress")
+        for pr in c.fetchall():
+            progress_map[pr['media_id']] = pr
+    except Exception:
+        pass
     
     # Obtenemos playlist information map: { rel_path: [pl_name1, pl_name2] }
     try:
@@ -621,14 +636,25 @@ def generar_biblioteca_viva(owner_email='public'):
         }
         if is_video:
             f['folder_type'] = row['folder_type']
-            if row['tmdb_id'] is not None: f['tmdb_id'] = row['tmdb_id']
-            if row['tmdb_title']: f['tmdb_title'] = row['tmdb_title']
-            if row['tmdb_year']: f['tmdb_year'] = row['tmdb_year']
-            if row['tmdb_overview']: f['tmdb_overview'] = row['tmdb_overview']
-            if row['tmdb_genres']: f['tmdb_genres'] = row['tmdb_genres']
-            if row['tmdb_poster']: f['tmdb_poster'] = row['tmdb_poster']
-            if row['tmdb_rating']: f['tmdb_rating'] = row['tmdb_rating']
-            if row['is_adult']: f['is_adult'] = row['is_adult']
+            for col in (
+                'tmdb_id', 'tmdb_title', 'tmdb_year', 'tmdb_overview', 'tmdb_genres',
+                'tmdb_poster', 'tmdb_rating', 'is_adult', 'video_resolution', 'video_codec',
+                'audio_codec', 'audio_channels', 'audio_tracks', 'subtitle_tracks',
+                'tmdb_collection_id', 'tmdb_collection_name', 'tmdb_collection_poster',
+                'tmdb_director', 'tmdb_cast', 'tmdb_studio', 'tmdb_keywords',
+                'tmdb_vote_average', 'tmdb_country', 'tmdb_backdrop'
+            ):
+                try:
+                    val = row[col]
+                    if val is not None and val != '':
+                        f[col] = val
+                except (KeyError, IndexError):
+                    pass
+            prog = progress_map.get(row['id'])
+            if prog:
+                f['progress_seconds'] = prog['progress_seconds'] or 0
+                f['duration_seconds'] = prog['duration_seconds'] or f.get('duration_sec', 0)
+                f['is_finished'] = bool(prog['is_finished'])
         else:
             f['bpm'] = round(float(row['bpm'] or 0.0), 1)
             f['energy'] = round(float(row['energy'] or 0.0), 1)

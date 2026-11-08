@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, send_file, render_template_string, Response, send_from_directory
+from flask import Blueprint, render_template, request, jsonify, send_file, render_template_string, Response, send_from_directory
 import os, time, json, shutil, subprocess, sys, threading, urllib.parse, re, copy, secrets
 import io
 import logging
@@ -638,10 +638,8 @@ def get_stats():
         conn = get_db()
         c = conn.cursor()
         
-        # Get stats from last 30 days
+        # 1. Audio stats from last 30 days
         thirty_days_ago = time.time() - (30 * 24 * 60 * 60)
-        
-        # Top 10 artists by play count
         c.execute('''
             SELECT artist, COUNT(*) as plays, SUM(duration_sec) as total_time
             FROM play_history
@@ -652,7 +650,6 @@ def get_stats():
         ''', (thirty_days_ago,))
         top_artists = [{"artist": r[0], "plays": r[1], "total_time": r[2] or 0} for r in c.fetchall()]
         
-        # Top 20 tracks by play count
         c.execute('''
             SELECT title, artist, COUNT(*) as plays
             FROM play_history
@@ -663,7 +660,6 @@ def get_stats():
         ''', (thirty_days_ago,))
         top_tracks = [{"title": r[0], "artist": r[1], "plays": r[2]} for r in c.fetchall()]
         
-        # Total stats
         c.execute('''
             SELECT COUNT(*) as total_plays, SUM(duration_sec) as total_time
             FROM play_history
@@ -672,16 +668,140 @@ def get_stats():
         row = c.fetchone()
         total_plays = row[0] or 0
         total_time = row[1] or 0
+
+        # Top Audio Genres
+        c.execute('''
+            SELECT genre, COUNT(*) as cnt
+            FROM media
+            WHERE media_type = 'audio' AND genre IS NOT NULL AND genre != ''
+            GROUP BY genre
+            ORDER BY cnt DESC
+            LIMIT 8
+        ''')
+        audio_genres = [{"genre": r[0].split(',')[0].strip(), "count": r[1]} for r in c.fetchall()]
         
+        # 2. Video stats from user_progress & media
+        try:
+            c.execute('''
+                SELECT COUNT(*) as watched_items,
+                       SUM(progress_seconds) as total_watch_sec,
+                       SUM(CASE WHEN is_finished = 1 THEN 1 ELSE 0 END) as completed_items
+                FROM user_progress
+            ''')
+            v_row = c.fetchone()
+            video_watched_items = (v_row[0] or 0) if v_row else 0
+            video_total_time_sec = (v_row[1] or 0) if v_row else 0
+            video_completed_items = (v_row[2] or 0) if v_row else 0
+        except Exception:
+            video_watched_items, video_total_time_sec, video_completed_items = 0, 0, 0
+
+        try:
+            c.execute('''
+                SELECT m.genre, COUNT(*) as cnt
+                FROM user_progress up
+                JOIN media m ON up.media_id = m.id
+                WHERE m.genre IS NOT NULL AND m.genre != ''
+                GROUP BY m.genre
+                ORDER BY cnt DESC
+                LIMIT 8
+            ''')
+            video_top_genres = [{"genre": r[0].split(',')[0].strip(), "count": r[1]} for r in c.fetchall()]
+        except Exception:
+            video_top_genres = []
+
+        if not video_top_genres:
+            try:
+                c.execute('''
+                    SELECT genre, COUNT(*) as cnt
+                    FROM media
+                    WHERE media_type = 'video' AND genre IS NOT NULL AND genre != ''
+                    GROUP BY genre
+                    ORDER BY cnt DESC
+                    LIMIT 8
+                ''')
+                video_top_genres = [{"genre": r[0].split(',')[0].strip(), "count": r[1]} for r in c.fetchall()]
+            except Exception:
+                video_top_genres = []
+
+        try:
+            c.execute('''
+                SELECT tmdb_director, COUNT(*) as cnt
+                FROM media
+                WHERE media_type = 'video' AND tmdb_director IS NOT NULL AND tmdb_director != ''
+                GROUP BY tmdb_director
+                ORDER BY cnt DESC
+                LIMIT 8
+            ''')
+            top_directors = [{"director": r[0].split(',')[0].strip(), "count": r[1]} for r in c.fetchall()]
+        except Exception:
+            top_directors = []
+
+        # 3. Global totals
+        try:
+            c.execute("SELECT COUNT(*), SUM(size_bytes) FROM media WHERE media_type = 'audio'")
+            a_tot = c.fetchone() or (0, 0)
+            c.execute("SELECT COUNT(*), SUM(size_bytes) FROM media WHERE media_type = 'video'")
+            v_tot = c.fetchone() or (0, 0)
+            c.execute("SELECT COUNT(*) FROM media WHERE media_type = 'video' AND folder_type = 'movie'")
+            total_movies = (c.fetchone() or [0])[0]
+            c.execute("SELECT COUNT(DISTINCT artist) FROM media WHERE media_type = 'audio' AND artist IS NOT NULL")
+            distinct_artists = (c.fetchone() or [0])[0]
+            c.execute("SELECT COUNT(DISTINCT album) FROM media WHERE media_type = 'audio' AND album IS NOT NULL")
+            distinct_albums = (c.fetchone() or [0])[0]
+            c.execute("SELECT COUNT(*) FROM media WHERE media_type = 'audio' AND rating = 1")
+            favs_audio = (c.fetchone() or [0])[0]
+            c.execute("SELECT COUNT(*) FROM media WHERE media_type = 'video' AND rating = 1")
+            favs_video = (c.fetchone() or [0])[0]
+        except Exception:
+            a_tot = (0, 0)
+            v_tot = (0, 0)
+            total_movies, distinct_artists, distinct_albums, favs_audio, favs_video = 0, 0, 0, 0, 0
+
         conn.close()
         
+        audio_bytes_val = a_tot[1] or 0
+        video_bytes_val = v_tot[1] or 0
+
         return jsonify({
             "ok": True,
             "period_days": 30,
             "total_plays": total_plays,
             "total_time_sec": total_time,
             "top_artists": top_artists,
-            "top_tracks": top_tracks
+            "top_tracks": top_tracks,
+            "audio_genres": audio_genres,
+            "audio": {
+                "total_plays": total_plays,
+                "total_time_sec": total_time,
+                "top_artists": top_artists,
+                "top_tracks": top_tracks,
+                "top_genres": audio_genres
+            },
+            "video": {
+                "watched_items": video_watched_items,
+                "watched_videos": video_watched_items,
+                "total_time_sec": video_total_time_sec,
+                "total_watch_hours": round(video_total_time_sec / 3600.0, 1),
+                "completed_items": video_completed_items,
+                "completed_videos": video_completed_items,
+                "total_movies": total_movies or (v_tot[0] or 0),
+                "top_genres": video_top_genres,
+                "top_directors": top_directors
+            },
+            "global": {
+                "audio_count": a_tot[0] or 0,
+                "audio_bytes": audio_bytes_val,
+                "audio_bytes_gb": round(audio_bytes_val / (1024 ** 3), 1),
+                "video_count": v_tot[0] or 0,
+                "video_bytes": video_bytes_val,
+                "video_bytes_gb": round(video_bytes_val / (1024 ** 3), 1),
+                "distinct_artists": distinct_artists,
+                "distinct_albums": distinct_albums,
+                "favs_audio": favs_audio,
+                "audio_favs": favs_audio,
+                "favs_video": favs_video,
+                "video_favs": favs_video
+            }
         })
     except Exception as e:
         return jsonify({"error": str(e), "top_artists": [], "top_tracks": []})
@@ -1948,6 +2068,12 @@ def actualizar_cache():
     
     # escaneo físico
     escanear_archivos_fisicos()
+    _clear_library_caches()
+    try:
+        from services.video_tagger import enrich_extended_tmdb_metadata_async
+        threading.Thread(target=enrich_extended_tmdb_metadata_async, daemon=True).start()
+    except Exception as e:
+        print(f"Warning lanzando enrich_extended_tmdb_metadata_async: {e}")
     return jsonify({"ok": True})
 
 @api_bp.route('/crear_carpeta', methods=['POST'])
@@ -2881,14 +3007,67 @@ def auto_tag_video_endpoint():
 
         # Guardar en base de datos
         from services.database import get_db
+        from services.video_tagger import extract_extended_tmdb_fields
         conn = get_db()
         c = conn.cursor()
+
+        ext = extract_extended_tmdb_fields(result, result.get('media_type', video_type))
+        coll_poster = None
+        if ext.get('tmdb_collection_poster') and ext.get('tmdb_collection_id'):
+            coll_file = f"collection_{ext['tmdb_collection_id']}.jpg"
+            if not os.path.exists(os.path.join(config.THUMBNAILS_FOLDER, coll_file)):
+                download_poster(ext['tmdb_collection_poster'], config.THUMBNAILS_FOLDER, f"collection_{ext['tmdb_collection_id']}")
+            coll_poster = coll_file
+
+        c.execute('''
+            UPDATE media SET
+            tmdb_id = ?,
+            tmdb_title = ?,
+            tmdb_year = ?,
+            tmdb_overview = ?,
+            tmdb_genres = ?,
+            tmdb_poster = ?,
+            tmdb_rating = ?,
+            tmdb_collection_id = ?,
+            tmdb_collection_name = ?,
+            tmdb_collection_poster = ?,
+            tmdb_director = ?,
+            tmdb_cast = ?,
+            tmdb_studio = ?,
+            tmdb_keywords = ?,
+            tmdb_vote_average = ?,
+            tmdb_country = ?,
+            tmdb_backdrop = ?
+            WHERE rel_path = ? OR rel_path = ?
+        ''', (
+            result.get('id'),
+            title,
+            year,
+            overview,
+            ','.join(genres),
+            poster_filename,
+            result.get('content_rating'),
+            ext.get('tmdb_collection_id'),
+            ext.get('tmdb_collection_name'),
+            coll_poster or ext.get('tmdb_collection_poster'),
+            ext.get('tmdb_director'),
+            ext.get('tmdb_cast'),
+            ext.get('tmdb_studio'),
+            ext.get('tmdb_keywords'),
+            ext.get('tmdb_vote_average'),
+            ext.get('tmdb_country'),
+            ext.get('tmdb_backdrop'),
+            path.replace('\\', '/').lstrip('/'),
+            path.replace('/', '\\').lstrip('\\')
+        ))
 
         # Actualizar o insertar metadata
         c.execute('''
             INSERT OR REPLACE INTO video_metadata
-            (path, tmdb_title, tmdb_year, tmdb_overview, tmdb_genres, tmdb_poster, tmdb_id, tmdb_type, tmdb_rating)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (path, tmdb_title, tmdb_year, tmdb_overview, tmdb_genres, tmdb_poster, tmdb_id, tmdb_type, tmdb_rating,
+             tmdb_collection_id, tmdb_collection_name, tmdb_collection_poster, tmdb_director, tmdb_cast, tmdb_studio,
+             tmdb_keywords, tmdb_vote_average, tmdb_country, tmdb_backdrop)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             path,
             title,
@@ -2898,10 +3077,21 @@ def auto_tag_video_endpoint():
             poster_filename,
             result.get('id'),
             result.get('media_type'),
-            result.get('content_rating')
+            result.get('content_rating'),
+            ext.get('tmdb_collection_id'),
+            ext.get('tmdb_collection_name'),
+            coll_poster or ext.get('tmdb_collection_poster'),
+            ext.get('tmdb_director'),
+            ext.get('tmdb_cast'),
+            ext.get('tmdb_studio'),
+            ext.get('tmdb_keywords'),
+            ext.get('tmdb_vote_average'),
+            ext.get('tmdb_country'),
+            ext.get('tmdb_backdrop')
         ))
         conn.commit()
         conn.close()
+        BIB_CACHE_BY_OWNER.clear()
 
         return jsonify({
             'found': True,
@@ -3028,10 +3218,21 @@ def auto_tag_library_videos():
         c.execute("SELECT COUNT(*) FROM media WHERE tmdb_id IS NOT NULL AND tmdb_id > 0 AND (tmdb_rating IS NULL OR tmdb_rating = '') AND media_type = 'video'")
         pending_ratings_count = (c.fetchone() or [0])[0]
 
-        if not videos and pending_ratings_count == 0 and not subtitle_candidates:
+        c.execute('''
+            SELECT DISTINCT tmdb_id, folder_type
+            FROM media
+            WHERE media_type = 'video'
+              AND tmdb_id IS NOT NULL AND tmdb_id > 0
+              AND (tmdb_director IS NULL OR tmdb_director = ''
+                   OR tmdb_cast IS NULL OR tmdb_cast = ''
+                   OR tmdb_vote_average IS NULL OR tmdb_vote_average = 0)
+        ''')
+        pending_extended = c.fetchall()
+
+        if not videos and pending_ratings_count == 0 and not pending_extended and not subtitle_candidates:
             conn.close()
             return jsonify({
-                'message': 'No hay videos pendientes de auto-tag ni subtítulos por extraer',
+                'message': 'Todos tus videos ya cuentan con Sagas, Directores, Reparto, Clasificación y Subtítulos al día',
                 'processed': 0,
                 'subtitles_extracted': 0
             })
@@ -3105,6 +3306,15 @@ def auto_tag_library_videos():
                                 filename_base
                             )
 
+                    from services.video_tagger import extract_extended_tmdb_fields
+                    ext = extract_extended_tmdb_fields(result, result.get('media_type', video_folder_type))
+                    coll_poster = None
+                    if ext.get('tmdb_collection_poster') and ext.get('tmdb_collection_id'):
+                        coll_file = f"collection_{ext['tmdb_collection_id']}.jpg"
+                        if not os.path.exists(os.path.join(config.THUMBNAILS_FOLDER, coll_file)):
+                            download_poster(ext['tmdb_collection_poster'], config.THUMBNAILS_FOLDER, f"collection_{ext['tmdb_collection_id']}")
+                        coll_poster = coll_file
+
                     c.execute('''
                         UPDATE media SET
                         tmdb_id = ?,
@@ -3113,7 +3323,17 @@ def auto_tag_library_videos():
                         tmdb_overview = ?,
                         tmdb_genres = ?,
                         tmdb_poster = ?,
-                        tmdb_rating = ?
+                        tmdb_rating = ?,
+                        tmdb_collection_id = ?,
+                        tmdb_collection_name = ?,
+                        tmdb_collection_poster = ?,
+                        tmdb_director = ?,
+                        tmdb_cast = ?,
+                        tmdb_studio = ?,
+                        tmdb_keywords = ?,
+                        tmdb_vote_average = ?,
+                        tmdb_country = ?,
+                        tmdb_backdrop = ?
                         WHERE rel_path = ?
                     ''', (
                         result.get('id'),
@@ -3123,6 +3343,16 @@ def auto_tag_library_videos():
                         ','.join(genres),
                         poster_filename,
                         result.get('content_rating'),
+                        ext.get('tmdb_collection_id'),
+                        ext.get('tmdb_collection_name'),
+                        coll_poster or ext.get('tmdb_collection_poster'),
+                        ext.get('tmdb_director'),
+                        ext.get('tmdb_cast'),
+                        ext.get('tmdb_studio'),
+                        ext.get('tmdb_keywords'),
+                        ext.get('tmdb_vote_average'),
+                        ext.get('tmdb_country'),
+                        ext.get('tmdb_backdrop'),
                         video_path
                     ))
                     conn.commit()
@@ -3163,11 +3393,67 @@ def auto_tag_library_videos():
                         updated_ratings += 1
                         
                     if i % 3 == 0 or i == len(rating_videos) - 1:
-                        pct = 45 + int(((i + 1) / len(rating_videos)) * 20)
+                        pct = 35 + int(((i + 1) / len(rating_videos)) * 15)
                         state.RESCAN_STATUS["percent"] = pct
                         state.RESCAN_STATUS["message"] = f"Clasificando: {i+1}/{len(rating_videos)} ({pct}%)"
                 except Exception:
                     pass
+
+        # FASE 2.5: Enriquecer Sagas, Directores, Reparto, Estudio, Keywords y Puntuación (v5.0.2)
+        enriched_extended_count = 0
+        if pending_extended:
+            from services.video_tagger import get_movie_details, get_tv_details, extract_extended_tmdb_fields
+            total_ext = len(pending_extended)
+            for idx_e, erow in enumerate(pending_extended, 1):
+                try:
+                    import time as _time; _time.sleep(0.06)
+                    e_tmdb_id = erow[0]
+                    e_type = erow[1] or 'movie'
+                    is_tv = e_type in ('series', 'anime', 'tv')
+                    details = get_tv_details(e_tmdb_id) if is_tv else get_movie_details(e_tmdb_id)
+                    if details:
+                        ext = extract_extended_tmdb_fields(details, 'tv' if is_tv else 'movie')
+                        coll_poster = None
+                        if ext.get('tmdb_collection_poster') and ext.get('tmdb_collection_id'):
+                            coll_file = f"collection_{ext['tmdb_collection_id']}.jpg"
+                            if not os.path.exists(os.path.join(config.THUMBNAILS_FOLDER, coll_file)):
+                                download_poster(ext['tmdb_collection_poster'], config.THUMBNAILS_FOLDER, f"collection_{ext['tmdb_collection_id']}")
+                            coll_poster = coll_file
+                        c.execute('''
+                            UPDATE media SET
+                                tmdb_collection_id = COALESCE(?, tmdb_collection_id),
+                                tmdb_collection_name = COALESCE(?, tmdb_collection_name),
+                                tmdb_collection_poster = COALESCE(?, tmdb_collection_poster),
+                                tmdb_director = COALESCE(?, tmdb_director),
+                                tmdb_cast = COALESCE(?, tmdb_cast),
+                                tmdb_studio = COALESCE(?, tmdb_studio),
+                                tmdb_keywords = COALESCE(?, tmdb_keywords),
+                                tmdb_vote_average = COALESCE(?, tmdb_vote_average),
+                                tmdb_country = COALESCE(?, tmdb_country),
+                                tmdb_backdrop = COALESCE(?, tmdb_backdrop)
+                            WHERE tmdb_id = ? AND media_type = 'video'
+                        ''', (
+                            ext.get('tmdb_collection_id'),
+                            ext.get('tmdb_collection_name'),
+                            coll_poster or ext.get('tmdb_collection_poster'),
+                            ext.get('tmdb_director'),
+                            ext.get('tmdb_cast'),
+                            ext.get('tmdb_studio'),
+                            ext.get('tmdb_keywords'),
+                            ext.get('tmdb_vote_average'),
+                            ext.get('tmdb_country'),
+                            ext.get('tmdb_backdrop'),
+                            e_tmdb_id
+                        ))
+                        conn.commit()
+                        enriched_extended_count += 1
+                    pct = 50 + int((idx_e / max(1, total_ext)) * 25)
+                    state.RESCAN_STATUS["processed"] = idx_e
+                    state.RESCAN_STATUS["total"] = total_ext
+                    state.RESCAN_STATUS["percent"] = pct
+                    state.RESCAN_STATUS["message"] = f"Sagas y Reparto TMDB: {idx_e}/{total_ext} ({pct}%)"
+                except Exception as e:
+                    print(f"Error enriqueciendo extendido {erow}: {e}")
 
         conn.close()
 
@@ -3195,6 +3481,7 @@ def auto_tag_library_videos():
 
         elapsed = time.time() - state.RESCAN_STATUS.get("start_time", time.time())
         state.RESCAN_STATUS["active"] = False
+        BIB_CACHE_BY_OWNER.clear()
         state.RESCAN_STATUS["stage"] = "done"
         state.RESCAN_STATUS["percent"] = 100
         state.RESCAN_STATUS["message"] = (
@@ -3208,8 +3495,9 @@ def auto_tag_library_videos():
                 f'{updated_ratings} clasificaciones actualizadas y {subtitles_extracted} subtítulos .srt extraídos '
                 f'({videos_with_new_subs} videos)'
             ),
-            'found': found,
-            'processed': processed,
+            'found': found + enriched_extended_count,
+            'processed': processed + enriched_extended_count,
+            'enriched_extended': enriched_extended_count,
             'series_posters': posters_downloaded,
             'ratings_updated': updated_ratings,
             'subtitles_extracted': subtitles_extracted,
@@ -3312,6 +3600,92 @@ def update_video_ratings():
         'total': len(videos),
         'errors': errors if errors else None
     })
+
+
+@api_bp.route('/api/enrich_video_metadata', methods=['POST'])
+def enrich_video_metadata():
+    """
+    Rellena colecciones, directores, reparto, estudio, keywords, score TMDb
+    para videos que YA tienen tmdb_id asignado.
+    Agrupa por tmdb_id único para no hacer llamadas repetidas a TMDb.
+    """
+    data = request.json or {}
+    pin = data.get('pin')
+    if pin != get_master_pin():
+        return jsonify({'error': 'PIN incorrecto'}), 401
+
+    def _worker():
+        from services.database import get_db
+        from services.video_tagger import get_movie_details, get_tv_details, extract_extended_tmdb_fields, download_poster
+        import config
+
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('''
+            SELECT DISTINCT tmdb_id, folder_type
+            FROM media
+            WHERE tmdb_id IS NOT NULL AND tmdb_id > 0
+              AND (tmdb_director IS NULL AND tmdb_cast IS NULL AND (tmdb_vote_average IS NULL OR tmdb_vote_average = 0))
+              AND media_type = 'video'
+        ''')
+        unique_tmdb = c.fetchall()
+        print(f"[Enrich] {len(unique_tmdb)} títulos TMDB únicos por enriquecer...")
+
+        updated_count = 0
+        for item in unique_tmdb:
+            tid = item['tmdb_id']
+            ftype = item['folder_type'] or 'movie'
+            try:
+                time.sleep(0.12)
+                details = get_movie_details(tid) if ftype == 'movie' else get_tv_details(tid)
+                if not details:
+                    continue
+                ext = extract_extended_tmdb_fields(details, 'movie' if ftype == 'movie' else 'tv')
+                coll_poster = None
+                if ext.get('tmdb_collection_poster') and ext.get('tmdb_collection_id'):
+                    coll_file = f"collection_{ext['tmdb_collection_id']}.jpg"
+                    if not os.path.exists(os.path.join(config.THUMBNAILS_FOLDER, coll_file)):
+                        download_poster(ext['tmdb_collection_poster'], config.THUMBNAILS_FOLDER, f"collection_{ext['tmdb_collection_id']}")
+                    coll_poster = coll_file
+
+                c.execute('''
+                    UPDATE media SET
+                    tmdb_collection_id = ?,
+                    tmdb_collection_name = ?,
+                    tmdb_collection_poster = ?,
+                    tmdb_director = ?,
+                    tmdb_cast = ?,
+                    tmdb_studio = ?,
+                    tmdb_keywords = ?,
+                    tmdb_vote_average = ?,
+                    tmdb_country = ?,
+                    tmdb_backdrop = ?
+                    WHERE tmdb_id = ?
+                ''', (
+                    ext.get('tmdb_collection_id'),
+                    ext.get('tmdb_collection_name'),
+                    coll_poster or ext.get('tmdb_collection_poster'),
+                    ext.get('tmdb_director'),
+                    ext.get('tmdb_cast'),
+                    ext.get('tmdb_studio'),
+                    ext.get('tmdb_keywords'),
+                    ext.get('tmdb_vote_average'),
+                    ext.get('tmdb_country'),
+                    ext.get('tmdb_backdrop'),
+                    tid
+                ))
+                conn.commit()
+                updated_count += 1
+            except Exception as e:
+                print(f"[Enrich] Error procesando tmdb_id {tid}: {e}")
+
+        conn.close()
+        global BIB_CACHE_BY_OWNER
+        BIB_CACHE_BY_OWNER.clear()
+        print(f"✅ [Enrich] Enriquecimiento finalizado. {updated_count} títulos actualizados.")
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({'ok': True, 'message': 'Enriquecimiento iniciado en segundo plano'})
 
 
 @api_bp.route('/api/check_update', methods=['GET'])
@@ -4534,11 +4908,12 @@ def tmdb_extended_details():
     try:
         from services.video_tagger import TMDB_API_KEY, TMDB_BASE_URL
 
-        # 1. Get main details + credits in one call
+        # 1. Get main details + credits + keywords + videos + images in one call
         params = {
             'api_key': TMDB_API_KEY,
             'language': 'es-MX',
-            'append_to_response': 'credits'
+            'append_to_response': 'credits,keywords,videos,images',
+            'include_image_language': 'es,en,null'
         }
 
         endpoint = f"{TMDB_BASE_URL}/{media_type}/{tmdb_id}"
@@ -4569,8 +4944,45 @@ def tmdb_extended_details():
             if creators and not directors:
                 directors = creators
 
-        # Extract backdrop
-        backdrop = f"https://image.tmdb.org/t/p/w1280{data['backdrop_path']}" if data.get('backdrop_path') else None
+        # Extract backdrop (prefer backdrop_path, fallback to first horizontal image)
+        backdrop_path = data.get('backdrop_path')
+        if not backdrop_path:
+            img_list = data.get('images', {}).get('backdrops', [])
+            if img_list and isinstance(img_list, list) and img_list[0].get('file_path'):
+                backdrop_path = img_list[0]['file_path']
+        backdrop = f"https://image.tmdb.org/t/p/w1280{backdrop_path}" if backdrop_path else None
+
+        # Extract YouTube trailer
+        def _pick_yt_trailer(videos_list):
+            if not videos_list or not isinstance(videos_list, list):
+                return None
+            yt_videos = [v for v in videos_list if v.get('site') == 'YouTube' and v.get('key')]
+            # 1. Trailer in Spanish
+            t_es = next((v['key'] for v in yt_videos if v.get('type') == 'Trailer' and v.get('iso_639_1') in ('es', 'es-MX')), None)
+            if t_es:
+                return t_es
+            # 2. Teaser in Spanish
+            tz_es = next((v['key'] for v in yt_videos if v.get('type') == 'Teaser' and v.get('iso_639_1') in ('es', 'es-MX')), None)
+            if tz_es:
+                return tz_es
+            # 3. Trailer in English
+            t_en = next((v['key'] for v in yt_videos if v.get('type') == 'Trailer' and v.get('iso_639_1') == 'en'), None)
+            if t_en:
+                return t_en
+            # 4. Any Trailer
+            t_any = next((v['key'] for v in yt_videos if v.get('type') == 'Trailer'), None)
+            if t_any:
+                return t_any
+            return yt_videos[0]['key'] if yt_videos else None
+
+        trailer_key = _pick_yt_trailer(data.get('videos', {}).get('results', []))
+        if not trailer_key:
+            try:
+                vr = requests.get(f"{TMDB_BASE_URL}/{media_type}/{tmdb_id}/videos", params={'api_key': TMDB_API_KEY, 'language': 'en-US'}, timeout=5)
+                if vr.status_code == 200:
+                    trailer_key = _pick_yt_trailer(vr.json().get('results', []))
+            except Exception:
+                pass
 
         # Build response
         title = data.get('title') or data.get('name', '')
@@ -4580,6 +4992,27 @@ def tmdb_extended_details():
         vote = data.get('vote_average', 0)
         seasons = data.get('number_of_seasons')
         episodes = data.get('number_of_episodes')
+
+        # Extract collection, keywords and studios
+        coll_raw = data.get('belongs_to_collection') or {}
+        collection_info = None
+        if coll_raw and isinstance(coll_raw, dict):
+            c_name = re.sub(r'\s*[-–—]\s*Colecci[oó]n$', '', coll_raw.get('name') or '', flags=re.IGNORECASE).strip()
+            collection_info = {
+                'id': coll_raw.get('id'),
+                'name': c_name,
+                'poster': f"https://image.tmdb.org/t/p/w500{coll_raw['poster_path']}" if coll_raw.get('poster_path') else None
+            }
+        
+        kw_obj = data.get('keywords') or {}
+        kw_list = kw_obj.get('keywords') or kw_obj.get('results') or []
+        keywords = [k.get('name', '').strip() for k in kw_list if isinstance(k, dict) and k.get('name')][:15]
+
+        studios = []
+        if media_type == 'tv':
+            studios = [n.get('name', '').strip() for n in (data.get('networks') or []) if n.get('name')]
+        if not studios:
+            studios = [p.get('name', '').strip() for p in (data.get('production_companies') or []) if p.get('name')]
 
         return jsonify({
             "ok": True,
@@ -4592,7 +5025,11 @@ def tmdb_extended_details():
             "cast": cast,
             "directors": directors,
             "seasons": seasons,
-            "episodes": episodes
+            "episodes": episodes,
+            "collection": collection_info,
+            "keywords": keywords,
+            "studios": studios[:3],
+            "trailer_key": trailer_key
         })
 
     except Exception as e:
@@ -5290,3 +5727,262 @@ def share_lyrics(token):
         return jsonify({'found': False, 'error': 'Enlace expirado'}), 410
 
     return lyrics(row['rel_path'])
+
+# ============================================================
+# BACKGROUND AUTO-ENRICH WORKER (v5.0.2)
+# ============================================================
+def _start_auto_enrich_worker():
+    def _run():
+        time.sleep(12)  # Esperar inicio del servidor
+        try:
+            from services.database import get_db
+            from services.video_tagger import get_movie_details, get_tv_details, extract_extended_tmdb_fields, download_poster
+            import config
+
+            conn = get_db()
+            c = conn.cursor()
+            c.execute('''
+                SELECT DISTINCT tmdb_id, folder_type
+                FROM media
+                WHERE tmdb_id IS NOT NULL AND tmdb_id > 0
+                  AND (tmdb_director IS NULL AND tmdb_cast IS NULL AND (tmdb_vote_average IS NULL OR tmdb_vote_average = 0))
+                  AND media_type = 'video'
+                LIMIT 250
+            ''')
+            rows = c.fetchall()
+            if not rows:
+                conn.close()
+                return
+
+            print(f"🚀 [Auto-Enrich] Detectados {len(rows)} títulos TMDB sin metadatos extendidos. Iniciando auto-completado...")
+            updated = 0
+            for r in rows:
+                tid = r['tmdb_id']
+                ftype = r['folder_type'] or 'movie'
+                try:
+                    time.sleep(0.15)
+                    details = get_movie_details(tid) if ftype == 'movie' else get_tv_details(tid)
+                    if not details:
+                        continue
+                    ext = extract_extended_tmdb_fields(details, 'movie' if ftype == 'movie' else 'tv')
+                    coll_poster = None
+                    if ext.get('tmdb_collection_poster') and ext.get('tmdb_collection_id'):
+                        coll_file = f"collection_{ext['tmdb_collection_id']}.jpg"
+                        if not os.path.exists(os.path.join(config.THUMBNAILS_FOLDER, coll_file)):
+                            download_poster(ext['tmdb_collection_poster'], config.THUMBNAILS_FOLDER, f"collection_{ext['tmdb_collection_id']}")
+                        coll_poster = coll_file
+
+                    c.execute('''
+                        UPDATE media SET
+                        tmdb_collection_id = ?,
+                        tmdb_collection_name = ?,
+                        tmdb_collection_poster = ?,
+                        tmdb_director = ?,
+                        tmdb_cast = ?,
+                        tmdb_studio = ?,
+                        tmdb_keywords = ?,
+                        tmdb_vote_average = ?,
+                        tmdb_country = ?,
+                        tmdb_backdrop = ?
+                        WHERE tmdb_id = ?
+                    ''', (
+                        ext.get('tmdb_collection_id'),
+                        ext.get('tmdb_collection_name'),
+                        coll_poster or ext.get('tmdb_collection_poster'),
+                        ext.get('tmdb_director'),
+                        ext.get('tmdb_cast'),
+                        ext.get('tmdb_studio'),
+                        ext.get('tmdb_keywords'),
+                        ext.get('tmdb_vote_average'),
+                        ext.get('tmdb_country'),
+                        ext.get('tmdb_backdrop'),
+                        tid
+                    ))
+                    conn.commit()
+                    updated += 1
+                except Exception as e:
+                    print(f"⚠️ [Auto-Enrich] Error en tmdb_id {tid}: {e}")
+
+            conn.close()
+            if updated > 0:
+                global BIB_CACHE_BY_OWNER
+                BIB_CACHE_BY_OWNER.clear()
+                print(f"✅ [Auto-Enrich] {updated} títulos enriquecidos en segundo plano.")
+        except Exception as e:
+            print(f"⚠️ [Auto-Enrich] Error general: {e}")
+
+    threading.Thread(target=_run, daemon=True).start()
+
+try:
+    _start_auto_enrich_worker()
+except Exception as e:
+    print(f"⚠️ Error iniciando worker de auto-enrich: {e}")
+
+
+# ============= MODO FIESTA (Jukebox Colaborativo para Invitados) =============
+
+def _get_party_base_url() -> str:
+    """Devuelve la URL base (public_url o IP LAN) para que el QR y link de Modo Fiesta funcionen desde celulares."""
+    try:
+        runtime = _load_runtime_config()
+        pub_url = (runtime.get("public_url") or getattr(config, "PUBLIC_SERVER_URL", "") or getattr(config, "CAST_PUBLIC_URL", "") or "").strip().rstrip("/")
+        if pub_url:
+            return pub_url
+    except Exception:
+        pass
+    host_url = request.host_url.rstrip("/")
+    if "127.0.0.1" in host_url or "localhost" in host_url:
+        try:
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            lan_ip = s.getsockname()[0]
+            s.close()
+            port = request.host.split(":")[1] if ":" in request.host else "5000"
+            return f"http://{lan_ip}:{port}"
+        except Exception:
+            pass
+    return host_url
+
+@api_bp.route('/api/party/toggle', methods=['POST'])
+def party_toggle():
+    from services.party_mode import party_manager
+    data = request.get_json(silent=True) or {}
+    enable = data.get('active')
+    limit = data.get('limit_per_guest', 10)
+    res = party_manager.toggle(enable=enable, limit_per_guest=limit)
+    guest_url = f"{_get_party_base_url()}/fiesta"
+    return jsonify({"ok": True, "guest_url": guest_url, **res})
+
+@api_bp.route('/api/party/status')
+def party_status():
+    from services.party_mode import party_manager
+    status = party_manager.get_status()
+    guest_url = f"{_get_party_base_url()}/fiesta"
+    return jsonify({"ok": True, "guest_url": guest_url, **status})
+
+@api_bp.route('/fiesta')
+def fiesta_page():
+    from services.party_mode import party_manager
+    code = request.args.get('code') or party_manager.code
+    return render_template('party_guest.html', active=party_manager.active, code=code)
+
+@api_bp.route('/api/party/search')
+def party_search():
+    from services.party_mode import party_manager
+    if not party_manager.active:
+        return jsonify({"ok": False, "error": "El Modo Fiesta está desactivado.", "items": []})
+    q = (request.args.get('q') or '').strip().lower()
+    conn = get_db()
+    c = conn.cursor()
+    if q:
+        c.execute('''
+            SELECT rel_path, title, artist, album, duration_sec, id
+            FROM media
+            WHERE media_type = 'audio' AND (
+                LOWER(title) LIKE ? OR LOWER(artist) LIKE ? OR LOWER(album) LIKE ?
+            )
+            ORDER BY play_count DESC
+            LIMIT 30
+        ''', (f"%{q}%", f"%{q}%", f"%{q}%"))
+    else:
+        c.execute('''
+            SELECT rel_path, title, artist, album, duration_sec, id
+            FROM media
+            WHERE media_type = 'audio'
+            ORDER BY play_count DESC, rating DESC
+            LIMIT 25
+        ''')
+    rows = c.fetchall()
+    conn.close()
+
+    items = []
+    for r in rows:
+        dur_sec = r['duration_sec'] or 0
+        mins = int(dur_sec // 60)
+        secs = int(dur_sec % 60)
+        cover = f"/caratula/{r['rel_path'].replace(chr(92), '/')}"
+        items.append({
+            "id": r['id'],
+            "path": r['rel_path'].replace('\\', '/'),
+            "title": r['title'] or "Canción",
+            "artist": r['artist'] or "Desconocido",
+            "album": r['album'] or "",
+            "duration": f"{mins}:{secs:02d}",
+            "duration_sec": dur_sec,
+            "cover": cover
+        })
+    return jsonify({"ok": True, "items": items})
+
+@api_bp.route('/api/party/add', methods=['POST'])
+def party_add():
+    from services.party_mode import party_manager
+    data = request.get_json(silent=True) or {}
+    path = data.get('path')
+    guest_name = data.get('guest_name', 'Invitado')
+    guest_id = data.get('guest_id') or request.remote_addr or 'guest'
+
+    if not path:
+        return jsonify({"ok": False, "error": "Falta la ruta de la canción"}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    norm_path = path.replace('\\', '/').lstrip('/')
+    row = c.execute("SELECT rel_path, title, artist, album, duration_sec FROM media WHERE rel_path = ? OR rel_path = ?", (norm_path, path)).fetchone()
+    if not row:
+        row = c.execute("SELECT rel_path, title, artist, album, duration_sec FROM media WHERE rel_path LIKE ? LIMIT 1", (f"%{norm_path}",)).fetchone()
+    conn.close()
+
+    if not row:
+        return jsonify({"ok": False, "error": "Canción no encontrada en biblioteca"}), 404
+
+    dur_sec = row['duration_sec'] or 0
+    mins = int(dur_sec // 60)
+    secs = int(dur_sec % 60)
+    cover = f"/caratula/{row['rel_path'].replace(chr(92), '/')}"
+
+    track_info = {
+        "path": row['rel_path'].replace('\\', '/'),
+        "title": row['title'] or "Canción",
+        "artist": row['artist'] or "Desconocido",
+        "album": row['album'] or "",
+        "duration": f"{mins}:{secs:02d}",
+        "duration_sec": dur_sec,
+        "cover": cover
+    }
+
+    res = party_manager.add_to_queue(track_info, guest_name=guest_name, guest_id=guest_id)
+    return jsonify(res)
+
+@api_bp.route('/api/party/vote', methods=['POST'])
+def party_vote():
+    from services.party_mode import party_manager
+    data = request.get_json(silent=True) or {}
+    item_id = data.get('item_id')
+    guest_id = data.get('guest_id') or request.remote_addr or 'guest'
+    if not item_id:
+        return jsonify({"ok": False, "error": "Falta item_id"}), 400
+    res = party_manager.vote_track(item_id, guest_id)
+    return jsonify(res)
+
+@api_bp.route('/api/party/host-sync')
+def party_host_sync():
+    from services.party_mode import party_manager
+    cursor = int(request.args.get('cursor', 0))
+    res = party_manager.get_host_sync(cursor)
+    return jsonify({"ok": True, **res})
+
+@api_bp.route('/api/party/mark-consumed', methods=['POST'])
+def party_mark_consumed():
+    from services.party_mode import party_manager
+    data = request.get_json(silent=True) or {}
+    item_id = data.get('item_id')
+    if item_id:
+        party_manager.mark_consumed(item_id)
+    return jsonify({"ok": True})
+
+@api_bp.route('/api/party/clear', methods=['POST'])
+def party_clear():
+    from services.party_mode import party_manager
+    party_manager.clear_queue()
+    return jsonify({"ok": True})

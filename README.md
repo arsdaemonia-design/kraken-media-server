@@ -1,227 +1,265 @@
-# Kraken Media Server — Guía de usuario
+# 🐙 Kraken Media Server — Guía de Uso y Configuración (v5.0.2)
 
-Kraken es un servidor multimedia autohospedado para organizar y reproducir música y video desde una biblioteca propia. Incluye una aplicación web, una modalidad de escritorio para Windows, acceso remoto opcional mediante Cloudflare Tunnel y un cliente experimental para Android TV.
+Kraken es un servidor multimedia autohospedado para organizar, descubrir y reproducir música y video desde tu propia biblioteca. Incluye una aplicación web adaptable (PC y móvil), modalidad de escritorio para Windows (`KrakenOffline.exe`), acceso remoto mediante Cloudflare Tunnel y una aplicación 100% nativa en Kotlin para Android TV (`KrakenTV`).
 
-> **Estado documentado:** backend/web v5.0.1 y cliente Android TV KrakenTV v5.0.1 (octubre de 2026). Incluye Watch Party interactivo, Danmaku visual en pantalla, control remoto cinemático con soporte de chat/reacciones, backend modular por Blueprints y sincronización en tiempo real.
+> **Estado documentado:** Backend/Web **v5.0.2 (`v5.0.2.7`)** y cliente Android TV **KrakenTV v5.0.1** (noviembre de 2026). Incluye **Modo Fiesta Colaborativo (`/fiesta`)**, **Catálogo Inteligente TMDB** (Sagas, Hero de Director/Actor, Tráilers Oficiales de YouTube y Similares), **Ruleta Interactiva**, **Favoritos unificados**, **Estadísticas en 3 pestañas**, **Enlaces Compartidos Efímeros (`/share/<token>`)**, **Perfiles Beta temporales**, **Login por QR para TV (`/tv-verify`)** y **Modo Amigo (Watch Party con Danmaku)**.
+
+---
 
 ## Índice
 
-- [Qué ofrece](#qué-ofrece)
-- [Requisitos](#requisitos)
-- [Instalar y arrancar](#instalar-y-arrancar)
-- [Primera configuración](#primera-configuración)
-- [Usar la biblioteca](#usar-la-biblioteca)
-- [Descargas](#descargas)
-- [Música](#música)
-- [Video](#video)
-- [Subtítulos](#subtítulos)
-- [Usuarios, modo niños y bóveda +18](#usuarios-modo-niños-y-bóveda-18)
-- [Acceso remoto con Cloudflare Tunnel y dominio](#acceso-remoto-con-cloudflare-tunnel-y-dominio)
-- [Google Cast / Chromecast](#google-cast--chromecast)
-- [Android TV](#android-tv)
-- [Modo escritorio y PWA](#modo-escritorio-y-pwa)
-- [Solución de problemas](#solución-de-problemas)
-- [Privacidad, respaldo y mantenimiento](#privacidad-respaldo-y-mantenimiento)
-- [Documentación relacionada](#documentación-relacionada)
+1. [Qué ofrece Kraken](#1-qué-ofrece-kraken)
+2. [Requisitos e Instalación](#2-requisitos-e-instalación)
+3. [Primera configuración y Dominio Público](#3-primera-configuración-y-dominio-público)
+4. [Música: Biblioteca, Favoritos, OST Nerd y Enlaces Compartidos](#4-música-biblioteca-favoritos-ost-nerd-y-enlaces-compartidos)
+5. [🎉 Modo Fiesta Colaborativo (`/fiesta`)](#5--modo-fiesta-colaborativo-fiesta)
+6. [🎬 Video: Catálogo Inteligente, Filtros, Sagas, Ruleta y Tráilers](#6--video-catálogo-inteligente-filtros-sagas-ruleta-y-tráilers)
+7. [🍿 Modo Amigo (Watch Party), Radar y Cine Remote](#7--modo-amigo-watch-party-radar-y-cine-remote)
+8. [📊 Estadísticas Avanzadas (Música, Video y Global)](#8--estadísticas-avanzadas-música-video-y-global)
+9. [Subtítulos y Descargas](#9-subtítulos-y-descargas)
+10. [Usuarios, Perfiles Beta Temporales, Modo Niños y Bóveda +18](#10-usuarios-perfiles-beta-temporales-modo-niños-y-bóveda-18)
+11. [📺 Android TV Nativo (`KrakenTV`) y Vinculación por Código QR](#11--android-tv-nativo-krakentv-y-vinculación-por-código-qr)
+12. [Acceso Remoto con Cloudflare Tunnel y Google Cast](#12-acceso-remoto-con-cloudflare-tunnel-y-google-cast)
+13. [Modo Escritorio, PWA y Solución de Problemas](#13-modo-escritorio-pwa-y-solución-de-problemas)
+14. [Documentación Relacionada](#14-documentación-relacionada)
 
-## Qué ofrece
+---
 
-- **Biblioteca de video:** catálogo por películas, series, géneros y categorías; carátulas y metadatos de TMDB; fila Seguir viendo con progreso y reanudación por usuario; tamaños de póster ajustables.
-- **Reproducción de video:** DirectPlay/remux cuando es compatible y streaming HLS coordinado por FFmpeg cuando se necesita adaptar el archivo al cliente. Incluye selección de audio, subtítulos, búsqueda temporal, pantalla completa y controles para teclado/táctil. En pantalla completa, el doble toque salta diez segundos hacia atrás/adelante o pausa/reanuda.
-- **Subtítulos:** lectura de .srt y .vtt externos, extracción de pistas de texto embebidas, normalización UTF-8 y búsqueda/descarga online con SubDL y Podnapisi según la configuración disponible.
-- **Biblioteca de música:** lectura de etiquetas y carátulas, búsqueda, favoritos, playlists, historial, letras .lrc, análisis de BPM/energía y mixes/recomendaciones. La búsqueda de metadatos y géneros puede consultar MusicBrainz, Last.fm y Deezer.
-- **Revisión de duplicados:** distingue coincidencias exactas mediante hash de posibles variantes. Las acciones son explícitas; el análisis no elimina archivos por sí solo.
-- **Cuentas y controles:** autenticación JWT, cuentas con roles, modo niños y bóveda de contenido adulto protegida con PIN maestro.
-- **Control entre dispositivos:** permite seleccionar un dispositivo activo y enviar controles remotos sin mezclar las colas o sesiones independientes de cada equipo.
-- **Acceso local o remoto:** red local, dominio propio mediante Cloudflare Tunnel y una URL temporal Quick Tunnel para pruebas.
-- **Clientes:** interfaz web adaptable/PWA, ventana de escritorio con pywebview y cliente Android TV experimental. Roku es una idea de roadmap, no una aplicación implementada.
+## 1. Qué ofrece Kraken
 
-## Requisitos
+- **Biblioteca de Video Inteligente (TMDB):** Catálogo de películas y series con pósters, *backdrops* horizontales 16:9 con encuadre superior, calificación oficial `★ TMDB`, agrupación automática de **Sagas y Franquicias**, filtros por **Director, Actor, Estudio, Década, Duración y Calidad**, **Preview en vivo al pasar el cursor**, **Tráilers oficiales de YouTube**, fila de **Títulos Similares** y **Ruleta Interactiva ("¿Qué vemos hoy?")**.
+- **Reproducción de Video Adaptativa:** *Direct Play* / *Remux* (`-c:v copy`) sin pérdida cuando el cliente es compatible (incluyendo 4K en PC/Web y reanudación instantánea con `HTTP 206`), y transcodificación **HLS acelerada por GPU (NVIDIA NVENC)** con salto instantáneo a cualquier minuto (`-ss` server-side) y ajuste automático 1080p Nivel 4.1 para Smart TVs.
+- **Biblioteca Musical Completa:** Lectura de etiquetas y carátulas con Mutagen, búsqueda instantánea sin acentos, **Playlist fija de `❤️ Mis Favoritos`**, **Mixes Para Ti** basados en BPM/energía, modo **OST Nerd** (bandas sonoras vinculadas con películas/series/juegos), letras sincronizadas `.lrc`, crossfade e historial real de reproducción.
+- **🎉 Modo Fiesta Colaborativo (`/fiesta`):** Sala interactiva con código QR para que tus invitados pidan canciones desde su celular sin necesitar cuenta, voten con `🔥` en tiempo real y alimenten automáticamente la cola de reproducción del anfitrión en orden de popularidad.
+- **🔗 Enlaces Compartidos Efímeros (`/share/<token>`):** Comparte cualquier canción mediante un link seguro con caducidad configurable (1 hora a 7 días) que abre un reproductor web independiente con letras sincronizadas.
+- **🍿 Watch Party (Modo Amigo) y Cine Remote:** Mira películas o series sincronizadas al segundo con tus amigos conectados (con reacciones **Danmaku** flotantes en pantalla y chat en vivo) o usa tu celular como control remoto táctil de tu TV o PC.
+- **📊 Estadísticas en 3 Pestañas:** Panel analítico detallado dividido en **🎵 Música**, **🎬 Video** y **🌐 Resumen Global** (incluyendo gigabytes ocupados en disco por categoría).
+- **Cuentas, Perfiles Beta y Bóveda +18:** Autenticación JWT, códigos de invitación permanentes o **Perfiles Beta con expiración temporal**, **Modo Niños** y **Bóveda +18** protegida con PIN maestro.
 
-### Para ejecutar el servidor desde el código
+---
 
-- Windows 10/11 recomendado; Python 3.10 o posterior.
-- Dependencias de requirements.txt instaladas en un entorno virtual.
-- FFmpeg y FFprobe accesibles por el servidor para generar miniaturas, analizar medios y procesar HLS.
-- Espacio de almacenamiento para la biblioteca, cachés, base SQLite y temporales de HLS.
+## 2. Requisitos e Instalación
 
-### Para instalar el servidor empaquetado
+### Ejecutar desde código fuente (Desarrollo / Servidor Local)
 
-El repositorio contiene artefactos Windows bajo dist/, incluido el instalador documentado para v4.99.1. La compatibilidad del instalador debe juzgarse por el artefacto concreto que se distribuya; no sustituye el respaldo de la biblioteca ni de los datos de usuario.
+- **Sistema Operativo:** Windows 10/11 recomendado; Python 3.10 o superior.
+- **Herramientas Multimedia:** `ffmpeg` y `ffprobe` accesibles en el `PATH` o en la carpeta del proyecto.
 
-## Instalar y arrancar
-
-### Desarrollo en Windows
-
-Desde la carpeta del repositorio:
-
-~~~powershell
+```powershell
 python -m venv venv
-.envScriptsActivate.ps1
+.\venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 python app.py
-~~~
+```
 
-El servidor de desarrollo se configura normalmente en el puerto 5000. En el mismo equipo, abre http://127.0.0.1:5000. Para detenerlo, vuelve a la consola y pulsa Ctrl+C.
+El servidor escucha por defecto en `http://127.0.0.1:5000` (y en tu IP de red local `http://192.168.x.x:5000`).
 
-### Aplicación de escritorio
+### Aplicación de Escritorio (`app_offline.py` / Instalador)
 
-app_offline.py integra la interfaz web en una ventana pywebview. En el entorno del proyecto:
+Para abrir Kraken en su propia ventana nativa acelerada por hardware (`pywebview`):
 
-~~~powershell
-.envScriptsActivate.ps1
+```powershell
+.\venv\Scripts\Activate.ps1
 python app_offline.py
-~~~
+```
 
-La forma de inicio empaquetada depende de los archivos de dist/ y del instalador disponible.
+También puedes utilizar los ejecutables compilados en `dist/` (`KrakenOffline.exe`, `Kraken.exe` o el instalador `Kraken_Media_Server_Installer_v5.0.1.exe`).
 
-## Primera configuración
+---
 
-1. En una instalación nueva completa el Setup Wizard: crea el usuario administrador inicial, contraseña, PIN maestro y ruta de medios. Si el asistente no aparece, revisa `/api/setup/status` en los logs y que la base SQLite de esa instancia sea nueva/configurada.
-2. Inicia sesión con la cuenta de esa instancia. No hay una cuenta comunitaria compartida. Cuando ya existe un administrador, las cuentas adicionales se crean desde administración o mediante invitaciones.
-3. Revisa la ruta de biblioteca y apunta Kraken a las carpetas de música y video que quieres indexar.
-4. Ejecuta Sync Library / sincronización. Las nuevas filas se guardan en la base SQLite del servidor.
-5. Revisa títulos, metadatos y clasificaciones. El etiquetado automático puede completar datos, pero conviene confirmar resultados ambiguos.
-6. Configura un PIN maestro propio y crea usuarios con los roles y límites apropiados antes de compartir acceso remoto.
-7. Prueba primero desde el navegador del mismo equipo. Después prueba un segundo dispositivo en LAN y finalmente el acceso remoto, si lo habilitas.
+## 3. Primera configuración y Dominio Público
 
-Las rutas de almacenamiento se definen desde la configuración del servidor (config.py y/o variables de entorno, según el despliegue). Conserva juntas la base de datos y sus archivos de soporte: al mover la biblioteca no basta con copiar el frontend.
+1. **Asistente Inicial (Setup Wizard):** Al abrir Kraken por primera vez, crea tu cuenta de **SuperAdmin**, define tu **PIN Maestro** (para proteger ajustes críticos y la bóveda `+18`) y selecciona las carpetas donde almacenas tu música y tus videos.
+2. **Sincronización de Biblioteca (`Sync Library`):** Escanea tus carpetas desde el menú lateral o el panel de administración para indexar tus archivos en `kraken.db` (motor SQLite en modo `WAL` de alta concurrencia).
+3. **Configuración de URL Pública / Dominio del Servidor (Importante para `/share` y `/fiesta`):**
+   - Entra a **Ajustes de Administrador** (icono de engrane o panel Admin).
+   - En el campo **URL Pública del Servidor (`public_url`)**, escribe tu dominio externo si usas un túnel como Cloudflare (por ejemplo, `https://kraken.ederzu.com` o `https://media.tudominio.com`) y guarda los cambios.
+   - **¿Cómo funciona?**
+     - Si configuras un dominio público, tanto los enlaces compartidos (`/share/<token>`) como el código QR y enlace del **Modo Fiesta (`/fiesta`)** usarán automáticamente ese dominio (`https://tudominio.com/fiesta`), permitiendo que tus invitados se conecten incluso con datos móviles (4G/5G).
+     - Si lo dejas **en blanco**, Kraken detecta automáticamente la IP LAN local de tu servidor (`http://192.168.x.x:5000`) para funcionar dentro de tu red Wi-Fi doméstica sin requerir internet.
 
-## Usar la biblioteca
+---
 
-- **Buscar y filtrar:** utiliza las vistas de música y video, las categorías y los filtros disponibles. Algunas funciones de catálogo dependen de metadatos importados.
-- **Sincronizar:** vuelve a explorar cuando agregues o retires medios. El escaneo y Auto-Tag están coordinados para no competir simultáneamente por SQLite y el disco.
-- **Editar metadatos:** utiliza los editores de audio/video para corregir títulos, géneros, ratings, ocultación y otros campos disponibles.
-- **Seguir viendo:** el progreso de video se guarda por usuario y se puede reanudar desde la fila correspondiente.
-- **Control remoto:** en el radar de dispositivos elige una sesión concreta; “Controlar dispositivo” envía órdenes al equipo elegido, mientras “Reproducir aquí” mantiene la reproducción local.
+## 4. Música: Biblioteca, Favoritos, OST Nerd y Enlaces Compartidos
 
-## Descargas
+### Navegación y Reproducción
+- **Vistas superiores:** Alterna entre **Todo**, **Tracks**, **Albums**, **Artists** y **Playlists**, o filtra por carpetas desde el menú lateral.
+- **Mixes Para Ti:** Kraken analiza BPM, energía e historial para generar mixes dinámicos (*Mis Favoritos*, *Para Ti Hoy*, *Chill & Noche*, *Energía Total*).
+- **Historial Real y Cola Contextual:** Al reproducir cualquier canción, Kraken arma una cola contextual (álbum, artista o vista actual) y conserva el historial real de pistas reproducidas para que el botón **Anterior (`⏮`)** regrese siempre a las canciones que acabas de escuchar.
 
-La vista Descargar acepta enlaces compatibles con yt-dlp y deja analizar el contenido antes de elegir elementos. La interfaz ofrece descarga de video en la mejor calidad disponible o calidades 1080p/720p/480p, y extracción de mejor audio a MP3. El código también integra SpotDL para resolver algunos enlaces de Spotify a una fuente alternativa. La descarga se procesa en segundo plano, muestra avance y permite cancelar; los resultados se guardan en la carpeta configurada y después se vuelven a indexar.
+### ❤️ Mis Favoritos (Música)
+- Puedes marcar cualquier canción con el icono de corazón `❤️` desde la lista de pistas o desde la barra de reproducción inferior.
+- Para ver y reproducir todas tus canciones favoritas juntas, haz clic en **`❤️ Mis Favoritos`** en el menú lateral izquierdo (debajo de *Mi Música*) o toca la tarjeta **Mis Favoritos** dentro de *Mixes Para Ti*.
 
-Las plataformas pueden cambiar sus formatos y protecciones; algunos videos no se pueden descargar. Para YouTube y fuentes modernas, yt-dlp puede requerir un runtime JavaScript como Deno y sus dependencias actualizadas. Descarga solo contenido que tengas derecho a guardar.
+### 🎻 Modo OST Nerd
+- Desde el menú lateral puedes abrir **OST Nerd**, un espacio especializado en bandas sonoras de películas, series, anime y videojuegos que vincula tus pistas musicales con fichas informativas y compositores.
 
-## Música
+### 🔗 Compartir Canciones con Enlaces Efímeros (`/share/<token>`)
+1. Haz clic en el botón de **Compartir** (o menú contextual de una canción) para abrir el modal de enlace compartido.
+2. Elige la duración de validez del enlace (**1 hora, 6 horas, 24 horas, 72 horas o 7 días**).
+3. Copia el enlace generado (`/share/<token>`). Quien lo abra verá un reproductor web independiente con onda de audio y letras sincronizadas `.lrc`, sin tener acceso al resto de tu servidor. Al cumplirse el tiempo, el enlace caduca automáticamente (`HTTP 410 Gone`).
 
-Kraken indexa metadatos de audio con Mutagen y puede generar análisis de BPM y energía. La biblioteca ofrece playlists, favoritos, historial, radios/mixes y lectura de archivos de letras .lrc cuando están disponibles. El motor de recomendación usa los tags locales y, si se ejecuta Auto-Tag, puede consultar MusicBrainz, Last.fm o Deezer. Los datos externos pueden faltar o cambiar; los resultados se pueden corregir manualmente.
+---
 
-El detector de duplicados separa archivos idénticos de candidatos parecidos (por ejemplo, versiones en vivo, acústicas o remasterizadas). Revisa cada grupo antes de ocultar o borrar nada. No hay borrado automático del análisis.
+## 5. 🎉 Modo Fiesta Colaborativo (`/fiesta`)
 
-## Video
+El **Modo Fiesta** convierte a Kraken en una rockola colaborativa en tiempo real para reuniones y fiestas, sin que tus invitados necesiten cuenta ni contraseña.
 
-El inicio de Video presenta recomendaciones/carruseles según la biblioteca y una vista de catálogo. TMDB puede aportar póster, backdrop, resumen, año, género y rating. La conexión a TMDB y la calidad de coincidencia dependen de la configuración y los metadatos disponibles.
+### Cómo activarlo (Anfitrión)
+1. Ve a la vista de **Mi Música** (en PC o desde tu celular).
+2. En la barra superior de controles (junto al botón verde **Play All** en escritorio o junto a **Play** en móvil), pulsa el botón **`🎉 Modo Fiesta`**.
+3. En la ventana emergente, pulsa **`Activar Modo Fiesta`**.
+4. El botón superior mostrará el indicador pulsante **`EN VIVO`** y se desplegará un **Código QR** junto con el enlace directo (ej. `https://kraken.ederzu.com/fiesta` o `http://192.168.x.x:5000/fiesta`).
 
-Al reproducir, Kraken obtiene un token y crea una sesión HLS si el cliente no puede reproducir el medio directamente. FFmpeg puede remuxear o transcodificar según el contenedor, video, audio y pistas. Los archivos grandes en HDD pueden tardar más en comenzar porque deben prepararse los primeros segmentos. HLS requiere que el proceso servidor y FFmpeg permanezcan activos mientras se reproduce.
+### Cómo participan los Invitados
+1. Los invitados escanean el **Código QR** con la cámara de su teléfono o abren el link `/fiesta`.
+2. Escriben su **apodo** (ej. *Aldo*, *Nico*) para identificarse.
+3. Desde la pestaña **🔍 Pedir Canción**, buscan cualquier tema de tu biblioteca musical y pulsan **`+`** para agregarlo a la fila.
+4. Desde la pestaña **🔥 Fila de la Fiesta**, todos los invitados ven las canciones solicitadas, quién pidió cada una y pueden **votar con `🔥`** por sus favoritas.
 
-En escritorio/navegador se documentan atajos de teclado: espacio/K para pausa, flechas izquierda/derecha para buscar ±10 s, arriba/abajo para volumen, M para silencio y F para pantalla completa, respetando campos de texto y diálogos. En móvil, el reproductor incluye doble toque de ±10 s y pausa/reproducción al centro.
+### Cómo se sincroniza con la Cola del Anfitrión
+- Kraken sincroniza automáticamente la sala cada **4 segundos** con el reproductor del anfitrión:
+  - **Si tu reproductor estaba detenido:** En cuanto un invitado pide la primera canción, Kraken la carga e **inicia la reproducción automáticamente**.
+  - **Si ya había música sonando:** Las canciones de la fiesta se inyectan justo **después de la canción que está sonando actualmente** (`siguiente en la fila`), desplazando hacia abajo las canciones normales del álbum o mix.
+  - **Orden dinámico por votos `🔥`:** Si una canción en espera recibe más fuegos `🔥` que otra, sube automáticamente de posición tanto en los celulares de los invitados como en la cola de reproducción del anfitrión.
+  - **Identificación y consumo automático:** En la cola del reproductor del anfitrión verás cada tema etiquetado con `· 🎉 NombreInvitado (🔥votos)`. También puedes forzar su reproducción inmediata con el botón `▶` dentro del modal de Modo Fiesta. Cuando una canción de la fiesta empieza a sonar, se retira automáticamente de la lista de espera de los invitados.
 
-## Subtítulos
+---
 
-1. Kraken detecta .srt/.vtt vecinos del video con nombres e idiomas comunes. En carpetas con un solo video hay un fallback de asociación.
-2. Auto-Tag puede extraer subtítulos **de texto** embebidos a .srt; subtítulos de imagen como PGS/DVD no se convierten por esta ruta.
-3. El buscador online consulta SubDL y conserva Podnapisi como respaldo, según la configuración de proveedores. Descarga y normaliza SRT a UTF-8.
-4. En el reproductor selecciona la pista externa o embebida disponible. Audio y subtítulos pueden variar según el códec del archivo y la compatibilidad del cliente.
+## 6. 🎬 Video: Catálogo Inteligente, Filtros, Sagas, Ruleta y Tráilers
 
-## Usuarios, modo niños y bóveda +18
+### Enriquecimiento Automático con TMDB (`Auto-Tag TMDB`)
+- Para enriquecer tus películas y series con metadatos oficiales de **The Movie Database (TMDB)**, abre el panel **Historial / Mantenimiento** en el menú lateral y pulsa **`Auto-Tag TMDB`**.
+- Kraken descargará pósters verticales, *backdrops* horizontales 16:9, calificación `★ TMDB`, sinopsis, año, **director, reparto principal con fotografía, estudio/productora, colección/saga oficial** y el **tráiler oficial de YouTube**.
 
-- Las cuentas normales se autentican con JWT. Los roles controlan las opciones administrativas disponibles.
-- El modo niños excluye videos marcados is_adult y una lista de ratings restringidos tanto del catálogo TV como del token de reproducción.
-- La bóveda adulta permanece oculta por defecto en las rutas que aplican este filtro. Para abrirla se requiere el PIN maestro; el servidor también comprueba el PIN antes de emitir token para un video marcado adulto y vuelve a validar el permiso al iniciar HLS.
-- is_adult es un campo preexistente de la base de datos: la integración TV no añadió la columna ni clasificó de nuevo toda la biblioteca. El rating puede alimentar esa bandera en flujos de metadatos, pero se deben revisar casos incorrectos.
-- Cambia el PIN de instalación por uno único, evita reutilizar contraseñas y no incluyas claves, tokens de Cloudflare ni datos privados en documentos públicos.
+### Barra de Herramientas y Popover Unificado de Filtros (`⚙️ Filtros`)
+En la barra superior de **Mis Series y Videos** cuentas con:
+- **Selector de Categoría (`Todo`, `Películas`, `Series`, `❤️ Favoritos`, carpetas)** y **Selector de Géneros**.
+- **Botón `⚙️ Filtros` (Popover Unificado):** Agrupa de forma limpia:
+  - **Década:** `2020s`, `2010s`, `2000s`, `90s`, `80s`, `Clásicos`.
+  - **Duración:** Cortas (`< 90 min`), Estándar (`90–120 min`), Épicas (`> 2h`).
+  - **Calidad y Estado:** `HD / 4K`, `No vistas`, `En progreso`, `Vistas`.
+  - **📚 Agrupar Sagas:** Agrupa las películas que pertenecen a una misma franquicia oficial de TMDB (ej. *Harry Potter*, *Toy Story*, *John Wick*) o secuelas verificadas en una sola tarjeta de colección con botón **`▶ Reproducir Maratón en Orden`**.
+- **Selector de Ordenamiento:** Recién agregadas, Calificación TMDB, Año de estreno o Alfabético (`A-Z`).
 
-## Acceso remoto con Cloudflare Tunnel y dominio
+### Hero de Director / Actor y Películas Similares
+- Al abrir el modal de **Más Información** de cualquier película, verás su calificación `★`, estudio, director y las fotos del reparto principal:
+  - **Filas de Similares:** En la parte inferior del modal encontrarás el carrusel **"Más títulos similares"** calculado automáticamente según géneros, director, saga y época.
+  - **Explorar Director o Actor:** Si haces clic sobre el nombre del **Director** o sobre cualquier **Actor**, el catálogo se filtra por esa persona, oculta los carruseles genéricos de *Explora* y despliega un **Hero Banner dedicado al Director/Actor** junto con una fila de **"Recomendadas similares a su estilo"**.
 
-Cloudflare Tunnel permite exponer un servicio web sin abrir un puerto entrante en el router. cloudflared hace una conexión saliente a Cloudflare y enlaza un **hostname público** con un **origen local**, por ejemplo https://media.tudominio.com → http://127.0.0.1:5000. El hostname y la cuenta/dominio pertenecen a quien administra cada servidor. kraken.ederzu.com es solo el dominio de la instalación original; los usuarios de la comunidad deben configurar el suyo.
+### 🎬 Tráilers Oficiales de YouTube
+- Tanto en el **Hero Banner principal**, como en el modal de **Más Información** y en la **Ruleta**, dispones del botón **`🎬 Ver Tráiler`**.
+- **Cómo funciona:** Kraken consulta la clave oficial del tráiler en TMDB (priorizando Español Latino/España y luego Inglés en YouTube) y la guarda en `kraken.db`. Al pulsar el botón, se abre un reproductor flotante 16:9 dentro de Kraken sin salir de la aplicación (con botón de respaldo para buscar en YouTube si es una película independiente sin tráiler registrado en TMDB).
 
-### Prueba rápida con Quick Tunnel
+### 🎲 Ruleta Interactiva ("¿Qué vemos hoy?")
+- Si no sabes qué ver, pulsa el botón **`🎲 Ruleta`** en la barra superior de Video.
+- Filtra opcionalmente por **Películas / Series**, **Género** y **Solo no vistas**, y pulsa **`¡Girar Ruleta!`**.
+- La ruleta animará los pósters de tu biblioteca hasta detenerse en una recomendación ganadora, desde donde puedes **Reproducir**, **Ver Tráiler** o **Ver Más Info**.
 
-En el equipo que ejecuta el servidor, inicia Kraken y ejecuta:
+### Preview en Vivo al Pasar el Cursor (Desktop)
+- En computadoras de escritorio, al mantener el cursor brevemente sobre la tarjeta de un video, se despliega un **Preview flotante global** reproduciendo un fragmento silencioso de la película sin recortarse en los bordes del carrusel. En móviles y pantallas táctiles se desactiva automáticamente para garantizar un scroll táctil fluido.
 
-~~~powershell
-cloudflared tunnel --url http://127.0.0.1:5000
-~~~
+---
 
-Cloudflare imprime una URL aleatoria bajo trycloudflare.com. Comparte esa URL únicamente con quienes deben probar el servicio: cualquiera que tenga el enlace puede acceder, y deja de servir cuando se detiene cloudflared. El proyecto también incluye start_offline_tunnel.bat, que intenta iniciar app_offline.py y el túnel rápido; úsalo como herramienta temporal y confirma qué proceso está ejecutando antes de utilizarlo.
+## 7. 🍿 Modo Amigo (Watch Party), Radar y Cine Remote
 
-Quick Tunnels son para desarrollo/pruebas, no para una instalación permanente. Su hostname es temporal y no hay garantía de disponibilidad. [Documentación oficial de Quick Tunnels](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/).
+El botón **Radar de Dispositivos** (icono de antena/dispositivos en la barra superior) permite interactuar en tiempo real con tus pantallas y con tus amigos conectados:
 
-### Dominio persistente con túnel administrado
+### 1. Segunda Pantalla y `Kraken Cine Remote` (Tus propios dispositivos)
+- Si inicias una película en tu **Smart TV (`KrakenTV`)** o en la **PC**, y abres Kraken en tu celular con la misma cuenta, aparecerá un aviso invitándote a usar el celular como **Segunda Pantalla (`Cine Remote`)**.
+- Desde el **Cine Remote** puedes pausar, reanudar, usar la barra de progreso con *seek* instantáneo, saltar `±10s` / `±30s`, cambiar el volumen, alternar pistas de audio y cambiar subtítulos sin tocar el control remoto del televisor.
 
-1. Agrega tu dominio a Cloudflare y configura sus nameservers según las instrucciones de Cloudflare.
-2. En Cloudflare Zero Trust / Networking > Tunnels, crea un túnel y agrega una ruta de aplicación publicada.
-3. Asigna un subdominio propio (por ejemplo media.tudominio.com) y el origen donde corre Kraken, normalmente http://localhost:5000 si cloudflared y Kraken están en el mismo servidor.
-4. Instala/ejecuta cloudflared en el servidor. Para un túnel remotamente administrado, Cloudflare proporciona un comando del estilo:
+### 2. Modo Amigo / Watch Party ("Ver con amigo")
+- En el **Radar de Dispositivos**, cuando un amigo tiene sesión iniciada en Kraken, puedes pulsar **`🍿 Ver con amigo (Watch Party)`** junto a su nombre.
+- **Sincronización en Tiempo Real:** Tu amigo recibe una invitación en pantalla; al aceptarla, ambos reproductores quedan enlazados (`KRAKEN_SYNC_WATCH_PARTY`). Si cualquiera pausa, reanuda o adelanta el video, el reproductor del otro se sincroniza automáticamente al mismo segundo.
+- **Reacciones Danmaku y Chat en Vivo:** Durante la función pueden enviarse mensajes de texto y **super-emojis animados** que cruzan flotando sobre la pantalla del video estilo *Danmaku*, además de contar con una píldora flotante de chat rápido si uno de los dos usa el celular como acompañante.
 
-   ~~~powershell
-   cloudflared.exe service install <TUNNEL_TOKEN>
-   ~~~
+---
 
-   Ejecútalo en una consola elevada si Windows lo requiere. Mantén el token en un gestor de secretos o configuración privada; no lo subas a Git ni lo pegues en una guía compartida.
-5. Comprueba el servicio y la ruta desde fuera de tu red. Asegúrate de que Kraken escuche en el puerto/origen configurado y de que el equipo servidor no esté suspendido.
-6. En la pantalla de conexión de Android TV y en los navegadores remotos, cada persona configura la URL HTTPS de **su propia** instancia.
-7. Si utilizas Google Cast, configura CAST_PUBLIC_URL con ese mismo hostname público HTTPS y reinicia Kraken. De ese modo las URLs que recibe el dispositivo Cast apuntan al dominio correcto.
+## 8. 📊 Estadísticas Avanzadas (Música, Video y Global)
 
-Cloudflare termina HTTPS en el borde; el servicio local puede recibir HTTP por loopback dentro del origen del túnel. No publiques el puerto del servidor en el router salvo que tengas una razón concreta y hayas protegido el servicio. Un requisito Cloudflare Access con login web interactivo puede interferir con clientes nativos; prueba autenticación y streaming desde el cliente real.
+Para abrir tus estadísticas detalladas, haz clic en el **icono de gráfica dorada (`📊`)** ubicado en la barra superior de contadores (a la izquierda del total de canciones). El modal se divide en **3 pestañas interactivas**:
 
-Guías oficiales: [publicar una aplicación en Tunnel](https://developers.cloudflare.com/tunnel/get-started/) · [servicio de Windows](https://developers.cloudflare.com/tunnel/features/locally-managed-tunnels/as-a-service/windows/) · [Quick Tunnels](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/).
+1. **🎵 Música:** Total de canciones indexadas, horas acumuladas de escucha, conteo de canciones favoritas, **Top 10 Canciones más escuchadas** (con reproducción en 1 clic), **Top Artistas** y distribución de **Géneros Musicales**.
+2. **🎬 Video:** Total de películas y series, películas completadas vs. en progreso, horas estimadas de cine/series vistas, calificación promedio `★ TMDB` de tu colección, barra de porcentaje del catálogo visto y géneros cinematográficos favoritos.
+3. **🌐 Resumen Global:** Total de medios combinados, **espacio total en disco en GB** (desglosado entre gigabytes de Audio y gigabytes de Video con barra comparativa) e historial de actividad reciente.
 
-### Configuración del dominio del servidor
+---
 
-config.py incluye CAST_PUBLIC_URL con un valor histórico de https://kraken.ederzu.com. Para una distribución comunitaria, el administrador debe definir su propia URL por entorno, por ejemplo:
+## 9. Subtítulos y Descargas
 
-~~~powershell
-$env:CAST_PUBLIC_URL = 'https://media.tudominio.com'
-python app.py
-~~~
+### Subtítulos
+1. **Locales y Embebidos:** Kraken detecta archivos `.srt` y `.vtt` junto al video y extrae automáticamente subtítulos de texto embebidos en contenedores `.mkv`, normalizándolos a UTF-8.
+2. **Búsqueda Online Integrada:** Desde el reproductor puedes buscar y descargar subtítulos en línea a través de **SubDL** y **Podnapisi**.
 
-No uses el hostname del desarrollador como configuración predeterminada de una app pública. La app Kraken TV almacena una URL introducida por el usuario, y no debe venir preconfigurada para conectarse a un servidor ajeno.
+### Descargas (`yt-dlp` / `SpotDL`)
+- Desde la sección **Descargar**, pega un enlace compatible para analizarlo y descargarlo en segundo plano como **Video** (`Mejor calidad`, `1080p`, `720p`, `480p`) o como **Audio MP3**, indexándose automáticamente en tu biblioteca al finalizar.
 
-## Google Cast / Chromecast
+---
 
-El dispositivo que recibe Cast debe poder alcanzar la URL del servidor y sus manifiestos/segmentos. Configura CAST_PUBLIC_URL con el dominio HTTPS público de tu instancia, mantén la sesión de Kraken activa y prueba primero con un video pequeño. El soporte depende de los códecs del archivo, de FFmpeg y de las restricciones del receptor Cast.
+## 10. Usuarios, Perfiles Beta Temporales, Modo Niños y Bóveda +18
 
-## Android TV
+### Gestión de Usuarios y Códigos de Invitación (`KRK-XXXX`)
+Desde el panel de **Administración**, el SuperAdmin puede generar dos tipos de códigos de invitación:
+- **Invitación Permanente:** Crea una cuenta estándar definitiva.
+- **⏳ Invitación Beta Temporal:** Permite definir un período de prueba (ej. **24 horas, 48 horas, 3 días, 7 días**). El invitado registra su propio usuario y contraseña, disfruta de Kraken durante ese lapso y, al vencer el plazo, el servidor bloquea automáticamente su acceso (`HTTP 403`). El administrador puede renovarle el tiempo (`+24h`, `+3d`, `+7d`) o ascenderlo a cuenta permanente en cualquier momento desde la lista de usuarios.
 
-El cliente Kotlin conocido como KrakenTV incluye login configurable, navegación D-Pad con Leanback, catálogo paginado, pósteres pequeños y reproducción HLS mediante Media3/ExoPlayer. Las series se presentan como una tarjeta por serie y al abrirla se consultan sus episodios. Usa `/api/tv/library`, `/api/tv/episodes`, `/api/tv/poster`, `/api/stream/token` y `/api/hls/play`; necesita un backend Kraken que incluya estas rutas. La sección de música todavía no está integrada en la app TV.
+### Modo Niños y Bóveda +18
+- **Modo Niños:** Oculta todo el contenido clasificado como adulto o con restricción de edad tanto en Web como en Android TV.
+- **Bóveda +18:** Los videos marcados como `+18` u ocultos requieren ingresar el **PIN Maestro** tanto para mostrarse en el catálogo como para emitir un token de streaming o iniciar HLS.
 
-**Estado real al 20-Oct-2026:** el código Android está en el directorio hermano `../KrakenTV`, fuera de este repositorio Git. El backend local incorpora el soporte TV en `routes/api.py` y `routes/hls.py`; el proyecto Android continúa separado de este checkout. El APK debug se compiló con Gradle Wrapper 9.8.2 y se instaló en el AVD Android TV. Se corrigió el cierre de `PlayerActivity` causado por usar el tema Leanback con una actividad AppCompat. El backend local ahora agrupa series y expone sus episodios en `/api/tv/episodes`; el servidor que use la app debe actualizarse para que esas tarjetas agrupadas aparezcan. El cliente requiere HTTPS y cada persona configura la URL de su propio servidor. La música no forma parte todavía del cliente TV.
+---
 
-La configuración Android actual apunta a AGP 9.4.0 y compileSdk 37, minSdk 24, targetSdk 28, bytecode Java 17 y ABI armeabi-v7a. El targetSdk y la compatibilidad real deben revisarse antes de un release. El consumo inferior a 80 MB es una meta de diseño documentada, no una medición verificada.
+## 11. 📺 Android TV Nativo (`KrakenTV`) y Vinculación por Código QR
 
-## Modo escritorio y PWA
+El cliente oficial para televisores (**`KrakenMS.apk`**) cuenta con una interfaz **100% nativa en Kotlin (`NativeTvHomeView.kt`)** diseñada para fluir a 60fps en controles remotos D-Pad:
 
-La aplicación web es accesible desde el navegador y adapta vistas para móvil. El Service Worker usa una estrategia Network-First para el shell de la app cuando hay conexión y conserva recursos offline. La versión de escritorio usa pywebview. En navegadores Chromium compatibles, el reproductor de música puede guardar canciones, carátulas y playlists en almacenamiento local para reproducirlas sin conexión; el límite configurado en el código es de hasta 500 canciones y puede depender de cuota/espacio del navegador. La función offline no hace que HLS remoto, descargas nuevas ni servicios externos funcionen sin red.
+### Cómo iniciar sesión en tu TV con Código QR (Sin escribir con el control remoto)
+1. Abre la app **Kraken TV** en tu televisor; a la izquierda verás un **Código QR** y una clave de 6 caracteres (ej. `K7M - 9P2`).
+2. **Opción A (Escanear con cámara):** Escanea el QR con la cámara de tu celular (donde ya tengas sesión iniciada en Kraken) y toca **Autorizar**.
+3. **Opción B (Ingresar código desde el menú de perfil):** En Kraken Web (desde tu celular o PC), abre tu menú de perfil arriba a la derecha, selecciona **`📺 Vincular Pantalla (TV)`**, escribe el código de 6 letras y pulsa **Vincular**.
+4. Tu televisor iniciará sesión automáticamente y guardará tu sesión de forma persistente (**Auto-Login**).
+*(Nota: En navegadores web también puedes usar el botón desplegable **`📲 QR Login`** en la ventana de inicio de sesión).*
 
-## Solución de problemas
+### Características de la App Nativa de Android TV
+- **Menú Lateral Retráctil en Overlay:** Navega entre **Video** (*Inicio, Películas, Series, Seguir viendo, Descubre hoy*) y **Mi Música** (*Todas las canciones con paginación infinita para +14,400 temas, Mixes Para Ti, Playlists, Álbumes, Artistas*).
+- **Buscador Estilo Netflix Dual (Video / Música):** Teclado en pantalla simétrico `6×6` a prueba de pérdida de foco e insensible a acentos/tildes (`fantasia` encuentra *Fantasía*).
+- **Vista de Series y Películas TMDB:** Pantalla dedicada de temporadas y episodios panorámicos 16:9 con botón **`▶ Continuar viendo T1:E3`** y **`🎲 Episodio Aleatorio`**.
+- **Reproducción 4K Adaptativa:** Detecta automáticamente películas H.264 4K Nivel 5.1 que exceden el límite de hardware de los chips de Smart TV y las transcodifica al vuelo a 1080p por GPU con buffer de `64 MB`, evitando pantallas negras o congelamientos.
+
+---
+
+## 12. Acceso Remoto con Cloudflare Tunnel y Google Cast
+
+### Cloudflare Tunnel
+Permite acceder a tu servidor desde fuera de casa con HTTPS sin abrir puertos en el router:
+- **Túnel Rápido Temporal (Pruebas):** `cloudflared tunnel --url http://127.0.0.1:5000` (o mediante `start_offline_tunnel.bat`).
+- **Dominio Propio Persistente:** Configura un túnel administrado en Cloudflare Zero Trust apuntando tu subdominio (ej. `https://kraken.tudominio.com`) a `http://localhost:5000`, e ingresa ese mismo dominio en el campo **URL Pública del Servidor** dentro de los Ajustes de Administrador de Kraken.
+
+### Google Cast / Chromecast
+- Asegúrate de que tu `CAST_PUBLIC_URL` / **URL Pública** sea alcanzable por el Chromecast para transmitir manifiestos HLS y pistas directamente al televisor.
+
+---
+
+## 13. Modo Escritorio, PWA y Solución de Problemas
+
+### PWA y Música Offline
+- Desde navegadores compatibles (Chrome/Edge/Android) puedes instalar Kraken como **PWA** y descargar canciones o playlists en la memoria local del navegador (hasta 500 pistas) para escucharlas sin conexión.
+
+### Solución Rápida de Problemas
 
 | Síntoma | Qué revisar |
-|---|---|
-| No abre 127.0.0.1:5000 | Verifica que app.py siga ejecutándose, el puerto configurado y los logs de Flask. |
-| No aparecen medios nuevos | Confirma la ruta de biblioteca y ejecuta Sync Library. Revisa permisos de lectura y logs. |
-| Video queda cargando | Comprueba FFmpeg/FFprobe, acceso al archivo, espacio temporal y el primer segmento HLS. Los MKV grandes o discos dormidos pueden tardar. |
-| Audio AC-3 u otro formato falla | Revisa la ruta de transcodificación y los logs de FFmpeg; algunos clientes necesitan recodificar audio/video. |
-| Subtítulos con caracteres rotos | Usa la normalización de SRT/UTF-8 o vuelve a descargar/extractar el archivo. |
-| Cast no encuentra el servidor | Verifica CAST_PUBLIC_URL, DNS/Tunnel, HTTPS, sesión y acceso del receptor a las URLs de HLS. |
-| Android TV no conecta | Escribe la URL HTTPS del servidor, confirma que se publicó el backend compatible y que el túnel/servidor está encendido. HTTP simple no está aceptado por el cliente actual. |
-| Cambié un póster y sigue igual | El endpoint de póster marca caché de un año como immutable. La caché del servidor está en THUMBNAILS_FOLDER/tv_cache; elimina el derivado correspondiente con Kraken detenido o implementa invalidación/versionado antes de automatizar limpieza. |
+| :--- | :--- |
+| **El QR del Modo Fiesta o link `/share` da `192.168.x.x` en vez de mi dominio** | Abre **Ajustes de Administrador** y verifica que tu dominio (`https://...`) esté guardado en **URL Pública del Servidor**. |
+| **Las canciones del Modo Fiesta no suenan en el anfitrión** | Asegúrate de que el **Modo Fiesta** esté en estado **`EN VIVO`** en la ventana del anfitrión; la sincronización ocurre automáticamente cada 4 segundos. |
+| **No aparece el tráiler de una película** | Ejecuta **Auto-Tag TMDB** desde el panel *Historial* o pulsa **`🎬 Ver Tráiler`** para que Kraken lo busque en tiempo real en TMDB/YouTube. |
+| **Un video tarda en iniciar o falla el audio AC-3** | Verifica que `ffmpeg` y `ffprobe` estén instalados; Kraken transcodificará automáticamente el audio a AAC mediante HLS. |
 
-Para diagnosticar HLS, empieza con un solo archivo representativo y revisa registros del servidor y FFmpeg. Los informes antiguos de _archive/docs_historicos/ describen fallos históricos y no necesariamente el comportamiento actual.
+---
 
-## Privacidad, respaldo y mantenimiento
+## 14. Documentación Relacionada
 
-- Mantén Python, dependencias y cloudflared actualizados.
-- Guarda copias de la base de datos de Kraken, configuración de usuario, playlists, historial y metadatos. Conserva los archivos multimedia originales; la base no los reemplaza.
-- Mantén runtime_config.json, tokens Tunnel, secretos TMDB/servicios externos y logs fuera del repositorio público.
-- No asumas que un Quick Tunnel es privado: cualquier persona con su URL puede intentar acceder.
-- El backend guarda tokens de streaming en estado de proceso y las sesiones HLS dependen de que el servidor continúe funcionando.
-- Si ejecutas el túnel y servidor en Windows, revisa que el servicio solo arranque una instancia del backend y que el almacenamiento sobreviva a reinicios.
-
-## Documentación relacionada
-
-- [Resumen histórico, decisiones y problemas resueltos](HISTORIAL_TECNICO.md)
-- [Notas de versión v4.99](RELEASE_NOTES_v4.99.md)
-- [Roadmap e integración TV](SESION_v4.99_ROADMAP_TV.md)
-- [Registro cronológico completo](Cambios.md)
-- [Diagnósticos históricos](_archive/docs_historicos/)
-- [README de Kraken TV](../KrakenTV/README.md) — solo está disponible en el workspace local mientras el proyecto Android permanezca fuera de este repo.
+- [Documentación Técnica Completa v5.0.1 & v5.0.2](version5.md)
+- [Registro Cronológico de Cambios](Cambios.md)
+- [Historial Técnico y Arquitectura](HISTORIAL_TECNICO.md)
+- [Notas de Versión v4.99](RELEASE_NOTES_v4.99.md)

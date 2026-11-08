@@ -66,12 +66,28 @@ def get_movie_details(movie_id):
     params = {
         'api_key': TMDB_API_KEY,
         'language': 'es-MX',
-        'append_to_response': 'credits,release_dates'
+        'append_to_response': 'credits,release_dates,keywords'
     }
 
     try:
         response = requests.get(f"{TMDB_BASE_URL}/movie/{movie_id}", params=params, timeout=10)
         result = response.json()
+
+        # Si el título o nombre de colección viene en alfabeto no latino (coreano, tailandés, japonés), pedir fallback en-US
+        title_es = (result.get('title') or '').strip()
+        coll_es = ((result.get('belongs_to_collection') or {}).get('name') or '').strip()
+        if (title_es and not re.search(r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]', title_es)) or (coll_es and not re.search(r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]', coll_es)):
+            try:
+                en_resp = requests.get(f"{TMDB_BASE_URL}/movie/{movie_id}", params={'api_key': TMDB_API_KEY, 'language': 'en-US'}, timeout=8)
+                if en_resp.ok:
+                    en_data = en_resp.json()
+                    if title_es and not re.search(r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]', title_es) and en_data.get('title'):
+                        result['title'] = en_data['title']
+                    en_coll = (en_data.get('belongs_to_collection') or {}).get('name')
+                    if coll_es and not re.search(r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]', coll_es) and en_coll and isinstance(result.get('belongs_to_collection'), dict):
+                        result['belongs_to_collection']['name'] = en_coll
+            except Exception:
+                pass
         
         # Extraer rating de certificación
         rating = extract_movie_rating(result)
@@ -93,7 +109,7 @@ def get_tv_details(tv_id):
     params = {
         'api_key': TMDB_API_KEY,
         'language': 'es-MX',
-        'append_to_response': 'credits,content_ratings'
+        'append_to_response': 'credits,content_ratings,keywords'
     }
 
     try:
@@ -109,6 +125,72 @@ def get_tv_details(tv_id):
     except Exception as e:
         print(f"Error obteniendo detalles: {e}")
         return None
+
+
+def extract_extended_tmdb_fields(details: dict, media_type: str = 'movie') -> dict:
+    """Extrae colección, directores, reparto principal, estudio, keywords, score y país de un payload TMDB."""
+    if not details or not isinstance(details, dict):
+        return {}
+
+    # 1. Colección / Saga (solo películas)
+    coll = details.get('belongs_to_collection') or {}
+    collection_id = coll.get('id') if isinstance(coll, dict) else None
+    collection_name = (coll.get('name') or '').strip() if isinstance(coll, dict) else None
+    if collection_name:
+        # Limpiar sufijos redundantes como " - Colección", " Collection" o " シリーズ"
+        collection_name = re.sub(r'\s*[-–—]?\s*Colecci[oó]n$', '', collection_name, flags=re.IGNORECASE).strip()
+        collection_name = re.sub(r'\s+Collection$', '', collection_name, flags=re.IGNORECASE).strip()
+        collection_name = re.sub(r'\s*シリーズ$', '', collection_name).strip()
+    collection_poster = coll.get('poster_path') if isinstance(coll, dict) else None
+
+    # 2. Directores / Creadores
+    credits = details.get('credits') or {}
+    crew = credits.get('crew') or []
+    directors = [c.get('name', '').strip() for c in crew if c.get('job') in ('Director', 'Series Director') and c.get('name')]
+    if media_type == 'tv' or not directors:
+        creators = [c.get('name', '').strip() for c in (details.get('created_by') or []) if c.get('name')]
+        directors = list(dict.fromkeys(directors + creators))
+    directors_str = ', '.join(directors[:3]) if directors else None
+
+    # 3. Actores principales (Top 8)
+    cast_raw = credits.get('cast') or []
+    cast_names = [c.get('name', '').strip() for c in cast_raw[:8] if c.get('name')]
+    cast_str = ', '.join(cast_names) if cast_names else None
+
+    # 4. Estudio / Productora / Cadena (Top 2)
+    studios = []
+    if media_type == 'tv':
+        studios = [n.get('name', '').strip() for n in (details.get('networks') or []) if n.get('name')]
+    if not studios:
+        studios = [p.get('name', '').strip() for p in (details.get('production_companies') or []) if p.get('name')]
+    studio_str = ', '.join(studios[:2]) if studios else None
+
+    # 5. Keywords / Sub-temáticas
+    kw_obj = details.get('keywords') or {}
+    kw_list = kw_obj.get('keywords') or kw_obj.get('results') or []
+    keywords = [k.get('name', '').strip() for k in kw_list[:15] if isinstance(k, dict) and k.get('name')]
+    keywords_str = ', '.join(keywords) if keywords else None
+
+    # 6. Calificación y País/Idioma
+    vote_avg = round(float(details.get('vote_average') or 0.0), 1)
+    countries = details.get('origin_country') or [
+        c.get('iso_3166_1') for c in (details.get('production_countries') or []) if c.get('iso_3166_1')
+    ]
+    country_str = ','.join([str(c) for c in countries[:2] if c]) or (details.get('original_language') or '').upper()
+    backdrop_path = details.get('backdrop_path')
+
+    return {
+        'tmdb_collection_id': collection_id,
+        'tmdb_collection_name': collection_name or None,
+        'tmdb_collection_poster': collection_poster,
+        'tmdb_director': directors_str,
+        'tmdb_cast': cast_str,
+        'tmdb_studio': studio_str,
+        'tmdb_keywords': keywords_str,
+        'tmdb_vote_average': vote_avg,
+        'tmdb_country': country_str or None,
+        'tmdb_backdrop': backdrop_path,
+    }
 
 
 def extract_movie_rating(tmdb_data):
@@ -627,3 +709,103 @@ def extract_embedded_subtitles_for_video(full_video_path: str) -> int:
         print(f"[Subti] Extraídos {created} subtítulos .srt para {os.path.basename(full_video_path)}")
     return created
 
+
+_ENRICH_LOCK = False
+
+def enrich_extended_tmdb_metadata_async():
+    """
+    Enriquece en segundo plano los videos que ya tienen tmdb_id en SQLite
+    pero aún no tienen tmdb_director, tmdb_cast, tmdb_collection_name o tmdb_vote_average.
+    Agrupa por (tmdb_id, folder_type) para hacer solo 1 petición por serie/película.
+    """
+    global _ENRICH_LOCK
+    if _ENRICH_LOCK:
+        return
+    _ENRICH_LOCK = True
+    try:
+        import time
+        import config
+        from services.database import get_db
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('''
+            SELECT DISTINCT tmdb_id, folder_type
+            FROM media
+            WHERE media_type = 'video'
+              AND tmdb_id IS NOT NULL AND tmdb_id > 0
+              AND (tmdb_director IS NULL OR tmdb_director = ''
+                   OR tmdb_cast IS NULL OR tmdb_cast = ''
+                   OR tmdb_vote_average IS NULL OR tmdb_vote_average = 0)
+        ''')
+        rows = c.fetchall()
+        conn.close()
+        if not rows:
+            return
+
+        print(f"[TMDB v5.0.2] Enriqueciendo {len(rows)} títulos únicos en segundo plano (Sagas, Directores, Reparto)...")
+        updated_groups = 0
+        for idx, row in enumerate(rows, 1):
+            tmdb_id_val = row[0]
+            f_type = row[1] or 'movie'
+            try:
+                time.sleep(0.15)
+                details = get_tv_details(tmdb_id_val) if f_type in ('series', 'anime', 'tv') else get_movie_details(tmdb_id_val)
+                if not details:
+                    continue
+                ext = extract_extended_tmdb_fields(details, 'tv' if f_type in ('series', 'anime', 'tv') else 'movie')
+                coll_poster = None
+                if ext.get('tmdb_collection_poster') and ext.get('tmdb_collection_id'):
+                    coll_file = f"collection_{ext['tmdb_collection_id']}.jpg"
+                    if not os.path.exists(os.path.join(config.THUMBNAILS_FOLDER, coll_file)):
+                        download_poster(ext['tmdb_collection_poster'], config.THUMBNAILS_FOLDER, f"collection_{ext['tmdb_collection_id']}")
+                    coll_poster = coll_file
+
+                wconn = get_db()
+                wconn.execute('''
+                    UPDATE media SET
+                        tmdb_collection_id = COALESCE(?, tmdb_collection_id),
+                        tmdb_collection_name = COALESCE(?, tmdb_collection_name),
+                        tmdb_collection_poster = COALESCE(?, tmdb_collection_poster),
+                        tmdb_director = COALESCE(?, tmdb_director),
+                        tmdb_cast = COALESCE(?, tmdb_cast),
+                        tmdb_studio = COALESCE(?, tmdb_studio),
+                        tmdb_keywords = COALESCE(?, tmdb_keywords),
+                        tmdb_vote_average = COALESCE(?, tmdb_vote_average),
+                        tmdb_country = COALESCE(?, tmdb_country),
+                        tmdb_backdrop = COALESCE(?, tmdb_backdrop)
+                    WHERE tmdb_id = ? AND media_type = 'video'
+                ''', (
+                    ext.get('tmdb_collection_id'),
+                    ext.get('tmdb_collection_name'),
+                    coll_poster or ext.get('tmdb_collection_poster'),
+                    ext.get('tmdb_director'),
+                    ext.get('tmdb_cast'),
+                    ext.get('tmdb_studio'),
+                    ext.get('tmdb_keywords'),
+                    ext.get('tmdb_vote_average'),
+                    ext.get('tmdb_country'),
+                    ext.get('tmdb_backdrop'),
+                    tmdb_id_val
+                ))
+                wconn.commit()
+                wconn.close()
+                updated_groups += 1
+                if updated_groups % 15 == 0:
+                    try:
+                        from routes.api import BIB_CACHE_BY_OWNER
+                        BIB_CACHE_BY_OWNER.clear()
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[TMDB v5.0.2] Error enriqueciendo tmdb_id={tmdb_id_val}: {e}")
+
+        try:
+            from routes.api import BIB_CACHE_BY_OWNER
+            BIB_CACHE_BY_OWNER.clear()
+        except Exception:
+            pass
+        print(f"✅ [TMDB v5.0.2] Enriquecimiento completado: {updated_groups}/{len(rows)} títulos actualizados.")
+    except Exception as e:
+        print(f"[TMDB v5.0.2] Error general en enrich_extended_tmdb_metadata_async: {e}")
+    finally:
+        _ENRICH_LOCK = False

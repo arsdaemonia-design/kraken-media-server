@@ -108,6 +108,19 @@ def init_db():
         FOREIGN KEY (media_path) REFERENCES media(rel_path) ON DELETE CASCADE
     )
     ''')
+
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS user_progress (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_email TEXT NOT NULL,
+        media_id INTEGER NOT NULL,
+        progress_seconds REAL DEFAULT 0,
+        duration_seconds REAL DEFAULT 0,
+        is_finished INTEGER DEFAULT 0,
+        last_watched REAL DEFAULT 0,
+        UNIQUE(user_email, media_id)
+    )
+    ''')
     
     c.execute('''
     CREATE TABLE IF NOT EXISTS downloads_history (
@@ -248,6 +261,29 @@ def init_db():
         c.execute("ALTER TABLE media ADD COLUMN is_hidden BOOLEAN DEFAULT 0")
     except sqlite3.OperationalError:
         pass # Column already exists
+
+    # Columnas extendidas TMDB v5.0.2 (Colecciones, Director, Reparto, Estudio, Keywords, Score, País)
+    extended_tmdb_cols = [
+        ("tmdb_collection_id", "INTEGER DEFAULT NULL"),
+        ("tmdb_collection_name", "TEXT DEFAULT NULL"),
+        ("tmdb_collection_poster", "TEXT DEFAULT NULL"),
+        ("tmdb_director", "TEXT DEFAULT NULL"),
+        ("tmdb_cast", "TEXT DEFAULT NULL"),
+        ("tmdb_studio", "TEXT DEFAULT NULL"),
+        ("tmdb_keywords", "TEXT DEFAULT NULL"),
+        ("tmdb_vote_average", "REAL DEFAULT 0.0"),
+        ("tmdb_country", "TEXT DEFAULT NULL"),
+        ("tmdb_backdrop", "TEXT DEFAULT NULL"),
+    ]
+    for col_name, col_type in extended_tmdb_cols:
+        try:
+            c.execute(f"ALTER TABLE media ADD COLUMN {col_name} {col_type}")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            c.execute(f"ALTER TABLE video_metadata ADD COLUMN {col_name} {col_type}")
+        except sqlite3.OperationalError:
+            pass
 
     # Duplicate detection is advisory: no file is deleted automatically.
     c.execute('''

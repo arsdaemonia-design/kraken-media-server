@@ -26,8 +26,8 @@ from state import cleanup_inactive_users, cleanup_old_hls_sessions
 from utils import check_ffmpeg
 import alexa_handlers
 
-APP_VERSION = "5.0.1"
-OFFLINE_VERSION = "5.0.1"
+APP_VERSION = "5.0.2"
+OFFLINE_VERSION = "5.0.2"
 OFFLINE_LIMIT = 500
 GITHUB_REPO = "arsdaemonia-design/kraken-media-server"
 

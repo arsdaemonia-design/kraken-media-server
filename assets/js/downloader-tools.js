@@ -272,76 +272,914 @@ async function borrarHistorial(id) { if (!confirm("¿Olvidar?")) return; await f
  * `cargarEstadisticas()`
  * Obtiene de `/api/stats` y renderiza el resumen de escuchas, top artistas y top canciones.
  */
-async function cargarEstadisticas() {
+window._currentStatsTab = 'audio';
+window._statsCacheData = null;
+
+async function cargarEstadisticas(forceTab) {
+    if (forceTab) window._currentStatsTab = forceTab;
     try {
         const res = await fetch('/api/stats');
         const data = await res.json();
-
-        if (!data.ok) throw new Error(data.error);
-
-        document.getElementById('stats-total-plays').textContent = data.total_plays || 0;
-
-        const totalSecs = data.total_time_sec || 0;
-        const hours = Math.floor(totalSecs / 3600);
-        const mins = Math.floor((totalSecs % 3600) / 60);
-        document.getElementById('stats-total-time').textContent = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
-
-        const topArtist = data.top_artists?.[0]?.artist || '-';
-        const topArtistPlays = data.top_artists?.[0]?.plays || 0;
-        document.getElementById('stats-top-artist').textContent = topArtist.length > 12 ? topArtist.substring(0, 12) + '...' : topArtist;
-        document.getElementById('stats-top-artist').title = topArtist + ` (${topArtistPlays} plays)`;
-
-        const topTrack = data.top_tracks?.[0]?.title || '-';
-        const topTrackPlays = data.top_tracks?.[0]?.plays || 0;
-        document.getElementById('stats-top-track').textContent = topTrack.length > 12 ? topTrack.substring(0, 12) + '...' : topTrack;
-        document.getElementById('stats-top-track').title = topTrack + ` (${topTrackPlays} plays)`;
-
-        // Artistas
-        const artistsList = document.getElementById('stats-artists-list');
-        if (data.top_artists?.length) {
-            const maxPlays = Math.max(...data.top_artists.map(a => a.plays));
-            artistsList.innerHTML = data.top_artists.map((a, i) => {
-                const pct = Math.round((a.plays / maxPlays) * 100);
-                const timeStr = a.total_time ? formatDuration(a.total_time) : '0m';
-                return `<div class="flex items-center gap-3">
-                    <span class="text-xs text-emerald-500/50 w-4">${i + 1}</span>
-                    <div class="flex-1 min-w-0">
-                        <div class="flex justify-between text-xs mb-1">
-                            <span class="text-white truncate">${a.artist || 'Unknown'}</span>
-                            <span class="text-yellow-400 ml-2 shrink-0">${a.plays} plays · ${timeStr}</span>
-                        </div>
-                        <div class="h-1 bg-black/50 rounded-full overflow-hidden">
-                            <div class="h-full bg-gradient-to-r from-yellow-600 to-yellow-400 rounded-full" style="width: ${pct}%"></div>
-                        </div>
-                    </div>
-                </div>`;
-            }).join('');
-        } else {
-            artistsList.innerHTML = '<p class="text-emerald-500/50 text-center py-4">Sin datos aún</p>';
-        }
-
-        // Tracks
-        const tracksList = document.getElementById('stats-tracks-list');
-        if (data.top_tracks?.length) {
-            tracksList.innerHTML = data.top_tracks.map((t, i) => {
-                return `<div class="flex items-center gap-3 p-2 hover:bg-white/5 rounded-lg transition">
-                    <span class="text-xs text-emerald-500/50 w-4">${i + 1}</span>
-                    <div class="flex-1 min-w-0">
-                        <div class="text-xs text-white truncate font-medium">${t.title || 'Unknown'}</div>
-                        <div class="text-[10px] text-pink-400/70 truncate">${t.artist || 'Unknown Artist'}</div>
-                    </div>
-                    <span class="text-xs text-pink-400 shrink-0">${t.plays}×</span>
-                </div>`;
-            }).join('');
-        } else {
-            tracksList.innerHTML = '<p class="text-emerald-500/50 text-center py-4">Sin datos aún</p>';
-        }
+        if (!data.ok) throw new Error(data.error || 'Error al cargar estadísticas');
+        window._statsCacheData = data;
+        renderStatsContent();
     } catch (e) {
-        console.error('Error loading stats:', e);
-        document.getElementById('stats-artists-list').innerHTML = '<p class="text-red-400 text-center py-4">Error cargando estadísticas</p>';
-        document.getElementById('stats-tracks-list').innerHTML = '<p class="text-red-400 text-center py-4">Error cargando estadísticas</p>';
+        console.error("Error cargando estadísticas:", e);
+        const area = document.getElementById('stats-content-area');
+        if (area) area.innerHTML = `<div class="p-8 text-center text-zinc-400">No se pudieron cargar las estadísticas.</div>`;
     }
 }
+
+window.cambiarPestanaStats = function (tab) {
+    window._currentStatsTab = tab;
+    ['audio', 'video', 'global'].forEach(t => {
+        const btn = document.getElementById(`stats-tab-${t}`);
+        if (!btn) return;
+        if (t === tab) {
+            btn.className = 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition bg-emerald-500 text-black shadow';
+        } else {
+            btn.className = 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition text-zinc-400 hover:text-white';
+        }
+    });
+    renderStatsContent();
+};
+
+function renderStatsContent() {
+    const data = window._statsCacheData;
+    const area = document.getElementById('stats-content-area');
+    if (!data || !area) return;
+
+    const tab = window._currentStatsTab || 'audio';
+
+    if (tab === 'audio') {
+        const a = data.audio || {};
+        const totalSecs = a.total_time_sec || 0;
+        const hours = Math.floor(totalSecs / 3600);
+        const mins = Math.floor((totalSecs % 3600) / 60);
+        const timeStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+
+        const topArtistsHtml = (a.top_artists || []).length ? a.top_artists.map((art, idx) => {
+            const maxPlays = Math.max(...a.top_artists.map(x => x.plays));
+            const pct = maxPlays > 0 ? Math.round((art.plays / maxPlays) * 100) : 0;
+            return `
+                <div class="flex items-center gap-3">
+                    <span class="text-xs font-bold text-amber-400/80 w-5">#${idx + 1}</span>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-white font-semibold truncate">${escapeHtml(art.artist || 'Desconocido')}</span>
+                            <span class="text-zinc-400 text-[10px] font-mono">${art.plays} plays</span>
+                        </div>
+                        <div class="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                            <div class="h-full bg-gradient-to-r from-amber-500 to-emerald-400 rounded-full" style="width: ${pct}%"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('') : '<div class="text-xs text-zinc-500 text-center py-6">Sin historial suficiente</div>';
+
+        const topTracksHtml = (a.top_tracks || []).length ? a.top_tracks.map((trk, idx) => {
+            const maxPlays = Math.max(...a.top_tracks.map(x => x.plays));
+            const pct = maxPlays > 0 ? Math.round((trk.plays / maxPlays) * 100) : 0;
+            return `
+                <div class="flex items-center gap-3">
+                    <span class="text-xs font-bold text-pink-400/80 w-5">#${idx + 1}</span>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-white font-semibold truncate">${escapeHtml(trk.title || 'Desconocido')}</span>
+                            <span class="text-zinc-400 text-[10px] font-mono">${trk.plays} plays</span>
+                        </div>
+                        <div class="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                            <div class="h-full bg-gradient-to-r from-pink-500 to-purple-400 rounded-full" style="width: ${pct}%"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('') : '<div class="text-xs text-zinc-500 text-center py-6">Sin historial suficiente</div>';
+
+        const genresHtml = (a.top_genres || []).map(g => `
+            <span class="px-3 py-1.5 rounded-xl bg-white/[0.04] border border-white/5 text-xs text-zinc-200 font-medium flex items-center justify-between gap-2">
+                <span>${escapeHtml(g.genre)}</span>
+                <span class="text-emerald-400 font-mono text-[10px]">${g.count}</span>
+            </span>
+        `).join('');
+
+        area.innerHTML = `
+            <!-- TARJETAS METRICAS AUDIO -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div class="glass p-4 rounded-2xl text-center border border-white/5 shadow-lg">
+                    <div class="text-3xl font-black text-emerald-400">${a.total_plays || 0}</div>
+                    <div class="text-[10px] text-zinc-400 uppercase tracking-wider mt-1 font-bold">Reproducciones</div>
+                </div>
+                <div class="glass p-4 rounded-2xl text-center border border-white/5 shadow-lg">
+                    <div class="text-3xl font-black text-purple-400">${timeStr}</div>
+                    <div class="text-[10px] text-zinc-400 uppercase tracking-wider mt-1 font-bold">Tiempo de Escucha</div>
+                </div>
+                <div class="glass p-4 rounded-2xl text-center border border-white/5 shadow-lg">
+                    <div class="text-3xl font-black text-amber-400 truncate">${escapeHtml(a.top_artists?.[0]?.artist || '-')}</div>
+                    <div class="text-[10px] text-zinc-400 uppercase tracking-wider mt-1 font-bold">Artista Más Escuchado</div>
+                </div>
+                <div class="glass p-4 rounded-2xl text-center border border-white/5 shadow-lg">
+                    <div class="text-3xl font-black text-pink-400 truncate">${escapeHtml(a.top_tracks?.[0]?.title || '-')}</div>
+                    <div class="text-[10px] text-zinc-400 uppercase tracking-wider mt-1 font-bold">Canción Favorita</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <div class="glass p-5 rounded-2xl border border-white/5">
+                    <h3 class="text-sm font-black text-amber-400 mb-4 flex items-center gap-2 uppercase tracking-wider">
+                        <i class="fa-solid fa-microphone"></i> Top Artistas
+                    </h3>
+                    <div class="space-y-3 max-h-80 overflow-y-auto no-scrollbar">${topArtistsHtml}</div>
+                </div>
+                <div class="glass p-5 rounded-2xl border border-white/5">
+                    <h3 class="text-sm font-black text-pink-400 mb-4 flex items-center gap-2 uppercase tracking-wider">
+                        <i class="fa-solid fa-music"></i> Top Canciones
+                    </h3>
+                    <div class="space-y-3 max-h-80 overflow-y-auto no-scrollbar">${topTracksHtml}</div>
+                </div>
+            </div>
+
+            ${genresHtml ? `
+                <div class="glass p-5 rounded-2xl border border-white/5">
+                    <h3 class="text-xs uppercase tracking-wider text-zinc-400 font-bold mb-3">Géneros Musicales Más Frecuentes</h3>
+                    <div class="flex flex-wrap gap-2">${genresHtml}</div>
+                </div>
+            ` : ''}
+        `;
+    } else if (tab === 'video') {
+        const v = data.video || {};
+        const hours = Math.round((v.total_watch_hours || 0) * 10) / 10;
+
+        const topDirsHtml = (v.top_directors || []).map(d => `
+            <span class="px-3 py-1.5 rounded-xl bg-white/[0.04] border border-white/5 text-xs text-zinc-200 font-medium flex items-center justify-between gap-2">
+                <span>${escapeHtml(d.director)}</span>
+                <span class="text-emerald-400 font-mono text-[10px]">${d.count} títulos</span>
+            </span>
+        `).join('');
+
+        const topGenresHtml = (v.top_genres || []).map(g => `
+            <span class="px-3 py-1.5 rounded-xl bg-white/[0.04] border border-white/5 text-xs text-zinc-200 font-medium flex items-center justify-between gap-2">
+                <span>${escapeHtml(g.genre)}</span>
+                <span class="text-cyan-400 font-mono text-[10px]">${g.count}</span>
+            </span>
+        `).join('');
+
+        area.innerHTML = `
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div class="glass p-4 rounded-2xl text-center border border-white/5 shadow-lg">
+                    <div class="text-3xl font-black text-cyan-400">${v.watched_videos || 0}</div>
+                    <div class="text-[10px] text-zinc-400 uppercase tracking-wider mt-1 font-bold">Videos en Progreso</div>
+                </div>
+                <div class="glass p-4 rounded-2xl text-center border border-white/5 shadow-lg">
+                    <div class="text-3xl font-black text-emerald-400">${hours}h</div>
+                    <div class="text-[10px] text-zinc-400 uppercase tracking-wider mt-1 font-bold">Horas Vistas</div>
+                </div>
+                <div class="glass p-4 rounded-2xl text-center border border-white/5 shadow-lg">
+                    <div class="text-3xl font-black text-indigo-400">${v.completed_videos || 0}</div>
+                    <div class="text-[10px] text-zinc-400 uppercase tracking-wider mt-1 font-bold">Completados al 100%</div>
+                </div>
+                <div class="glass p-4 rounded-2xl text-center border border-white/5 shadow-lg">
+                    <div class="text-3xl font-black text-amber-400">${v.total_movies || 0}</div>
+                    <div class="text-[10px] text-zinc-400 uppercase tracking-wider mt-1 font-bold">Películas Disponibles</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="glass p-5 rounded-2xl border border-white/5">
+                    <h3 class="text-xs uppercase tracking-wider text-cyan-400 font-black mb-3 flex items-center gap-2">
+                        <i class="fa-solid fa-clapperboard"></i> Géneros de Video Más Vistos
+                    </h3>
+                    <div class="flex flex-wrap gap-2">${topGenresHtml || '<span class="text-xs text-zinc-500">Sin datos</span>'}</div>
+                </div>
+                <div class="glass p-5 rounded-2xl border border-white/5">
+                    <h3 class="text-xs uppercase tracking-wider text-emerald-400 font-black mb-3 flex items-center gap-2">
+                        <i class="fa-solid fa-bullhorn"></i> Directores Más Frecuentes
+                    </h3>
+                    <div class="flex flex-wrap gap-2">${topDirsHtml || '<span class="text-xs text-zinc-500">Sin datos</span>'}</div>
+                </div>
+            </div>
+        `;
+    } else if (tab === 'global') {
+        const g = data.global || {};
+        area.innerHTML = `
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div class="glass p-4 rounded-2xl text-center border border-white/5 shadow-lg">
+                    <div class="text-3xl font-black text-emerald-400">${g.audio_count || 0}</div>
+                    <div class="text-[10px] text-zinc-400 uppercase tracking-wider mt-1 font-bold">Pistas de Música</div>
+                </div>
+                <div class="glass p-4 rounded-2xl text-center border border-white/5 shadow-lg">
+                    <div class="text-3xl font-black text-cyan-400">${g.video_count || 0}</div>
+                    <div class="text-[10px] text-zinc-400 uppercase tracking-wider mt-1 font-bold">Archivos de Video</div>
+                </div>
+                <div class="glass p-4 rounded-2xl text-center border border-white/5 shadow-lg">
+                    <div class="text-3xl font-black text-purple-400">${g.distinct_artists || 0}</div>
+                    <div class="text-[10px] text-zinc-400 uppercase tracking-wider mt-1 font-bold">Artistas Únicos</div>
+                </div>
+                <div class="glass p-4 rounded-2xl text-center border border-white/5 shadow-lg">
+                    <div class="text-3xl font-black text-amber-400">${g.distinct_albums || 0}</div>
+                    <div class="text-[10px] text-zinc-400 uppercase tracking-wider mt-1 font-bold">Álbumes Únicos</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="glass p-5 rounded-2xl border border-white/5 flex items-center justify-between">
+                    <div>
+                        <div class="text-xs text-zinc-400 uppercase tracking-wider font-bold">Almacenamiento Total Música</div>
+                        <div class="text-2xl font-black text-white mt-1">${g.audio_bytes_gb || 0} GB</div>
+                    </div>
+                    <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center text-xl">
+                        <i class="fa-solid fa-hard-drive"></i>
+                    </div>
+                </div>
+                <div class="glass p-5 rounded-2xl border border-white/5 flex items-center justify-between">
+                    <div>
+                        <div class="text-xs text-zinc-400 uppercase tracking-wider font-bold">Almacenamiento Total Video</div>
+                        <div class="text-2xl font-black text-white mt-1">${g.video_bytes_gb || 0} GB</div>
+                    </div>
+                    <div class="w-12 h-12 rounded-2xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center text-xl">
+                        <i class="fa-solid fa-server"></i>
+                    </div>
+                </div>
+                <div class="glass p-5 rounded-2xl border border-white/5 flex items-center justify-between">
+                    <div>
+                        <div class="text-xs text-zinc-400 uppercase tracking-wider font-bold">Favoritos Musicales</div>
+                        <div class="text-2xl font-black text-pink-400 mt-1">❤️ ${g.audio_favs || 0}</div>
+                    </div>
+                    <div class="w-12 h-12 rounded-2xl bg-pink-500/10 text-pink-400 flex items-center justify-center text-xl">
+                        <i class="fa-solid fa-heart"></i>
+                    </div>
+                </div>
+                <div class="glass p-5 rounded-2xl border border-white/5 flex items-center justify-between">
+                    <div>
+                        <div class="text-xs text-zinc-400 uppercase tracking-wider font-bold">Favoritos en Video</div>
+                        <div class="text-2xl font-black text-amber-400 mt-1">⭐ ${g.video_favs || 0}</div>
+                    </div>
+                    <div class="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center text-xl">
+                        <i class="fa-solid fa-star"></i>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+}
+
+// ============================================================================
+// 🍾 MODO FIESTA (PARTY MODE - HOST VIEW & BACKGROUND SYNC)
+// ============================================================================
+window._krkPartyActive = false;
+window._krkPartyPollTimer = null;
+window._krkPartyCursor = 0;
+
+window.openPartyModal = async function () {
+    let modal = document.getElementById('krk-party-host-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'krk-party-host-modal';
+        modal.className = 'fixed inset-0 z-[1400] p-4 md:p-8 flex items-center justify-center';
+        document.body.appendChild(modal);
+    }
+
+    try {
+        const res = await fetch('/api/party/status');
+        const st = await res.json();
+        window._krkPartyActive = Boolean(st.active);
+        if (window._krkPartyActive) {
+            iniciarPartySyncLoop();
+            syncPartyQueueToPlayer(st.queue || []);
+        }
+        renderPartyModalContent(st);
+    } catch (e) {
+        console.error('Error abriendo modo fiesta:', e);
+        showToast('No se pudo conectar con el Modo Fiesta', 'error');
+    }
+};
+
+function updatePartyTopBarButtons(isActive) {
+    const badgeDsk = document.getElementById('party-badge-desktop');
+    const badgeMob = document.getElementById('party-badge-mobile');
+    const btnDsk = document.getElementById('btn-party-desktop');
+    const btnMob = document.getElementById('btn-party-mobile');
+    if (badgeDsk) badgeDsk.classList.toggle('hidden', !isActive);
+    if (badgeMob) badgeMob.classList.toggle('hidden', !isActive);
+    if (btnDsk) {
+        btnDsk.classList.toggle('bg-amber-500/20', isActive);
+        btnDsk.classList.toggle('border-emerald-400/60', isActive);
+    }
+    if (btnMob) {
+        btnMob.classList.toggle('bg-amber-500/30', isActive);
+        btnMob.classList.toggle('border-emerald-400/70', isActive);
+    }
+}
+
+function renderPartyModalContent(st) {
+    const modal = document.getElementById('krk-party-host-modal');
+    if (!modal) return;
+
+    const guestUrl = st.guest_url || `${window.location.origin}/fiesta`;
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(guestUrl)}`;
+    const isActive = Boolean(st.active);
+    updatePartyTopBarButtons(isActive);
+
+    const queueItems = (st.queue || []).map((it, idx) => `
+        <div class="flex items-center justify-between p-3 rounded-xl bg-white/[0.04] border border-white/5 gap-2">
+            <div class="flex items-center gap-3 min-w-0">
+                <span class="text-xs font-bold text-amber-400 w-4 shrink-0">${idx + 1}</span>
+                <div class="min-w-0">
+                    <div class="text-xs font-bold text-white truncate">${escapeHtml(it.title)}</div>
+                    <div class="text-[10px] text-zinc-400 truncate">${escapeHtml(it.artist)} · <span class="text-amber-300">👤 ${escapeHtml(it.guest_name)}</span></div>
+                </div>
+            </div>
+            <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                <span class="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold">🔥 ${it.votes || 0}</span>
+                <button onclick="playPartySongNow('${it.id}')" class="w-7 h-7 rounded-full bg-emerald-500/20 hover:bg-emerald-500 text-emerald-400 hover:text-black flex items-center justify-center transition" title="Reproducir ahora">
+                    <i class="fa-solid fa-play text-[10px] ml-0.5"></i>
+                </button>
+                <button onclick="skipPartySong('${it.id}')" class="w-7 h-7 rounded-full bg-white/10 hover:bg-red-500/20 hover:text-red-400 text-zinc-400 flex items-center justify-center transition" title="Quitar de cola">
+                    <i class="fa-solid fa-xmark text-xs"></i>
+                </button>
+            </div>
+        </div>
+    `).join('');
+
+    modal.innerHTML = `
+        <div class="absolute inset-0 bg-black/85 backdrop-blur-md" onclick="closePartyModal()"></div>
+        <div class="relative z-10 w-full max-w-2xl bg-[#121317] border border-white/10 rounded-3xl shadow-2xl p-4 sm:p-6 md:p-8 flex flex-col gap-4 sm:gap-5 text-white max-h-[90vh] overflow-y-auto no-scrollbar">
+            <!-- HEADER -->
+            <div class="flex items-center justify-between border-b border-white/10 pb-3.5 sm:pb-4 gap-2">
+                <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-500 flex items-center justify-center text-black shadow-lg shadow-amber-500/30 shrink-0">
+                        <i class="fa-solid fa-champagne-glasses text-lg sm:text-xl"></i>
+                    </div>
+                    <div class="min-w-0">
+                        <h2 class="text-base sm:text-xl md:text-2xl font-black text-white flex flex-wrap items-center gap-2 leading-tight">
+                            <span>Modo Fiesta Colaborativo</span>
+                            ${isActive ? '<span class="px-2 py-0.5 rounded-full bg-emerald-500 text-black text-[10px] font-black uppercase">EN VIVO</span>' : '<span class="px-2 py-0.5 rounded-full bg-zinc-700 text-zinc-300 text-[10px] font-black uppercase">INACTIVO</span>'}
+                        </h2>
+                        <p class="text-[11px] sm:text-xs text-zinc-400 mt-0.5">Tus invitados agregan canciones a tu fila en tiempo real</p>
+                    </div>
+                </div>
+                <button onclick="closePartyModal()" class="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition shrink-0">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+
+            <!-- TOGGLE ACTIVO / INACTIVO -->
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 sm:p-4 rounded-2xl bg-white/[0.03] border border-white/5">
+                <div>
+                    <div class="text-sm font-bold text-white">Estado del Modo Fiesta</div>
+                    <div class="text-xs text-zinc-400">${isActive ? 'La sala está abierta y recibiendo canciones' : 'Actívalo para permitir que los invitados se conecten'}</div>
+                </div>
+                <button onclick="togglePartyModeHost()" class="w-full sm:w-auto px-6 py-2.5 rounded-full font-black text-xs transition shadow-lg shrink-0 ${isActive ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-emerald-500 hover:bg-emerald-400 text-black'}">
+                    ${isActive ? 'Desactivar Modo Fiesta' : 'Activar Modo Fiesta'}
+                </button>
+            </div>
+
+            ${isActive ? `
+                <!-- LINK Y QR -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center bg-white/[0.02] p-4 sm:p-5 rounded-2xl border border-white/5">
+                    <div class="flex flex-col items-center justify-center bg-white p-3 rounded-2xl shadow-xl mx-auto sm:mx-0">
+                        <img src="${qrUrl}" alt="QR Modo Fiesta" class="w-36 h-36 sm:w-44 sm:h-44 object-contain">
+                        <div class="text-black text-[11px] font-black mt-1">Escanea para pedir canciones</div>
+                    </div>
+                    <div class="flex flex-col gap-3">
+                        <div class="text-xs font-bold text-zinc-300">Enlace directo para invitados:</div>
+                        <div class="p-3 bg-black/60 rounded-xl border border-white/10 font-mono text-xs text-amber-300 break-all select-all">
+                            ${guestUrl}
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="copiarLinkFiesta('${escapeStr(guestUrl)}')" class="flex-1 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center justify-center gap-2 border border-white/10 transition">
+                                <i class="fa-solid fa-copy"></i> Copiar Enlace
+                            </button>
+                            <a href="${guestUrl}" target="_blank" class="px-3.5 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 border border-amber-500/30 transition" title="Abrir vista de invitado">
+                                <i class="fa-solid fa-up-right-from-square"></i>
+                            </a>
+                        </div>
+                        <div class="text-[11px] text-zinc-400 flex items-center gap-2">
+                            <i class="fa-solid fa-users text-amber-400"></i>
+                            <span>${st.guest_count || 0} invitados conectados</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- COLA DE CANCIONES -->
+                <div>
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="text-xs uppercase tracking-wider text-zinc-400 font-bold">Cola de Canciones de la Fiesta (${(st.queue || []).length})</div>
+                        ${(st.queue || []).length > 0 ? `<button onclick="limpiarColaFiesta()" class="text-[11px] text-red-400 hover:text-red-300 font-bold">Limpiar cola</button>` : ''}
+                    </div>
+                    <div class="space-y-2 max-h-56 overflow-y-auto no-scrollbar">
+                        ${queueItems || '<div class="text-xs text-zinc-500 text-center py-6">Aún no hay canciones en la cola de fiesta</div>'}
+                    </div>
+                </div>
+            ` : ''}
+        </div>
+    `;
+
+    modal.classList.remove('hidden');
+    document.body.classList.add('overflow-hidden');
+}
+
+window.closePartyModal = function () {
+    const modal = document.getElementById('krk-party-host-modal');
+    if (modal) modal.classList.add('hidden');
+    document.body.classList.remove('overflow-hidden');
+};
+
+window.copiarLinkFiesta = function (url) {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(url).then(() => {
+            showToast('📋 ¡Enlace del Modo Fiesta copiado!', 'success');
+        }).catch(() => {
+            _fallbackCopyText(url);
+        });
+    } else {
+        _fallbackCopyText(url);
+    }
+};
+
+function _fallbackCopyText(text) {
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('📋 ¡Enlace del Modo Fiesta copiado!', 'success');
+    } catch (e) {
+        showToast('Enlace: ' + text, 'info');
+    }
+}
+
+window.togglePartyModeHost = async function () {
+    try {
+        const nextState = !Boolean(window._krkPartyActive);
+        const res = await fetch('/api/party/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ active: nextState })
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        window._krkPartyActive = Boolean(data.active);
+        updatePartyTopBarButtons(window._krkPartyActive);
+        showToast(data.message || (data.active ? '🎉 ¡Modo Fiesta activado!' : 'Modo Fiesta desactivado'), data.active ? 'success' : 'info');
+        if (data.active) {
+            iniciarPartySyncLoop();
+        } else {
+            detenerPartySyncLoop();
+        }
+        renderPartyModalContent(data);
+    } catch (e) {
+        console.error('Error al cambiar Modo Fiesta:', e);
+        showToast('Error al cambiar Modo Fiesta', 'error');
+    }
+};
+
+window._krkSeenPartyIds = window._krkSeenPartyIds || new Set();
+
+function _buildPartyTrackObj(song) {
+    const normSongPath = String(song.path || '').replace(/\\/g, '/');
+    const matchFile = (typeof libData !== 'undefined' && libData && Array.isArray(libData.files))
+        ? libData.files.find(f => String(f.path || '').replace(/\\/g, '/') === normSongPath)
+        : null;
+    const base = matchFile ? { ...matchFile } : {
+        path: normSongPath,
+        title: song.title || 'Canción',
+        artist: song.artist || 'Desconocido',
+        album: song.album || '',
+        duration_sec: song.duration_sec || 0,
+        type: 'audio',
+        cover: song.cover
+    };
+    base._isPartyTrack = true;
+    base._partyItemId = song.id;
+    base._partyGuestName = song.guest_name || 'Invitado';
+    base._partyVotes = song.votes || 1;
+    return base;
+}
+
+function syncPartyQueueToPlayer(partyQueue) {
+    if (typeof playerQueue === 'undefined' || !Array.isArray(playerQueue)) return;
+    const queueArr = Array.isArray(partyQueue) ? partyQueue : [];
+
+    // Notificar canciones recién pedidas
+    queueArr.forEach(song => {
+        if (song && song.id && !window._krkSeenPartyIds.has(song.id)) {
+            window._krkSeenPartyIds.add(song.id);
+            if (typeof showToast === 'function') {
+                showToast(`🎉 ${song.guest_name || 'Invitado'} pidió: ${song.title}`, 'success');
+            }
+        }
+    });
+
+    const partyTracks = queueArr.map(_buildPartyTrackObj);
+    const partyPaths = new Set(partyTracks.map(t => t.path));
+
+    const isIdle = playerQueue.length === 0 || typeof currentTrackIndex === 'undefined' || currentTrackIndex < 0;
+
+    if (isIdle) {
+        if (partyTracks.length === 0) return;
+        playerQueue = [...partyTracks];
+        currentTrackIndex = 0;
+        if (typeof updateQueueUI === 'function') updateQueueUI();
+        if (typeof playTrack === 'function') {
+            playTrack(playerQueue[0]);
+        }
+        return;
+    }
+
+    // Si ya hay reproducción activa, colocamos las canciones de la fiesta inmediatamente después de la pista actual (en orden de votos 🔥)
+    const head = playerQueue.slice(0, currentTrackIndex + 1);
+    const currentPlayingPath = head[head.length - 1]?.path;
+    const filteredPartyTracks = partyTracks.filter(t => t.path !== currentPlayingPath);
+
+    const tail = playerQueue.slice(currentTrackIndex + 1).filter(t => {
+        if (!t) return false;
+        if (t._isPartyTrack) return false; // Reemplazamos las de fiesta pendientes por el nuevo orden votado
+        if (partyPaths.has(t.path)) return false; // Evitamos duplicados con la cola normal
+        return true;
+    });
+
+    playerQueue = [...head, ...filteredPartyTracks, ...tail];
+    if (typeof updateQueueUI === 'function') updateQueueUI();
+}
+
+window.playPartySongNow = async function (itemId) {
+    try {
+        const res = await fetch('/api/party/status');
+        const st = await res.json();
+        const target = (st.queue || []).find(q => q.id === itemId);
+        if (!target) return;
+        const trackObj = _buildPartyTrackObj(target);
+
+        if (typeof playerQueue !== 'undefined' && Array.isArray(playerQueue)) {
+            if (playerQueue.length === 0 || currentTrackIndex < 0) {
+                playerQueue = [trackObj];
+                currentTrackIndex = 0;
+            } else {
+                // Insertar justo después de la actual y saltar a ella
+                playerQueue.splice(currentTrackIndex + 1, 0, trackObj);
+                currentTrackIndex = currentTrackIndex + 1;
+            }
+            if (typeof updateQueueUI === 'function') updateQueueUI();
+            if (typeof playTrack === 'function') playTrack(trackObj);
+        }
+    } catch (e) {}
+};
+
+// Sincronizar estado inicial del Modo Fiesta al cargar la app
+setTimeout(async () => {
+    try {
+        const r = await fetch('/api/party/status');
+        if (r.ok) {
+            const st = await r.json();
+            window._krkPartyActive = Boolean(st.active);
+            updatePartyTopBarButtons(window._krkPartyActive);
+            if (window._krkPartyActive) {
+                (st.queue || []).forEach(q => { if (q && q.id) window._krkSeenPartyIds.add(q.id); });
+                syncPartyQueueToPlayer(st.queue || []);
+                iniciarPartySyncLoop();
+            }
+        }
+    } catch (e) {}
+}, 1500);
+
+window.skipPartySong = async function (itemId) {
+    try {
+        await fetch('/api/party/mark-consumed', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ item_id: itemId })
+        });
+        const res = await fetch('/api/party/status');
+        const st = await res.json();
+        syncPartyQueueToPlayer(st.queue || []);
+        renderPartyModalContent(st);
+        showToast('Canción retirada de la fiesta', 'info');
+    } catch (e) {}
+};
+
+window.limpiarColaFiesta = async function () {
+    try {
+        await fetch('/api/party/clear', { method: 'POST' });
+        const res = await fetch('/api/party/status');
+        const st = await res.json();
+        syncPartyQueueToPlayer(st.queue || []);
+        renderPartyModalContent(st);
+        showToast('Cola de fiesta vaciada', 'info');
+    } catch (e) {}
+};
+
+function iniciarPartySyncLoop() {
+    if (window._krkPartyPollTimer) clearInterval(window._krkPartyPollTimer);
+    window._krkPartyPollTimer = setInterval(async () => {
+        if (!window._krkPartyActive) return;
+        try {
+            const res = await fetch(`/api/party/host-sync?cursor=${window._krkPartyCursor}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            if (!data.active) {
+                window._krkPartyActive = false;
+                updatePartyTopBarButtons(false);
+                detenerPartySyncLoop();
+                return;
+            }
+            const prevCursor = window._krkPartyCursor;
+            window._krkPartyCursor = data.sync_cursor ?? window._krkPartyCursor;
+
+            if (data.has_changes || window._krkPartyCursor !== prevCursor) {
+                syncPartyQueueToPlayer(data.queue || []);
+                const modal = document.getElementById('krk-party-host-modal');
+                if (modal && !modal.classList.contains('hidden')) {
+                    fetch('/api/party/status').then(r => r.json()).then(renderPartyModalContent).catch(() => {});
+                }
+            }
+        } catch (e) {}
+    }, 3000);
+}
+
+function detenerPartySyncLoop() {
+    if (window._krkPartyPollTimer) {
+        clearInterval(window._krkPartyPollTimer);
+        window._krkPartyPollTimer = null;
+    }
+}
+/**
+ * ============================================================================
+ * KRAKEN MEDIA SERVER — downloader-tools.js
+ * Descargador multimedia (YouTube/Spotify), historial, estadísticas, escáner de duplicados, reescaneo de biblioteca, favoritos y notificaciones.
+ * ============================================================================
+ */
+
+/**
+ * `analizarClipboard()`
+ * Pega automáticamente el enlace del portapapeles en el buscador de descargas y lo analiza.
+ */
+async function analizarClipboard() { try { const t = await navigator.clipboard.readText(); if (t) { document.getElementById('url-input').value = t; analizar(); } } catch (e) { } }
+/**
+ * `analizar()`
+ * Envía una URL o búsqueda (YouTube/Spotify) a `/analizar` para listar las pistas descargables.
+ */
+async function analizar() {
+    const url = document.getElementById('url-input').value;
+    if (!url) return;
+
+    document.getElementById('download-area').classList.remove('hidden');
+    document.getElementById('download-list').innerHTML = '<div class="text-center p-8"><i class="fa-solid fa-spinner fa-spin text-3xl text-blue-500"></i></div>';
+
+    const res = await fetch('/analizar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+    });
+
+    const data = await res.json();
+    downloadList = data.entries;
+
+    // 1. Llenamos la memoria: todos seleccionados al inicio
+    selectedDownloadIndices = new Set();
+
+    // 2. Reset de paginación y dibujado
+    currentLoadedCount = 20;
+    renderDownloadList();
+}
+
+/**
+ * `renderDownloadList()`
+ * Renderiza los resultados obtenidos del analizador de descargas con casillas de selección.
+ */
+function renderDownloadList() {
+    const container = document.getElementById('download-list');
+    container.innerHTML = "";
+    const term = document.getElementById('dl-search').value.toLowerCase();
+    const filteredIndices = downloadList.map((v, i) => ({ v, i })).filter(item => item.v.title.toLowerCase().includes(term));
+
+    if (!filteredIndices.length) return container.innerHTML = '<p class="text-center text-emerald-500 py-4">No hay resultados.</p>';
+
+    const itemsToShow = filteredIndices.slice(0, 20);
+
+    itemsToShow.forEach(item => {
+        const { v, i } = item;
+        const img = v.thumbnail || '';
+
+        // Preguntamos si el índice está en nuestro Set de memoria
+        const isChecked = selectedDownloadIndices.has(i) ? 'checked' : '';
+
+        let statusIcon = '<div class="w-4 h-4 rounded-full border-2 border-emerald-600"></div>';
+        let existsHtml = '';
+        if (v.is_downloaded) {
+            statusIcon = '<i class="fa-solid fa-check text-emerald-500"></i>';
+            existsHtml = '<span class="text-[9px] bg-emerald-900/30 text-emerald-400 px-2 py-0.5 rounded font-bold ml-2">EN BIBLIOTECA</span>';
+        }
+
+        // Usamos ${isChecked} en lugar de la palabra "checked" fija
+        const checkboxHtml = v.is_downloaded ? statusIcon : `
+<input type="checkbox" class="chk-dl w-4 h-4 accent-emerald-500 cursor-pointer" 
+       value="${i}" ${isChecked} onchange="toggleDownloadSelection(${i}, this.checked)">`;
+
+        container.innerHTML += `
+<div class="flex items-center gap-3 p-2 hover:bg-white/5 rounded-lg group transition border border-white/5" id="row-${i}">
+    <div class="w-8 flex justify-center shrink-0">${checkboxHtml}</div>
+    <div class="w-6 flex justify-center text-sm" id="status-${i}">
+        ${v.is_downloaded ? '' : '<i class="fa-regular fa-circle text-emerald-600"></i>'}
+    </div>
+    <img src="${img}" class="w-12 h-8 object-cover rounded bg-emerald-900 shrink-0" onerror="this.src='data:image/svg+xml,...'">
+    <div class="flex-1 min-w-0">
+        <input type="text" id="title-${i}" value="${escapeHtml(v.title)}" class="w-full bg-emerald-900/50 border-b border-emerald-700 focus:border-emerald-500 outline-none text-xs text-white px-2 py-1 rounded">
+    </div>
+    ${existsHtml}
+</div>`;
+    });
+
+    if (filteredIndices.length > 20) {
+        container.innerHTML += `<button onclick="loadMoreResults(${filteredIndices.length})" class="w-full mt-4 py-3 bg-emerald-800 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition">CARGAR MÁS (${filteredIndices.length - 20} restantes)</button>`;
+    }
+}
+
+/**
+ * `loadMoreResults(total)`
+ * Muestra más elementos en la lista de resultados de análisis de descarga.
+ */
+function loadMoreResults(total) {
+    const container = document.getElementById('download-list');
+    // Quitamos el botón anterior para que no se duplique abajo
+    const lastBtn = container.querySelector('button');
+    if (lastBtn) lastBtn.remove();
+
+    const term = document.getElementById('dl-search').value.toLowerCase();
+    const filteredIndices = downloadList.map((v, i) => ({ v, i })).filter(item => item.v.title.toLowerCase().includes(term));
+
+    const newItems = filteredIndices.slice(currentLoadedCount, currentLoadedCount + 20);
+
+    newItems.forEach(item => {
+        const { v, i } = item;
+        const img = v.thumbnail || '';
+
+        const isChecked = selectedDownloadIndices.has(i) ? 'checked' : '';
+
+        let statusIcon = '<div class="w-4 h-4 rounded-full border-2 border-emerald-600"></div>';
+        let existsHtml = '';
+        if (v.is_downloaded) {
+            statusIcon = '<i class="fa-solid fa-check text-emerald-500"></i>';
+            existsHtml = '<span class="text-[9px] bg-emerald-900/30 text-emerald-400 px-2 py-0.5 rounded font-bold ml-2">EN BIBLIOTECA</span>';
+        }
+
+        const checkboxHtml = v.is_downloaded ? statusIcon : `
+<input type="checkbox" class="chk-dl w-4 h-4 accent-emerald-500 cursor-pointer" 
+       value="${i}" ${isChecked} onchange="toggleDownloadSelection(${i}, this.checked)">`;
+
+        container.innerHTML += `
+<div class="flex items-center gap-3 p-2 hover:bg-white/5 rounded-lg group transition border border-white/5" id="row-${i}">
+    <div class="w-8 flex justify-center shrink-0">${checkboxHtml}</div>
+    <div class="w-6 flex justify-center text-sm" id="status-${i}">
+        ${v.is_downloaded ? '' : '<i class="fa-regular fa-circle text-emerald-600"></i>'}
+    </div>
+    <img src="${img}" referrerpolicy="no-referrer" class="w-12 h-8 object-cover rounded bg-emerald-900 shrink-0" onerror="this.src='data:image/svg+xml,...'">
+    <div class="flex-1 min-w-0">
+       <input type="text" id="title-${i}" value="${escapeHtml(v.title)}" class="w-full bg-emerald-900/50 border-b border-emerald-700 focus:border-emerald-500 outline-none text-xs text-white px-2 py-1 rounded">
+
+    </div>
+    ${existsHtml}
+</div>`;
+    });
+
+    currentLoadedCount += 20;
+
+    if (currentLoadedCount < filteredIndices.length) {
+        container.innerHTML += `<button onclick="loadMoreResults(${total})" class="w-full mt-4 py-3 bg-emerald-800 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition">CARGAR MÁS (${filteredIndices.length - currentLoadedCount} restantes)</button>`;
+    }
+}
+
+/**
+ * `filterDownloadList()`
+ * Filtra en tiempo real los elementos de una lista de descarga analizada.
+ */
+function filterDownloadList() {
+    currentLoadedCount = 20;
+    renderDownloadList();
+}
+
+/**
+ * `iniciarDescarga()`
+ * Envía las pistas o videos seleccionados a `/descargar` con el formato y calidad elegidos.
+ */
+async function iniciarDescarga() {
+    let dlStopped = false;
+
+    // 1. Validar usando el Set (la memoria), no el HTML
+    if (selectedDownloadIndices.size === 0) {
+        showToast("¿Y las canciones? Selecciona algo 😒😒", "warning");
+        return;
+    }
+
+    // 2. Construir la lista de items desde la memoria
+    const items = Array.from(selectedDownloadIndices).map(idx => {
+        const inputEl = document.getElementById(`title-${idx}`);
+        const customTitle = inputEl ? inputEl.value.trim() : downloadList[idx].title;
+
+        return {
+            url: downloadList[idx].url,
+            title: customTitle || downloadList[idx].title,
+            index: idx,
+            id: downloadList[idx].id
+        };
+    });
+
+    const type = document.getElementById('dl-quality').value;
+    document.getElementById('dl-progress').classList.remove('hidden');
+
+    // 3. Loop de progreso
+    const loop = setInterval(async () => {
+        if (dlStopped) return;
+
+        const res = await fetch('/status');
+        const d = await res.json();
+
+        document.getElementById('dl-percent').innerText = d.percent;
+        document.getElementById('dl-filename').innerText = d.filename;
+        document.getElementById('dl-bar').style.width = d.percent;
+        document.getElementById('dl-details').innerText = d.details || '';
+
+        // Icono del elemento actual
+        if (d.current_index !== -1 && items[d.current_index]) {
+            const iconDiv = document.getElementById(`status-${items[d.current_index].index}`);
+            if (iconDiv) iconDiv.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-blue-500"></i>';
+        }
+
+        // Iconos completados
+        if (Array.isArray(d.completed_indices)) {
+            d.completed_indices.forEach(realIdx => {
+                if (items[realIdx]) {
+                    const rowId = items[realIdx].index;
+                    const iconDiv = document.getElementById(`status-${rowId}`);
+                    if (iconDiv) iconDiv.innerHTML = '<i class="fa-solid fa-check text-emerald-500"></i>';
+                }
+            });
+        }
+
+        // ❌ Error
+        if (d.failed) {
+            dlStopped = true;
+            clearInterval(loop);
+
+            document.getElementById('dl-progress').classList.add('hidden');
+            showStickyToast(d.details || 'Este enlace no permite descarga directa.', 'error');
+
+            selectedDownloadIndices.clear();
+            setTimeout(() => {
+                cargarLib();
+                cargarHistorial();
+            }, 300);
+
+            return;
+        }
+
+        // ✅ Finalizado con éxito
+        if (!d.active && d.percent === "100%") {
+            dlStopped = true;
+            clearInterval(loop);
+
+            document.getElementById('dl-progress').classList.add('hidden');
+            showStickyToast('¡Descarga finalizada con éxito!', 'success');
+
+            selectedDownloadIndices.clear();
+            setTimeout(() => {
+                cargarLib();
+                cargarHistorial();
+            }, 300);
+        }
+
+    }, 500);
+
+    // 4. Enviar la orden al servidor
+    await fetch('/descargar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items, type })
+    });
+}
+/**
+ * `detener()`
+ * Solicita al servidor cancelar el proceso de descarga en curso.
+ */
+async function detener() { await fetch('/stop', { method: 'POST' }); }
+
+/**
+ * `cargarHistorial()`
+ * Consulta y muestra el historial reciente de reproducción del usuario.
+ */
+async function cargarHistorial() { const res = await fetch('/historial?limit=200'); const data = await res.json(); const div = document.getElementById('history-container'); div.innerHTML = ""; const ids = Object.keys(data).reverse(); if (!ids.length) { div.innerHTML = "<p class='text-emerald-500 opacity-50 text-center py-10'>El historial está vacío.</p>"; return; } ids.forEach(id => { const item = data[id]; const date = new Date(item.date * 1000).toLocaleString(); div.innerHTML += `<div class="flex justify-between items-center p-3 border-b border-emerald-800 hover:bg-emerald-900 transition"><div class="min-w-0"><div class="text-xs text-white truncate font-bold">${item.title}</div><div class="text-[9px] text-emerald-500 font-mono flex gap-2"><span>${date}</span><span class="text-emerald-500">${item.filename.split('.').pop().toUpperCase()}</span></div></div><button onclick="borrarHistorial('${id}')" class="text-[9px] bg-red-900/20 text-red-400 px-3 py-1 rounded hover:bg-red-900/50">Olvidar</button></div>`; }); }
+/**
+ * `borrarHistorial(id)`
+ * Elimina una entrada del historial de reproducción.
+ */
+async function borrarHistorial(id) { if (!confirm("¿Olvidar?")) return; await fetch('/borrar_historial', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }); cargarHistorial(); }
+// (cargarEstadisticas antigua eliminada - se usa la version con pestanas definida arriba)
+
 /**
  * `formatDuration(secs)`
  * Convierte segundos totales en una cadena legible de horas y minutos.

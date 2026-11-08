@@ -5,7 +5,7 @@
  * multimedia para reproducción en modo Offline PWA.
  * ============================================================================
  */
-const VERSION = new URL(self.location.href).searchParams.get('v') || 'v5.0.1.4';
+const VERSION = new URL(self.location.href).searchParams.get('v') || 'v5.0.2.7';
 const CACHE_NAME = `kraken-offline-${VERSION}`;
 const APP_CACHE = `kraken-app-${VERSION}`;
 let offlineMode = false;
