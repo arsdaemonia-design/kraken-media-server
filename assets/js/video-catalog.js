@@ -71,6 +71,26 @@ window.netflixSortBy = window.netflixSortBy || 'recent';
 window.netflixGroupCollections = window.netflixGroupCollections !== undefined ? window.netflixGroupCollections : true;
 window.netflixActivePersonFilter = window.netflixActivePersonFilter || null;
 window._collectionsStore = window._collectionsStore || {};
+window.krakenTitleLang = localStorage.getItem('kraken_title_lang') || 'es';
+
+window.getPreferredVideoTitle = function (item, fallbackTitle) {
+    const src = (item && item.sample) ? item.sample : (item || {});
+    const lang = window.krakenTitleLang || 'es';
+    if (lang === 'en') {
+        return src.tmdb_title_en || src.tmdb_title || src.tmdb_title_original || fallbackTitle || src.clean_title || src.title || '';
+    }
+    if (lang === 'orig') {
+        return src.tmdb_title_original || src.tmdb_title_en || src.tmdb_title || fallbackTitle || src.clean_title || src.title || '';
+    }
+    return src.tmdb_title || src.tmdb_title_en || fallbackTitle || src.clean_title || src.title || '';
+};
+
+window.changeKrakenTitleLang = function (lang) {
+    window.krakenTitleLang = ['es', 'en', 'orig'].includes(lang) ? lang : 'es';
+    try { localStorage.setItem('kraken_title_lang', window.krakenTitleLang); } catch (_) {}
+    if (window.videoSearchEntityCache) window.videoSearchEntityCache.clear();
+    if (typeof renderLib === 'function') renderLib();
+};
 
 /**
  * Motor de Títulos Similares en Biblioteca Local (v5.0.2)
@@ -196,9 +216,8 @@ window.getSimilarLibraryItems = function (refItem, limit = 12) {
         }
 
         if (score >= 20) {
-            const displayTitle = isSeries
-                ? (f.tmdb_title || (parts[2] || '').replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim() || f.title)
-                : (f.tmdb_title || f.clean_title || f.title);
+            const fallbackSeries = (parts[2] || '').replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim() || f.title;
+            const displayTitle = window.getPreferredVideoTitle(f, isSeries ? fallbackSeries : (f.clean_title || f.title));
             candidates.push({
                 ...f,
                 _isSeries: isSeries,
@@ -423,6 +442,7 @@ function groupMoviesIntoCollections(shows) {
                 yearRange: yearRange,
                 vote_average: avgVote,
                 genre: mergedGenres || first.genre,
+                id: Math.max(...grp.items.map(it => Number(it.id || (it.sample && it.sample.id) || 0))),
                 date: Math.max(...grp.items.map(it => Number((it.sample || it).date || 0)))
             };
             window._collectionsStore[key] = collObj;
@@ -744,7 +764,7 @@ window.applyVideoAdvancedFilters = function (shows) {
             const vA = Number(srcA.tmdb_vote_average || 0);
             const vB = Number(srcB.tmdb_vote_average || 0);
             if (vB !== vA) return vB - vA;
-            return (b.date || 0) - (a.date || 0);
+            return (Number(b.id || srcB.id || 0) - Number(a.id || srcA.id || 0)) || ((b.date || 0) - (a.date || 0));
         }
         if (sortBy === 'year_desc') {
             const yA = parseInt(srcA.tmdb_year || 0, 10);
@@ -766,6 +786,9 @@ window.applyVideoAdvancedFilters = function (shows) {
             const dB = Number(srcB.duration_sec || 0) || 999999;
             return dA - dB;
         }
+        // 'recent' = orden real de llegada a Kraken (id autoincremental en SQLite)
+        const idDiff = Number(b.id || srcB.id || 0) - Number(a.id || srcA.id || 0);
+        if (idDiff !== 0) return idDiff;
         return (b.date || 0) - (a.date || 0);
     });
 
@@ -1402,6 +1425,15 @@ function buildNetflixPillsHtml(categoryDropdownHtml, genreDropdownHtml, recommen
                         ${durations.map(d => `<button onclick="changeNetflixDuration('${d.id}')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${(window.netflixActiveDuration || 'Todas') === d.id ? 'bg-blue-600 text-white' : 'bg-white/5 text-zinc-300 hover:bg-white/10'}">${d.label}</button>`).join('')}
                     </div>
                 </div>
+
+                <div class="pt-2 border-t border-white/10">
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1.5">Idioma de Títulos</div>
+                    <div class="grid grid-cols-3 gap-1.5">
+                        <button onclick="changeKrakenTitleLang('es')" class="px-2 py-1.5 rounded-lg text-[11px] font-bold transition ${(window.krakenTitleLang || 'es') === 'es' ? 'bg-emerald-500 text-black' : 'bg-white/5 text-zinc-300 hover:bg-white/10'}">🇲🇽 Español</button>
+                        <button onclick="changeKrakenTitleLang('en')" class="px-2 py-1.5 rounded-lg text-[11px] font-bold transition ${window.krakenTitleLang === 'en' ? 'bg-emerald-500 text-black' : 'bg-white/5 text-zinc-300 hover:bg-white/10'}">🇺🇸 Inglés</button>
+                        <button onclick="changeKrakenTitleLang('orig')" class="px-2 py-1.5 rounded-lg text-[11px] font-bold transition ${window.krakenTitleLang === 'orig' ? 'bg-emerald-500 text-black' : 'bg-white/5 text-zinc-300 hover:bg-white/10'}">🌐 Original</button>
+                    </div>
+                </div>
             </div>
         </div>
     `;
@@ -1564,20 +1596,22 @@ function buildVideoRootSearchEntities(filtered, searchValue, activeCategory) {
             if (!existing) {
                 map.set(showKey, {
                     type: 'folder',
-                    name: f.tmdb_title || showTitle.replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim(),
-                    title: f.tmdb_title || showTitle.replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim(),
+                    name: window.getPreferredVideoTitle(f, showTitle.replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim()),
+                    title: window.getPreferredVideoTitle(f, showTitle.replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim()),
                     path: showKey + '/',
                     sample: f,
                     folder_type: f.folder_type,
                     tmdb_id: f.tmdb_id,
                     tmdb_poster: f.tmdb_poster,
                     tmdb_rating: f.tmdb_rating,
+                    id: f.id,
                     date: f.date,
                     rating: f.rating,
                     _entityScore: (f._searchScore || 0)
                 });
             } else {
                 existing._entityScore = Math.max(existing._entityScore || 0, (f._searchScore || 0));
+                if ((f.id || 0) > (existing.id || 0)) existing.id = f.id;
                 if ((f.date || 0) > (existing.date || 0)) existing.date = f.date;
                 if ((f.rating || 0) > (existing.rating || 0)) existing.rating = f.rating;
             }
@@ -1588,6 +1622,10 @@ function buildVideoRootSearchEntities(filtered, searchValue, activeCategory) {
         const searchNorm = normalizeText(searchValue || '');
         if (searchNorm) {
             const extraText = normalizeText(
+                (f.tmdb_title || '') + ' ' +
+                (f.tmdb_title_original || '') + ' ' +
+                (f.tmdb_title_en || '') + ' ' +
+                (f.tmdb_alt_titles || '') + ' ' +
                 (f.tmdb_director || '') + ' ' +
                 (f.tmdb_cast || '') + ' ' +
                 (f.tmdb_studio || '') + ' ' +
@@ -1603,11 +1641,12 @@ function buildVideoRootSearchEntities(filtered, searchValue, activeCategory) {
         // Archivos directos (películas/documentales sueltos o en su propia carpeta)
         const movieKey = normalizedPath;
         if (!map.has(movieKey)) {
-            let safeTitle = f.tmdb_title || f.title || parts[parts.length - 1];
+            let fallbackMovie = f.title || parts[parts.length - 1];
             if (f.folder_type === 'movie' && parts.length >= 4) {
                 const folderIndex = Math.max(0, parts.length - 2);
-                safeTitle = f.tmdb_title || parts[folderIndex].replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim() || f.title;
+                fallbackMovie = parts[folderIndex].replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim() || f.title;
             }
+            const safeTitle = window.getPreferredVideoTitle(f, fallbackMovie);
             map.set(movieKey, { ...f, clean_title: safeTitle, name: safeTitle, _entityScore: (f._searchScore || 0) });
         }
     });
@@ -1712,12 +1751,12 @@ function buildNetflixRootCatalog(filtered) {
             isSeries = true;
         } else {
             showKey = f._normalizedPath;
-            let safeTitle = f.tmdb_title || f.title || parts[parts.length - 1];
+            let fallbackMovie = f.title || parts[parts.length - 1];
             if (f.folder_type === 'movie' && parts.length > 3) {
                 const folderIndex = Math.max(0, parts.length - 2);
-                safeTitle = f.tmdb_title || parts[folderIndex].replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim() || f.title;
+                fallbackMovie = parts[folderIndex].replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim() || f.title;
             }
-            showTitle = safeTitle;
+            showTitle = window.getPreferredVideoTitle(f, fallbackMovie);
             f.clean_title = showTitle;
             f.name = showTitle;
             showPathToOpen = f._normalizedPath;
@@ -1725,7 +1764,7 @@ function buildNetflixRootCatalog(filtered) {
 
         if (!uniqueShowsMap.has(showKey)) {
             if (isSeries) {
-                const cleanName = f.tmdb_title || showTitle.replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim();
+                const cleanName = window.getPreferredVideoTitle(f, showTitle.replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim());
                 const folderPoster = f.tmdb_poster ? f.tmdb_poster : (showTitle + '.jpg');
                 uniqueShowsMap.set(showKey, {
                     type: 'folder',
@@ -1733,6 +1772,7 @@ function buildNetflixRootCatalog(filtered) {
                     title: cleanName,
                     path: showPathToOpen,
                     sample: f,
+                    id: f.id,
                     date: f.date,
                     rating: f.rating,
                     folder_type: f.folder_type,
@@ -1743,6 +1783,12 @@ function buildNetflixRootCatalog(filtered) {
                 });
             } else {
                 uniqueShowsMap.set(showKey, f);
+            }
+        } else {
+            const existingShow = uniqueShowsMap.get(showKey);
+            if (existingShow) {
+                if ((f.id || 0) > (existingShow.id || 0)) existingShow.id = f.id;
+                if ((f.date || 0) > (existingShow.date || 0)) existingShow.date = f.date;
             }
         }
     });
@@ -2175,7 +2221,7 @@ window.spinVideoRoulette = function () {
         slotCard.style.backgroundImage = `url("${cover}")`;
         slotCard.style.backgroundPosition = 'center 18%';
         document.getElementById('roulette-slot-tag').innerText = (randomItem.folder_type === 'movie' ? '🎬 Película' : '📺 Serie');
-        document.getElementById('roulette-slot-title').innerText = randomItem.tmdb_title || randomItem.clean_title || randomItem.title || 'Video';
+        document.getElementById('roulette-slot-title').innerText = window.getPreferredVideoTitle(randomItem, randomItem.clean_title || randomItem.title) || 'Video';
         document.getElementById('roulette-slot-meta').innerText = `${randomItem.tmdb_year || ''} ${randomItem.genre ? '· ' + randomItem.genre.split(',').slice(0, 2).join(', ') : ''} ${randomItem.tmdb_vote_average ? '⭐ ' + randomItem.tmdb_vote_average : ''}`;
 
         if (currentStep < totalSteps) {
@@ -2192,7 +2238,7 @@ window.spinVideoRoulette = function () {
             slotCard.style.backgroundPosition = 'center 18%';
             document.getElementById('roulette-slot-tag').innerText = `✨ GANADOR · ${winner.folder_type === 'movie' ? 'Película' : 'Serie'}`;
             document.getElementById('roulette-slot-tag').className = 'text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded bg-emerald-400 text-black mb-1.5 inline-block shadow-lg';
-            document.getElementById('roulette-slot-title').innerText = winner.tmdb_title || winner.clean_title || winner.title || 'Video';
+            document.getElementById('roulette-slot-title').innerText = window.getPreferredVideoTitle(winner, winner.clean_title || winner.title) || 'Video';
             document.getElementById('roulette-slot-meta').innerText = `${winner.tmdb_year || ''} ${winner.genre ? '· ' + winner.genre : ''} ${winner.tmdb_vote_average ? '· ⭐ ' + winner.tmdb_vote_average : ''}`;
 
             const playBtn = document.getElementById('roulette-play-btn');

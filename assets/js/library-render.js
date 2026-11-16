@@ -354,7 +354,7 @@ function filterNetflixRows(category) {
                             const videoShow = f.type === 'video' ? (pathParts[2] || '') : '';
                             const videoSeason = f.type === 'video' ? (pathParts[3] || '') : '';
                             const videoTokens = f.type === 'video'
-                                ? `${videoCategory} ${videoShow} ${videoSeason} ${normalizedPath} ${f.tmdb_title || ''} ${f.tmdb_director || ''} ${f.tmdb_cast || ''} ${f.tmdb_studio || ''} ${f.tmdb_collection_name || ''} ${f.tmdb_keywords || ''} ${f.tmdb_year || ''} ${f.video_resolution || ''}`
+                                ? `${videoCategory} ${videoShow} ${videoSeason} ${normalizedPath} ${f.tmdb_title || ''} ${f.tmdb_title_original || ''} ${f.tmdb_title_en || ''} ${f.tmdb_alt_titles || ''} ${f.tmdb_director || ''} ${f.tmdb_cast || ''} ${f.tmdb_studio || ''} ${f.tmdb_collection_name || ''} ${f.tmdb_keywords || ''} ${f.tmdb_year || ''} ${f.video_resolution || ''}`
                                 : '';
                             f._searchTitle = normalizeText(title);
                             f._searchArtist = normalizeText(artist);
@@ -723,7 +723,7 @@ function filterNetflixRows(category) {
                     const videoCategory = f.type === 'video' ? (pathParts[1] || '') : '';
                     const videoShow = f.type === 'video' ? (pathParts[2] || '') : '';
                     const videoSeason = f.type === 'video' ? (pathParts[3] || '') : '';
-                    const videoExtra = f.type === 'video' ? `${f.tmdb_title || ''} ${f.tmdb_director || ''} ${f.tmdb_cast || ''} ${f.tmdb_studio || ''} ${f.tmdb_collection_name || ''} ${f.tmdb_keywords || ''} ${f.tmdb_year || ''} ${f.video_resolution || ''}` : '';
+                    const videoExtra = f.type === 'video' ? `${f.tmdb_title || ''} ${f.tmdb_title_original || ''} ${f.tmdb_title_en || ''} ${f.tmdb_alt_titles || ''} ${f.tmdb_director || ''} ${f.tmdb_cast || ''} ${f.tmdb_studio || ''} ${f.tmdb_collection_name || ''} ${f.tmdb_keywords || ''} ${f.tmdb_year || ''} ${f.video_resolution || ''}` : '';
                     const searchKey = f.searchKey || normalizeText(`${f.title || ''} ${f.artist || ''} ${f.album || ''} ${f.genre || ''} ${f.folder || ''} ${f.full_folder || ''} ${rawPath} ${videoCategory} ${videoShow} ${videoSeason} ${videoExtra}`);
 
                     // Búsqueda de texto mediante el Scope
@@ -1291,7 +1291,7 @@ function filterNetflixRows(category) {
                             showsToDisplay = showsToDisplay.filter(show => {
                                 const checkItem = (it) => {
                                     const src = it.sample ? it.sample : it;
-                                    const hay = normalizeText(`${it.name || it.title || ''} ${src.tmdb_title || ''} ${src.genre || ''} ${src.tmdb_director || ''} ${src.tmdb_cast || ''} ${src.tmdb_studio || ''} ${src.tmdb_collection_name || ''} ${src.tmdb_keywords || ''}`);
+                                    const hay = normalizeText(`${it.name || it.title || ''} ${src.tmdb_title || ''} ${src.tmdb_title_original || ''} ${src.tmdb_title_en || ''} ${src.tmdb_alt_titles || ''} ${src.genre || ''} ${src.tmdb_director || ''} ${src.tmdb_cast || ''} ${src.tmdb_studio || ''} ${src.tmdb_collection_name || ''} ${src.tmdb_keywords || ''}`);
                                     return hay.includes(term);
                                 };
                                 return show.isCollection && Array.isArray(show.items)
@@ -1338,7 +1338,7 @@ function filterNetflixRows(category) {
                                 window.appendPersonRecommendationsSection(container, showsToDisplay);
                             }
                         } else {
-                            const recentShows = [...uniqueShows].sort((a, b) => (b.date || 0) - (a.date || 0)).slice(0, 30);
+                            const recentShows = [...uniqueShows].sort((a, b) => (Number(b.id || (b.sample && b.sample.id) || 0) - Number(a.id || (a.sample && a.sample.id) || 0)) || ((b.date || 0) - (a.date || 0))).slice(0, 30);
                             const rawHero = recentShows[Math.floor(Math.random() * recentShows.length)];
                             const heroItem = (rawHero && rawHero.isCollection && rawHero.sample) ? rawHero.sample : rawHero;
 
@@ -2074,7 +2074,7 @@ function filterNetflixRows(category) {
         </div>
         
         <h3 class="font-bold text-white truncate text-xs mb-0.5 leading-tight flex items-center gap-1">
-            ${escapeHtml(f.clean_title || f.tmdb_title || (f.title || '').replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim())} ${inPlaylistIcon}
+            ${escapeHtml((currentLibrary === 'video' && typeof window.getPreferredVideoTitle === 'function') ? window.getPreferredVideoTitle(f, f.clean_title || f.name || f.tmdb_title || (f.title || '').replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]\}]?/gi, '').trim()) : (f.clean_title || f.tmdb_title || (f.title || '').replace(/\s*[\(\[\{]?tmdb[-_]?\d+[\)\]]?/gi, '').trim()))} ${inPlaylistIcon}
         </h3>
         ${videoInfoCta}
         

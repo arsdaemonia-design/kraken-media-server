@@ -100,17 +100,14 @@ def extract_tmdb_id_from_path(file_path):
 
 def detect_folder_type(file_path):
     """
-    Detecta si es movie o series basado en la estructura de carpetas
-    Series: Si la ruta contiene Temporada o Season
-    Movies: Todo lo demás
+    Detecta si es movie o series basado en la estructura de carpetas.
+    Usa límites de palabra para no confundir palabras como 'templo' o 'intemperie' con 'temp'.
     """
-    path_lower = str(file_path).lower()
-    
-    series_keywords = ['temporada', 'season', 'temp']
-    for keyword in series_keywords:
-        if keyword in path_lower:
-            return 'series'
-    
+    path_str = str(file_path).replace('\\', '/')
+    if re.search(r'(?:^|/)((?:temporadas?|seasons?|temp)\b[\s._-]*\d*|s\d{1,2})(?:/|$)', path_str, re.IGNORECASE):
+        return 'series'
+    if re.search(r'\b(?:temporada|season)\s*\d*\b', path_str, re.IGNORECASE):
+        return 'series'
     return 'movie'
 
 
@@ -138,7 +135,7 @@ def escanear_archivos_fisicos():
     conn = get_db()
     c = conn.cursor()
     
-    c.execute("SELECT rel_path, size_bytes, date_added, genre, video_resolution, audio_codec FROM media")
+    c.execute("SELECT rel_path, size_bytes, date_added, genre, video_resolution, audio_codec, tmdb_id, folder_type FROM media")
     existing_rows = {row['rel_path']: row for row in c.fetchall()}
     existing_genres = {
         rel_path: row['genre']
@@ -213,8 +210,10 @@ def escanear_archivos_fisicos():
                     if same_size and same_mtime:
                         ext_lower = ext.lower()
                         if ext_lower in ['mp4', 'webm', 'mkv']:
-                            # v4.92: Re-escanear si faltan columnas de metadata técnica
-                            if not _safe_get(existing, 'video_resolution'):
+                            # v4.92: Re-escanear si faltan columnas de metadata técnica o tmdb_id en ruta
+                            has_path_tmdb = bool(extract_tmdb_id_from_path(rel_path))
+                            missing_tmdb = has_path_tmdb and not _safe_get(existing, 'tmdb_id')
+                            if not _safe_get(existing, 'video_resolution') or missing_tmdb:
                                 # Necesita metadata nueva → NO hacer skip, caer al procesamiento
                                 pass
                             else:
@@ -524,7 +523,8 @@ def generar_biblioteca_viva(owner_email='public'):
                bpm, energy,
                video_resolution, video_codec, audio_codec, audio_channels, audio_tracks, subtitle_tracks,
                tmdb_collection_id, tmdb_collection_name, tmdb_collection_poster,
-               tmdb_director, tmdb_cast, tmdb_studio, tmdb_keywords, tmdb_vote_average, tmdb_country, tmdb_backdrop
+               tmdb_director, tmdb_cast, tmdb_studio, tmdb_keywords, tmdb_vote_average, tmdb_country, tmdb_backdrop,
+               tmdb_title_original, tmdb_title_en, tmdb_alt_titles, tmdb_tagline
         FROM media
         ORDER BY folder, title
     ''')
@@ -642,7 +642,8 @@ def generar_biblioteca_viva(owner_email='public'):
                 'audio_codec', 'audio_channels', 'audio_tracks', 'subtitle_tracks',
                 'tmdb_collection_id', 'tmdb_collection_name', 'tmdb_collection_poster',
                 'tmdb_director', 'tmdb_cast', 'tmdb_studio', 'tmdb_keywords',
-                'tmdb_vote_average', 'tmdb_country', 'tmdb_backdrop'
+                'tmdb_vote_average', 'tmdb_country', 'tmdb_backdrop',
+                'tmdb_title_original', 'tmdb_title_en', 'tmdb_alt_titles', 'tmdb_tagline'
             ):
                 try:
                     val = row[col]

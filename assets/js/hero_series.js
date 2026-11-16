@@ -34,7 +34,10 @@
             ? `/caratula/${encodeURIComponent(source.tmdb_poster)}`
             : `/caratula/${(source.path || source._normalizedPath || '').split('/').map(p => encodeURIComponent(p)).join('/')}`;
 
-        const heroTitle = heroItem.name || heroItem.title || source.tmdb_title || 'Sin titulo';
+        const heroTitle = (typeof window.getPreferredVideoTitle === 'function')
+            ? window.getPreferredVideoTitle(heroItem, heroItem.name || heroItem.title || source.tmdb_title || 'Sin titulo')
+            : (heroItem.name || heroItem.title || source.tmdb_title || 'Sin titulo');
+        const heroTagline = (source.tmdb_tagline || '').trim();
 
         let tmdbData = null;
         let resumeData = null;
@@ -86,7 +89,7 @@
         const showInfoButton = opts.showInfoButton !== false;
         const showFullInfo = !!opts.fullInfo;
         const infoButton = showInfoButton && !showFullInfo ? buildInfoButton(heroItem, tmdbData, resumeData, isMovie) : '';
-        const infoBanner = showFullInfo ? '' : buildInfoBanner(overviewText);
+        const infoBanner = showFullInfo ? '' : buildInfoBanner(heroTagline ? `“${heroTagline}” — ${overviewText}` : overviewText);
         const fullInfoBlock = showFullInfo
             ? `<div class="mt-3 text-zinc-200 text-sm md:text-base leading-relaxed">${escapeHtml(tmdbData?.overview || 'Sin descripcion disponible.')}</div>`
             : '';
@@ -386,6 +389,8 @@ function buildFullCastGrid(cast) {
                 <div class="relative z-10 p-5 md:p-7">
                     <div class="text-[10px] uppercase tracking-[0.2em] text-zinc-400 font-bold mb-2">${isMovie ? 'PELICULA' : 'SERIE'}</div>
                     <h3 class="text-2xl md:text-3xl font-black text-white">${escapeHtml(title)}</h3>
+                    ${(source.tmdb_title_original && source.tmdb_title_original.toLowerCase() !== String(title || '').toLowerCase()) ? `<div class="text-xs text-zinc-400 mt-1">Título original: <span class="text-zinc-200 font-semibold">${escapeHtml(source.tmdb_title_original)}</span></div>` : ''}
+                    ${source.tmdb_tagline ? `<div class="text-xs md:text-sm italic text-emerald-300/90 mt-2">“${escapeHtml(source.tmdb_tagline)}”</div>` : ''}
                     <div class="flex flex-wrap items-center gap-2 text-xs text-zinc-300 mt-3">
                         ${tmdbData?.year ? `<span>${escapeHtml(tmdbData.year)}</span>` : ''}
                         ${tmdbData?.vote_average ? `<span class="text-yellow-400"><i class="fa-solid fa-star mr-1"></i>${tmdbData.vote_average}</span>` : ''}
@@ -727,7 +732,7 @@ ${(tmdbData?.studios || []).length ? `<div class="mt-1 text-xs text-zinc-400">Es
 
         const movieCards = movies.map((m, idx) => {
             const mCover = m.tmdb_poster ? (m.tmdb_poster.startsWith('http') || m.tmdb_poster.startsWith('/caratula/') ? m.tmdb_poster : `/caratula/${encodeURIComponent(m.tmdb_poster)}`) : `/caratula/${(m.path || '').split('/').map(p => encodeURIComponent(p)).join('/')}`;
-            const mTitle = m.tmdb_title || m.clean_title || m.title || `Película ${idx + 1}`;
+            const mTitle = (window.getPreferredVideoTitle ? window.getPreferredVideoTitle(m, m.clean_title || m.title) : (m.tmdb_title || m.clean_title || m.title)) || `Película ${idx + 1}`;
             const mYear = m.tmdb_year ? `<span>${escapeHtml(m.tmdb_year)}</span>` : '';
             const mDur = m.duration || (m.duration_sec ? `${Math.round(m.duration_sec / 60)} min` : '');
             const mScore = m.tmdb_vote_average ? `<span class="text-amber-400 font-bold"><i class="fa-solid fa-star text-[9px] mr-0.5"></i>${m.tmdb_vote_average}</span>` : '';

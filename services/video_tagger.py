@@ -66,7 +66,7 @@ def get_movie_details(movie_id):
     params = {
         'api_key': TMDB_API_KEY,
         'language': 'es-MX',
-        'append_to_response': 'credits,release_dates,keywords'
+        'append_to_response': 'credits,release_dates,keywords,translations'
     }
 
     try:
@@ -109,7 +109,7 @@ def get_tv_details(tv_id):
     params = {
         'api_key': TMDB_API_KEY,
         'language': 'es-MX',
-        'append_to_response': 'credits,content_ratings,keywords'
+        'append_to_response': 'credits,content_ratings,keywords,translations'
     }
 
     try:
@@ -179,6 +179,38 @@ def extract_extended_tmdb_fields(details: dict, media_type: str = 'movie') -> di
     country_str = ','.join([str(c) for c in countries[:2] if c]) or (details.get('original_language') or '').upper()
     backdrop_path = details.get('backdrop_path')
 
+    # 7. Títulos (Original, Inglés, Alternativos) y Tagline
+    title_original = (details.get('original_title') or details.get('original_name') or '').strip() or None
+    title_es = (details.get('title') or details.get('name') or '').strip()
+    orig_lang = (details.get('original_language') or '').strip().lower()
+    tagline = (details.get('tagline') or '').strip() or None
+
+    title_en = title_original if orig_lang == 'en' else None
+    es_variants = []
+    translations = (details.get('translations') or {}).get('translations') or []
+    for tr in translations:
+        if not isinstance(tr, dict):
+            continue
+        iso639 = (tr.get('iso_639_1') or '').lower()
+        iso3166 = (tr.get('iso_3166_1') or '').upper()
+        tr_data = tr.get('data') or {}
+        tr_title = (tr_data.get('title') or tr_data.get('name') or '').strip()
+        if not tr_title:
+            continue
+        if iso639 == 'en':
+            if not title_en or iso3166 == 'US':
+                title_en = tr_title
+        elif iso639 == 'es' and iso3166 in ('MX', 'ES', ''):
+            es_variants.append(tr_title)
+
+    alt_candidates = []
+    seen_alt = set()
+    for cand in [title_es, title_original, title_en, *es_variants]:
+        if cand and cand.lower() not in seen_alt:
+            seen_alt.add(cand.lower())
+            alt_candidates.append(cand)
+    alt_titles_str = ' | '.join(alt_candidates) if alt_candidates else None
+
     return {
         'tmdb_collection_id': collection_id,
         'tmdb_collection_name': collection_name or None,
@@ -190,6 +222,10 @@ def extract_extended_tmdb_fields(details: dict, media_type: str = 'movie') -> di
         'tmdb_vote_average': vote_avg,
         'tmdb_country': country_str or None,
         'tmdb_backdrop': backdrop_path,
+        'tmdb_title_original': title_original,
+        'tmdb_title_en': title_en,
+        'tmdb_alt_titles': alt_titles_str,
+        'tmdb_tagline': tagline,
     }
 
 
@@ -350,17 +386,14 @@ def extract_year_from_path(file_path):
 
 def is_series_pattern(file_path):
     """
-    Detecta si la ruta corresponde a una serie
-    Busca: Temporada, Season en la ruta
+    Detecta si la ruta corresponde a una serie.
+    Usa límites de palabra para evitar falsos positivos como 'templo' con 'temp'.
     """
-    path_lower = str(file_path).lower()
-    
-    series_keywords = ['temporada', 'season', 'temp']
-    
-    for keyword in series_keywords:
-        if keyword in path_lower:
-            return True
-    
+    path_str = str(file_path).replace('\\', '/')
+    if re.search(r'(?:^|/)((?:temporadas?|seasons?|temp)\b[\s._-]*\d*|s\d{1,2})(?:/|$)', path_str, re.IGNORECASE):
+        return True
+    if re.search(r'\b(?:temporada|season)\s*\d*\b', path_str, re.IGNORECASE):
+        return True
     return False
 
 
@@ -735,7 +768,8 @@ def enrich_extended_tmdb_metadata_async():
               AND tmdb_id IS NOT NULL AND tmdb_id > 0
               AND (tmdb_director IS NULL OR tmdb_director = ''
                    OR tmdb_cast IS NULL OR tmdb_cast = ''
-                   OR tmdb_vote_average IS NULL OR tmdb_vote_average = 0)
+                   OR tmdb_vote_average IS NULL OR tmdb_vote_average = 0
+                   OR tmdb_alt_titles IS NULL OR tmdb_alt_titles = '')
         ''')
         rows = c.fetchall()
         conn.close()
@@ -772,7 +806,11 @@ def enrich_extended_tmdb_metadata_async():
                         tmdb_keywords = COALESCE(?, tmdb_keywords),
                         tmdb_vote_average = COALESCE(?, tmdb_vote_average),
                         tmdb_country = COALESCE(?, tmdb_country),
-                        tmdb_backdrop = COALESCE(?, tmdb_backdrop)
+                        tmdb_backdrop = COALESCE(?, tmdb_backdrop),
+                        tmdb_title_original = COALESCE(?, tmdb_title_original),
+                        tmdb_title_en = COALESCE(?, tmdb_title_en),
+                        tmdb_alt_titles = COALESCE(?, tmdb_alt_titles),
+                        tmdb_tagline = COALESCE(?, tmdb_tagline)
                     WHERE tmdb_id = ? AND media_type = 'video'
                 ''', (
                     ext.get('tmdb_collection_id'),
@@ -785,6 +823,10 @@ def enrich_extended_tmdb_metadata_async():
                     ext.get('tmdb_vote_average'),
                     ext.get('tmdb_country'),
                     ext.get('tmdb_backdrop'),
+                    ext.get('tmdb_title_original'),
+                    ext.get('tmdb_title_en'),
+                    ext.get('tmdb_alt_titles'),
+                    ext.get('tmdb_tagline'),
                     tmdb_id_val
                 ))
                 wconn.commit()

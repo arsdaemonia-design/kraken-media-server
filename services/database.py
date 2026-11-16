@@ -274,6 +274,10 @@ def init_db():
         ("tmdb_vote_average", "REAL DEFAULT 0.0"),
         ("tmdb_country", "TEXT DEFAULT NULL"),
         ("tmdb_backdrop", "TEXT DEFAULT NULL"),
+        ("tmdb_title_original", "TEXT DEFAULT NULL"),
+        ("tmdb_title_en", "TEXT DEFAULT NULL"),
+        ("tmdb_alt_titles", "TEXT DEFAULT NULL"),
+        ("tmdb_tagline", "TEXT DEFAULT NULL"),
     ]
     for col_name, col_type in extended_tmdb_cols:
         try:

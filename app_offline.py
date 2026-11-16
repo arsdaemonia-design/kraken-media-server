@@ -190,6 +190,12 @@ def main(open_browser: bool = True):
 
     print("ðŸ™  KRAKEN V4 - OFFLINE (Private Playlists Edition)")
     print("ðŸ§¹ Iniciando Radar de Usuarios...")
+    try:
+        from services.video_tagger import enrich_extended_tmdb_metadata_async
+        threading.Thread(target=enrich_extended_tmdb_metadata_async, daemon=True).start()
+    except Exception as e:
+        print(f"No se pudo iniciar enriquecimiento TMDB en segundo plano: {e}")
+
     radar_thread = threading.Thread(target=cleanup_inactive_users, daemon=True)
     radar_thread.start()
 

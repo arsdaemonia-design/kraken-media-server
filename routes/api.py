@@ -3037,7 +3037,11 @@ def auto_tag_video_endpoint():
             tmdb_keywords = ?,
             tmdb_vote_average = ?,
             tmdb_country = ?,
-            tmdb_backdrop = ?
+            tmdb_backdrop = ?,
+            tmdb_title_original = ?,
+            tmdb_title_en = ?,
+            tmdb_alt_titles = ?,
+            tmdb_tagline = ?
             WHERE rel_path = ? OR rel_path = ?
         ''', (
             result.get('id'),
@@ -3057,6 +3061,10 @@ def auto_tag_video_endpoint():
             ext.get('tmdb_vote_average'),
             ext.get('tmdb_country'),
             ext.get('tmdb_backdrop'),
+            ext.get('tmdb_title_original'),
+            ext.get('tmdb_title_en'),
+            ext.get('tmdb_alt_titles'),
+            ext.get('tmdb_tagline'),
             path.replace('\\', '/').lstrip('/'),
             path.replace('/', '\\').lstrip('\\')
         ))
@@ -3066,8 +3074,9 @@ def auto_tag_video_endpoint():
             INSERT OR REPLACE INTO video_metadata
             (path, tmdb_title, tmdb_year, tmdb_overview, tmdb_genres, tmdb_poster, tmdb_id, tmdb_type, tmdb_rating,
              tmdb_collection_id, tmdb_collection_name, tmdb_collection_poster, tmdb_director, tmdb_cast, tmdb_studio,
-             tmdb_keywords, tmdb_vote_average, tmdb_country, tmdb_backdrop)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             tmdb_keywords, tmdb_vote_average, tmdb_country, tmdb_backdrop,
+             tmdb_title_original, tmdb_title_en, tmdb_alt_titles, tmdb_tagline)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             path,
             title,
@@ -3087,7 +3096,11 @@ def auto_tag_video_endpoint():
             ext.get('tmdb_keywords'),
             ext.get('tmdb_vote_average'),
             ext.get('tmdb_country'),
-            ext.get('tmdb_backdrop')
+            ext.get('tmdb_backdrop'),
+            ext.get('tmdb_title_original'),
+            ext.get('tmdb_title_en'),
+            ext.get('tmdb_alt_titles'),
+            ext.get('tmdb_tagline')
         ))
         conn.commit()
         conn.close()
@@ -3333,7 +3346,11 @@ def auto_tag_library_videos():
                         tmdb_keywords = ?,
                         tmdb_vote_average = ?,
                         tmdb_country = ?,
-                        tmdb_backdrop = ?
+                        tmdb_backdrop = ?,
+                        tmdb_title_original = ?,
+                        tmdb_title_en = ?,
+                        tmdb_alt_titles = ?,
+                        tmdb_tagline = ?
                         WHERE rel_path = ?
                     ''', (
                         result.get('id'),
@@ -3353,6 +3370,10 @@ def auto_tag_library_videos():
                         ext.get('tmdb_vote_average'),
                         ext.get('tmdb_country'),
                         ext.get('tmdb_backdrop'),
+                        ext.get('tmdb_title_original'),
+                        ext.get('tmdb_title_en'),
+                        ext.get('tmdb_alt_titles'),
+                        ext.get('tmdb_tagline'),
                         video_path
                     ))
                     conn.commit()
